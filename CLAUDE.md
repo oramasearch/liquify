@@ -25,11 +25,11 @@ that says hello, `liquify version` prints, `liquify --smoke` renders 30 frames a
 4. **Starting UI stack: SDL3 3.2 + Dear ImGui 1.91 with the SDL_Renderer backend**, the stack
    Zetta's headed mode proves on all three desktop platforms. Whether an immediate-mode UI is
    the right long-term *editor buffer* is the first real liquify decision (see Open decisions).
-
 5. **liquify is a client of libliquid.** liquid is a submodule at `modules/liquid`, built
    library-only and linked as `liquid::liquid`. Everything liquify knows about repositories,
    drips, builds and search comes through that API; liquify never reimplements it. Bump the pin
    deliberately (one commit per bump, naming the liquid change it takes).
+
 ## Rules
 
 - `src/app.cpp` is the **one** translation unit that includes SDL3 or ImGui. No other file
