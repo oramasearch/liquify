@@ -77,7 +77,6 @@ void App::frame() {
     ImGui::Text("version %s", std::string(version_string()).c_str());
     ImGui::Separator();
     ImGui::Text("libliquid %s linked", std::string(liquid::version_string()).c_str());
-    ImGui::TextUnformatted(liquid::hello().c_str());
     ImGui::TextUnformatted("The IDE for liquid: instant open at any size, diagnostics from the build graph, drips.");
     ImGui::End();
 

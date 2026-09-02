@@ -6,7 +6,7 @@ eventually, like liquid.
 liquid is the tool. lake is where it collects. liquify is where you work.
 
 > **Status: hello world, linked to libliquid.** `liquify` opens a window on SDL3 + Dear ImGui,
-> shows the linked liquid version and `liquid::hello()`, prints its version, and can self-test
+> shows the linked liquid version, prints its version, and can self-test
 > by rendering a fixed number of frames. The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
