@@ -2,6 +2,7 @@
 #include <print>
 #include <string_view>
 
+#include "liquid/liquid.hpp"
 #include "liquify/app.hpp"
 #include "liquify/version.hpp"
 
@@ -19,7 +20,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string_view arg = argv[i];
         if (arg == "version" || arg == "--version") {
-            std::println("liquify {}", liquify::version_string());
+            std::println("liquify {} (libliquid {})", liquify::version_string(), liquid::version_string());
             return 0;
         }
         if (arg == "--help" || arg == "-h") {

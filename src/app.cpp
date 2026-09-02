@@ -11,6 +11,7 @@
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
 
+#include "liquid/liquid.hpp"
 #include "liquify/version.hpp"
 
 namespace liquify {
@@ -75,7 +76,8 @@ void App::frame() {
     ImGui::TextUnformatted("hello from liquify");
     ImGui::Text("version %s", std::string(version_string()).c_str());
     ImGui::Separator();
-    ImGui::TextUnformatted("liquid: not connected");
+    ImGui::Text("libliquid %s linked", std::string(liquid::version_string()).c_str());
+    ImGui::TextUnformatted(liquid::hello().c_str());
     ImGui::TextUnformatted("The IDE for liquid: instant open at any size, diagnostics from the build graph, drips.");
     ImGui::End();
 

@@ -5,8 +5,9 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: hello world.** `liquify` opens a window on SDL3 + Dear ImGui, prints its version,
-> and can self-test by rendering a fixed number of frames. The specification lives in
+> **Status: hello world, linked to libliquid.** `liquify` opens a window on SDL3 + Dear ImGui,
+> shows the linked liquid version and `liquid::hello()`, prints its version, and can self-test
+> by rendering a fixed number of frames. The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
 > Next, per the bridge's action plan (Phase 4): the editor surface backed by liquid's query
@@ -14,11 +15,12 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 
 ## Build and run
 
-Requirements: CMake ≥ 3.28, Ninja, Clang 17+ (Homebrew LLVM on macOS). SDL3, Dear ImGui and
-GoogleTest are fetched by CMake; SDL is linked static so the result is one binary.
+Requirements: CMake ≥ 3.28, Ninja, Clang 17+ (Homebrew LLVM on macOS). liquid is a submodule
+(libliquid is built in-tree and linked); SDL3, Dear ImGui and GoogleTest are fetched by CMake;
+SDL is linked static so the result is one binary.
 
 ```sh
-git clone git@github.com:oramasearch/liquify.git
+git clone --recurse-submodules git@github.com:oramasearch/liquify.git
 cd liquify
 cmake -S . -B build -G Ninja
 cmake --build build
@@ -36,6 +38,7 @@ ctest --test-dir build
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
 | `src/main.cpp` | CLI: `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
+| `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 
 ## What this is
 

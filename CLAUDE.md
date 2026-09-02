@@ -26,6 +26,10 @@ that says hello, `liquify version` prints, `liquify --smoke` renders 30 frames a
    Zetta's headed mode proves on all three desktop platforms. Whether an immediate-mode UI is
    the right long-term *editor buffer* is the first real liquify decision (see Open decisions).
 
+5. **liquify is a client of libliquid.** liquid is a submodule at `modules/liquid`, built
+   library-only and linked as `liquid::liquid`. Everything liquify knows about repositories,
+   drips, builds and search comes through that API; liquify never reimplements it. Bump the pin
+   deliberately (one commit per bump, naming the liquid change it takes).
 ## Rules
 
 - `src/app.cpp` is the **one** translation unit that includes SDL3 or ImGui. No other file
@@ -38,6 +42,8 @@ that says hello, `liquify version` prints, `liquify --smoke` renders 30 frames a
   or daemon wait for liquid's Phases 1 and 4. Until then liquify is a shell.
 - `--smoke` is the display-required self-test; keep it working, and keep `version` and the
   unit tests runnable without a display.
+- `modules/liquid` is a pin, not a working copy: never commit liquid changes from inside
+  liquify. Change liquid in its own repo, push, then bump the pin here.
 
 ## Open decisions
 
