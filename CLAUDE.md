@@ -61,7 +61,8 @@ that says hello, `liquify version` prints, `liquify --smoke` renders 30 frames a
 
 ## Before finishing any change
 
-1. Does `README.md` still describe what builds and runs? Update the status line and tables.
-2. Does this file's **Status**, **Decisions** and **Open decisions** still hold?
-3. `cmake --build build && ctest --test-dir build` green, and `./build/liquify --smoke` exits 0.
-4. Commit means push.
+1. **Document the change in `docs/<topic>/*.md`** (see `docs/README.md`). This is a must.
+2. Does `README.md` still describe what builds and runs? Update the status line and tables.
+3. Does this file's **Status**, **Decisions** and **Open decisions** still hold?
+4. `cmake --build build && ctest --test-dir build` green, and `./build/liquify --smoke` exits 0.
+5. Commit means push.

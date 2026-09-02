@@ -57,6 +57,10 @@ It starts from the window and UI stack Zetta's headed mode already proves on mac
 and Linux (SDL3 + Dear ImGui). No Zetta code is used, only its choices; liquify never depends
 on Zetta.
 
+## Internal documentation
+
+[`docs/`](docs/) — one folder per topic; every change lands its doc there in the same change.
+
 ## Where this sits
 
 Part of the liquid project. See
