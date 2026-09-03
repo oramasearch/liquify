@@ -8,9 +8,11 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Hello world** (bridge `docs/action-plan.md`, Phase 0.5). `./build/liquify` opens a window
-that says hello, `liquify version` prints, `liquify --smoke` renders 30 frames and exits 0,
-`ctest` is green. Next: Phase 4, the editor surface on liquid's graph.
+**Hello world, linked to libliquid** (bridge `docs/action-plan.md`, Phase 0.5). `./build/liquify`
+opens a window that shows the linked liquid version, `liquify version` prints both versions,
+`liquify --smoke` renders 30 frames and exits 0, `ctest` is green. liquid is pinned at
+`modules/liquid`. Next: Phase 4, the editor surface on liquid's graph (liquify #1); the
+editor-buffer rendering decision (liquify #2).
 
 ## Decisions — recorded
 
