@@ -1,16 +1,16 @@
 # The application shell
 
 **What.** `liquify::App` (`include/liquify/app.hpp`, `src/app.cpp`): one window, one renderer,
-one Dear ImGui context, one frame loop and a repository root panel. SDL3 3.2 (static) and Dear
-ImGui 1.91 use the SDL_Renderer backend. **`src/app.cpp` is the only translation unit that
-includes SDL3 or ImGui.** `RepositoryView` (`src/repository_view.hpp`,
+one Dear ImGui context, one frame loop, a repository root panel and an editor surface. SDL3 3.2
+(static) and Dear ImGui 1.91 use the SDL_Renderer backend. **`src/app.cpp` is the only translation
+unit that includes SDL3 or ImGui.** `RepositoryView` (`src/repository_view.hpp`,
 `src/repository_view.cpp`) is plain C++ and holds either the root `liquid::tree_entry` values or
 an error string.
 
 **Decision.** liquify is a native, cross-platform IDE from the start (Steve, 2026-09-02), not an
-editor extension. The repository panel is its first Phase 1 client; editing, diagnostics and the
-incremental graph remain Phase 4 work. The editor buffer is a retained GPU text layer inside Dear
-ImGui (bridge decision 15); ImGui continues to own chrome and panels.
+editor extension. The repository panel is its first Phase 1 client. The editor buffer is a retained
+GPU text layer inside Dear ImGui (bridge decision 15); ImGui continues to own chrome and panels.
+Diagnostics and the incremental graph follow the liquid #20 and #21 interfaces.
 
 **Lifecycle** (mirrors Zetta `src/gui/app.cpp`): `SDL_Init(VIDEO)` → window at 70 % of the usable
 display (floors 900×600), resizable, high-pixel-density → `SDL_CreateRenderer` + vsync → ImGui
@@ -27,10 +27,11 @@ is under `include/liquid/`; no private liquid header is used. An open or root-re
 liquid's context and message in the view instead of representing the repository as an empty tree.
 The panel renders that error, and `--print-tree` writes it to standard error and exits non-zero.
 
-**CLI.** `liquify` opens the hello state; `liquify <path>` opens the repository panel;
+**CLI.** `liquify` opens the hello state; `liquify <path>` opens the repository panel and lets a
+root blob be opened in the editor;
 `liquify --print-tree <path>` prints name, kind and mode without a display; `liquify --smoke [N]`
-renders N frames (default 30) with no repository and exits 0; `liquify version` prints
-`liquify <v> (libliquid <v>)`.
+scrolls and edits a generated 50,000-line buffer for N frames (default 30), prints latency metrics,
+and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`.
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
@@ -50,10 +51,11 @@ cmake --build build && ./build/liquify --smoke && ctest --test-dir build
 git add modules/liquid && git commit -m "Bump liquid to <sha>: <why>"
 ```
 
-**Tests.** The repository-view fixture is created at test time by the pinned liquid, then written
-and reopened through the same public API. A separate corrupt-marker case proves that the liquid
-error reaches the view and that `--print-tree` exits non-zero with that message. No repository
-bytes are committed as a fixture.
+**Tests.** Repository and editor fixtures are created at test time by the pinned liquid, then
+written and reopened through the same public API. A separate corrupt-marker case proves that the
+liquid error reaches the view and that `--print-tree` exits non-zero with that message. Buffer and
+layout-cache unit tests cover editing, UTF-8 cursor movement, save, reuse and line-local
+invalidation. No repository fixture bytes are committed.
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.

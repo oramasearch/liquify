@@ -8,12 +8,12 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Repository tree, linked to the Phase 4 design pin.** `./build/liquify <path>` opens a liquid
-repository off the render thread and shows its root entries; `liquify` with no path shows the
-hello state, unreadable repositories show liquid's error and make `liquify --print-tree <path>`
-exit non-zero, and `liquify --smoke` renders 30 frames and exits 0. liquid is pinned at
-`modules/liquid` through the Phase 4 incremental-engine design. Next: the editor shell and retained
-GPU text layer from liquify #1; graph integration follows liquid #20 and #21.
+**Editor shell on a retained GPU text layer, linked to the Phase 4 design pin.**
+`./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
+and opens root blobs into an editable in-memory buffer; save calls libliquid and produces a drip.
+The standard input mode is non-modal and a modal command/insert mode is available. Unreadable
+repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
+reports frame and typing latency, and exits 0. Graph integration follows liquid #20 and #21.
 
 ## Decisions — recorded
 

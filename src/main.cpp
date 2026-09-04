@@ -15,7 +15,7 @@ void usage() {
     std::println("liquify {}", liquify::version_string());
     std::println("  liquify [PATH]              open the IDE, optionally on a liquid repository");
     std::println("  liquify --print-tree PATH   print a repository root tree and exit");
-    std::println("  liquify --smoke [N]         render N frames (default 30) and exit");
+    std::println("  liquify --smoke [N]         scroll 50,000 lines for N frames and exit");
     std::println("  liquify version             print the version");
 }
 
@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (arg == "--smoke") {
+            opts.smoke = true;
             opts.max_frames = 30;
             if (i + 1 < argc) {
                 int frames = 0;

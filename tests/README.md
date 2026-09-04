@@ -9,3 +9,8 @@ repository created in the build tree. It requires a non-zero exit and the same l
 standard error. No repository fixture bytes are committed.
 
 `test_version.cpp` checks the public liquify version value and string.
+
+`test_editor_buffer.cpp` covers line and selection edits, UTF-8 cursor movement, and a save that
+reopens the result through `liquid::repository`. `test_text_layout.cpp` proves cached layouts are
+reused, an edit invalidates only its replaced lines, inserted lines preserve following cached
+layouts, and tabs plus UTF-8 retain byte-to-column positioning.

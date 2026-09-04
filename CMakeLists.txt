@@ -95,7 +95,9 @@ add_subdirectory(modules/liquid EXCLUDE_FROM_ALL)
 # liquify
 # -----------------------------------------------------------------------------
 add_library(liquify-core STATIC
+  src/editor_buffer.cpp
   src/repository_view.cpp
+  src/text_layout.cpp
   src/version.cpp)
 target_include_directories(liquify-core PUBLIC include)
 target_link_libraries(liquify-core PUBLIC liquid::liquid)

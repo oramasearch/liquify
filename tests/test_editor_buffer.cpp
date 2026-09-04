@@ -1,0 +1,112 @@
+#include <chrono>
+#include <cstddef>
+#include <filesystem>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include "../src/editor_buffer.hpp"
+#include "liquid/repository.hpp"
+#include "liquid/runtime.hpp"
+
+namespace {
+
+class TemporaryDirectory {
+public:
+    TemporaryDirectory() {
+        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        path_ = std::filesystem::temp_directory_path() /
+                ("liquify-editor-buffer-" + std::to_string(suffix));
+        std::filesystem::remove_all(path_);
+    }
+
+    ~TemporaryDirectory() {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    TemporaryDirectory(const TemporaryDirectory&) = delete;
+    auto operator=(const TemporaryDirectory&) -> TemporaryDirectory& = delete;
+
+    [[nodiscard]] auto path() const -> const std::filesystem::path& {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
+auto bytes(std::string_view value) -> std::vector<std::byte> {
+    const auto characters = std::span(value.data(), value.size());
+    const auto source = std::as_bytes(characters);
+    return {source.begin(), source.end()};
+}
+
+auto text(std::span<const std::byte> value) -> std::string {
+    const auto* data = reinterpret_cast<const char*>(value.data());
+    return std::string(data, value.size());
+}
+
+TEST(EditorBuffer, EditsSelectionAndLinesInMemory) {
+    auto buffer = liquify::EditorBuffer::from_text("blob-1", "notes.txt", "alpha\nbeta");
+    EXPECT_EQ(buffer.line_count(), 2U);
+    EXPECT_FALSE(buffer.dirty());
+
+    buffer.set_cursor({0, 5});
+    const auto newline = buffer.insert_newline();
+    EXPECT_EQ(newline.first_line, 0U);
+    EXPECT_EQ(newline.erased_lines, 1U);
+    EXPECT_EQ(newline.inserted_lines, 2U);
+    EXPECT_EQ(buffer.text(), "alpha\n\nbeta");
+
+    buffer.set_cursor({1, 0});
+    const auto inserted = buffer.insert_text("gamma");
+    ASSERT_TRUE(inserted);
+    buffer.set_cursor({1, 0});
+    buffer.move_right(true);
+    buffer.move_right(true);
+    const auto erased = buffer.backspace();
+    ASSERT_TRUE(erased);
+    EXPECT_EQ(buffer.text(), "alpha\nmma\nbeta");
+    EXPECT_TRUE(buffer.dirty());
+}
+
+TEST(EditorBuffer, MovesAcrossUtf8Codepoints) {
+    const std::string utf8{'a', static_cast<char>(0xc3), static_cast<char>(0xa9), 'z'};
+    auto buffer = liquify::EditorBuffer::from_text("blob-2", "unicode.txt", utf8);
+    buffer.move_end();
+    buffer.move_left();
+    EXPECT_EQ(buffer.cursor(), (liquify::TextPosition{0, 3}));
+    buffer.move_left();
+    EXPECT_EQ(buffer.cursor(), (liquify::TextPosition{0, 1}));
+    const auto erased = buffer.delete_forward();
+    ASSERT_TRUE(erased);
+    EXPECT_EQ(buffer.text(), "az");
+}
+
+TEST(EditorBuffer, SaveWritesThroughLiquid) {
+    TemporaryDirectory location;
+    auto created = liquid::runtime::block_on(liquid::repository::create(location.path()));
+    ASSERT_TRUE(created) << created.error().message;
+
+    auto repository = std::move(*created);
+    auto written = liquid::runtime::block_on(repository.write("notes.txt", bytes("before")));
+    ASSERT_TRUE(written) << written.error().message;
+    auto buffer = liquify::EditorBuffer::open(location.path(), "notes.txt", "blob-3");
+    ASSERT_TRUE(buffer.error().empty()) << buffer.error();
+    buffer.move_end();
+    ASSERT_TRUE(buffer.insert_text(" after"));
+    ASSERT_TRUE(buffer.save()) << buffer.error();
+    EXPECT_FALSE(buffer.dirty());
+
+    auto reopened = liquid::runtime::block_on(liquid::repository::open(location.path()));
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    auto contents = liquid::runtime::block_on(reopened->read("notes.txt"));
+    ASSERT_TRUE(contents) << contents.error().message;
+    EXPECT_EQ(text(*contents), "before after");
+}
+
+} // namespace

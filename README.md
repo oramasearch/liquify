@@ -5,17 +5,17 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: repository tree, linked to the Phase 4 design pin.** `liquify <path>` opens a liquid
-> repository through the public coroutine API and renders its root entries on SDL3 + Dear ImGui;
-> unreadable repositories show liquid's error and make `--print-tree` exit non-zero; `liquify`
-> with no path retains the hello state, and `--smoke` renders a fixed number of frames.
+> **Status: editor shell on a retained GPU text layer, linked to the Phase 4 design pin.**
+> `liquify <path>` opens a liquid repository through the public coroutine API, renders its root
+> entries, and opens root blobs into an editable in-memory buffer; save writes through libliquid
+> as a drip. Unreadable repositories show liquid's error and make `--print-tree` exit non-zero;
+> `liquify` with no path retains the hello state, and `--smoke` scrolls and edits 50,000 lines.
 > The pin includes liquid's compact-checkpoint repository format, Phase 2 and 3 APIs, and the
 > Phase 4 incremental-engine design.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
-> Next, per the bridge's action plan (Phase 4): the editor shell and retained GPU text layer;
-> graph integration follows liquid #20 and #21.
+> Next, per the bridge's action plan (Phase 4): graph integration after liquid #20 and #21.
 
 ## Build and run
 
@@ -38,7 +38,7 @@ ctest --test-dir build
 ./build/liquify            # open the IDE
 ./build/liquify <path>     # open a liquid repository and render its root tree
 ./build/liquify --print-tree <path>
-./build/liquify --smoke    # render 30 frames and exit 0 (needs a display)
+./build/liquify --smoke    # scroll/edit 50,000 lines for 30 frames, report latency, exit 0
 ./build/liquify version
 ```
 
@@ -47,6 +47,8 @@ ctest --test-dir build
 | Path | Role |
 |---|---|
 | `include/liquify/app.hpp`, `src/app.cpp` | the application shell: window, renderer, ImGui context, frame loop. **The one TU that includes SDL3 or ImGui.** |
+| `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory text buffer, input modes, and libliquid blob read/write path |
+| `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
 | `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: runs libliquid blocking calls on a worker and exposes root entries or an error |
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
 | `src/main.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, `--help` |
