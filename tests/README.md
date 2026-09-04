@@ -14,3 +14,8 @@ standard error. No repository fixture bytes are committed.
 reopens the result through `liquid::repository`. `test_text_layout.cpp` proves cached layouts are
 reused, an edit invalidates only its replaced lines, inserted lines preserve following cached
 layouts, and tabs plus UTF-8 retain byte-to-column positioning.
+
+`test_stub_tree.cpp` parses the checked-in C and C++ declaration fixtures through the public stub
+API, checks the exact declaration lists and modifiers, verifies graph persistence and equal-blob
+reuse, resolves a declaration across separate stub trees, and proves an edited blob recomputes
+without recomputing an unchanged blob.

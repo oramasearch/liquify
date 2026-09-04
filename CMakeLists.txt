@@ -92,15 +92,41 @@ set(LIQUID_BUILD_BENCH OFF CACHE BOOL "" FORCE)
 add_subdirectory(modules/liquid EXCLUDE_FROM_ALL)
 
 # -----------------------------------------------------------------------------
+# tree-sitter — pinned parser runtime and generated C/C++ grammars.
+# -----------------------------------------------------------------------------
+add_library(tree-sitter-runtime STATIC modules/tree-sitter/lib/src/lib.c)
+target_include_directories(tree-sitter-runtime PUBLIC modules/tree-sitter/lib/include)
+target_include_directories(tree-sitter-runtime PRIVATE modules/tree-sitter/lib/src)
+
+add_library(tree-sitter-c-parser STATIC modules/tree-sitter-c/src/parser.c)
+target_include_directories(tree-sitter-c-parser PRIVATE modules/tree-sitter/lib/include)
+target_link_libraries(tree-sitter-c-parser PUBLIC tree-sitter-runtime)
+
+add_library(tree-sitter-cpp-parser STATIC
+  modules/tree-sitter-cpp/src/parser.c
+  modules/tree-sitter-cpp/src/scanner.c)
+target_include_directories(tree-sitter-cpp-parser PRIVATE modules/tree-sitter/lib/include)
+target_link_libraries(tree-sitter-cpp-parser PUBLIC tree-sitter-runtime)
+
+# -----------------------------------------------------------------------------
 # liquify
 # -----------------------------------------------------------------------------
 add_library(liquify-core STATIC
   src/editor_buffer.cpp
   src/repository_view.cpp
   src/text_layout.cpp
+  src/stub_tree.cpp
   src/version.cpp)
 target_include_directories(liquify-core PUBLIC include)
-target_link_libraries(liquify-core PUBLIC liquid::liquid)
+target_link_libraries(liquify-core
+  PUBLIC liquid::liquid
+  PRIVATE tree-sitter-c-parser tree-sitter-cpp-parser)
+
+option(LIQUIFY_BUILD_BENCH "Build stub-tree benchmarks" OFF)
+if(LIQUIFY_BUILD_BENCH)
+  add_executable(liquify-stub-tree-bench bench/stub_tree_bench.cpp)
+  target_link_libraries(liquify-stub-tree-bench PRIVATE liquify-core)
+endif()
 
 add_library(liquify-app STATIC src/app.cpp)
 target_include_directories(liquify-app PUBLIC include)
