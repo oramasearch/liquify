@@ -43,8 +43,8 @@ On the Apple M3 Max macOS host on 2026-09-04, the liquid checkout contained 244 
 its nested modules and build output:
 
 ```text
-stub extraction: blobs=244 elapsed_us=8416252 per_blob_us=34492.8
-stub resolution: lookups=1000 elapsed_us=13248 per_lookup_us=13.248 resolved=16563
+stub extraction: blobs=244 elapsed_us=3768635 per_blob_us=15445.2
+stub resolution: lookups=1000 elapsed_us=7293 per_lookup_us=7.293 resolved=16563
 ```
 
 ## Change
