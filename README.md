@@ -11,8 +11,9 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > as a drip. Unreadable repositories show liquid's error and make `--print-tree` exit non-zero;
 > `liquify` with no path retains the hello state, and `--smoke` scrolls and edits 50,000 lines.
 > The pin includes liquid's compact-checkpoint repository format, Phase 2 and 3 APIs, and the
-> persisted demand-driven query graph and its C/C++ stub-tree query. Stub trees resolve
-> declarations from closed files without retaining their full parse trees.
+> persisted demand-driven query graph, tree-diff and record-enumeration APIs, per-checkout daemon,
+> and C/C++ stub-tree query. Stub trees resolve declarations from closed files without retaining
+> their full parse trees.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
