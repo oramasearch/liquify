@@ -12,8 +12,9 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > `liquify` with no path retains the hello state, and `--smoke` scrolls and edits 50,000 lines.
 > The pin includes liquid's compact-checkpoint repository format, Phase 2 and 3 APIs, and the
 > persisted demand-driven query graph, tree-diff and record-enumeration APIs, per-checkout daemon,
-> and C/C++ stub-tree query. Stub trees resolve declarations from closed files without retaining
-> their full parse trees. Open overlays retain error-tolerant incremental trees and answer node,
+> registered frontend modules with per-definition C/C++ actions, and C/C++ stub-tree query. Stub
+> trees resolve declarations from closed files without retaining their full parse trees. Open
+> overlays retain error-tolerant incremental trees and answer node,
 > enclosing-definition, definition, reference, hover, completion and build-diagnostic queries;
 > an edit cancels their in-flight graph work.
 > The specification lives in
