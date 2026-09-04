@@ -25,3 +25,8 @@ without recomputing an unchanged blob.
 all seven registered analysis queries. It covers closed-file stub hover and definition lookup,
 compiler-symbol precedence, translation-unit diagnostics, completion order, local references,
 tree-sitter changed-range reuse, cancellation during typing and a successful answer after the edit.
+
+`test_editor_graph.cpp` proves the application runtime hosts liquid's daemon for the first client,
+attaches when a daemon already owns the checkout, serializes overlay mutations, publishes
+diagnostics and cursor-query results, records edit-to-diagnostic latency and formats the validation
+backlog from daemon status.

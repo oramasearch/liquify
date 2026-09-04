@@ -59,6 +59,7 @@ ctest --test-dir build
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
 | `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |
+| `include/liquify/editor_graph.hpp`, `src/editor_graph.cpp` | background editor-query runtime, daemon host/attach lifetime, asynchronous query snapshots and status data |
 | `src/main.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |

@@ -113,6 +113,7 @@ target_link_libraries(tree-sitter-cpp-parser PUBLIC tree-sitter-runtime)
 # -----------------------------------------------------------------------------
 add_library(liquify-core STATIC
   src/editor_buffer.cpp
+  src/editor_graph.cpp
   src/interactive_analysis.cpp
   src/repository_view.cpp
   src/text_layout.cpp

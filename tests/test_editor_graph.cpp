@@ -1,0 +1,130 @@
+#include <chrono>
+#include <filesystem>
+#include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include "liquid/daemon.hpp"
+#include "liquid/repository.hpp"
+#include "liquid/runtime.hpp"
+#include "liquify/editor_graph.hpp"
+
+namespace {
+
+class TemporaryDirectory {
+public:
+    TemporaryDirectory() {
+        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        path_ = std::filesystem::temp_directory_path() /
+                ("liquify-editor-graph-" + std::to_string(suffix));
+        std::filesystem::remove_all(path_);
+    }
+
+    ~TemporaryDirectory() {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    TemporaryDirectory(const TemporaryDirectory&) = delete;
+    auto operator=(const TemporaryDirectory&) -> TemporaryDirectory& = delete;
+
+    [[nodiscard]] auto path() const -> const std::filesystem::path& {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
+auto bytes(std::string_view value) -> std::vector<std::byte> {
+    const auto characters = std::span(value.data(), value.size());
+    const auto source = std::as_bytes(characters);
+    return {source.begin(), source.end()};
+}
+
+auto create_repository(const std::filesystem::path& path, std::string_view source)
+    -> liquid::repository {
+    auto created = liquid::runtime::block_on(liquid::repository::create(path));
+    EXPECT_TRUE(created) << (created ? "" : created.error().message);
+    auto repository = std::move(*created);
+    auto written = liquid::runtime::block_on(repository.write("main.cpp", bytes(source)));
+    EXPECT_TRUE(written) << (written ? "" : written.error().message);
+    return repository;
+}
+
+TEST(EditorGraph, PublishesOverlayQueriesAndRepositoryStatus) {
+    TemporaryDirectory location;
+    const auto source = std::string{"int answer = 42;\nint use() { return answer; }\n"};
+    auto repository = create_repository(location.path(), source);
+    auto repository_status = repository.status();
+    ASSERT_TRUE(repository_status) << repository_status.error().message;
+    ASSERT_GE(repository_status->pending_drips, 1U);
+    liquify::EditorGraph graph(location.path());
+
+    graph.open_buffer("main.cpp", liquify::StubLanguage::cpp, source);
+    const auto literal = static_cast<std::uint32_t>(source.find("42"));
+    graph.apply_edit("main.cpp", {literal, literal + 2, "43"});
+    graph.publish_build_diagnostics("main.cpp",
+                                    "main.cpp",
+                                    {{{"main.cpp", {15, 17, 0, 13, 0, 15}},
+                                      liquify::DiagnosticSeverity::warning,
+                                      "answer changed"}});
+    graph.request_diagnostics("main.cpp");
+    graph.request_hover("main.cpp", 40);
+    graph.request_completion("main.cpp", 40);
+    graph.request_definition("main.cpp", 40);
+    graph.note_saved_drip(repository_status->pending_drips);
+    graph.refresh_status();
+    graph.wait_until_idle();
+
+    const auto snapshot = graph.snapshot();
+    ASSERT_TRUE(snapshot.ready) << snapshot.error;
+#ifndef _WIN32
+    EXPECT_TRUE(snapshot.daemon_running);
+    EXPECT_TRUE(snapshot.daemon_hosted);
+#endif
+    ASSERT_EQ(snapshot.diagnostics.size(), 1U);
+    EXPECT_EQ(snapshot.diagnostics.front().message, "answer changed");
+    EXPECT_GT(snapshot.edit_to_diagnostic_ms, 0.0);
+    ASSERT_TRUE(snapshot.hover);
+    EXPECT_NE(snapshot.hover->signature.find("answer"), std::string::npos);
+    EXPECT_NE(
+        std::ranges::find(snapshot.completions, "answer", &liquify::CompletionCandidate::name),
+        snapshot.completions.end());
+    ASSERT_TRUE(snapshot.definition);
+    EXPECT_EQ(snapshot.definition->path, "main.cpp");
+    EXPECT_GE(snapshot.repository_pending_drips, 1U);
+    EXPECT_NE(liquify::editor_graph_status(snapshot).find("validation backlog="),
+              std::string::npos);
+}
+
+#ifndef _WIN32
+TEST(EditorGraph, AttachesWhenTheDaemonAlreadyOwnsTheCheckout) {
+    TemporaryDirectory location;
+    auto repository = create_repository(location.path(), "int main() { return 0; }\n");
+    static_cast<void>(repository);
+    auto options = liquid::daemon_options{};
+    options.capture.exclude.push_back(".liquid/**");
+    auto hosted = liquid::runtime::block_on(liquid::daemon::start(location.path(), options));
+    ASSERT_TRUE(hosted) << (hosted ? "" : hosted.error().message);
+
+    {
+        liquify::EditorGraph graph(location.path());
+        graph.wait_until_idle();
+        const auto snapshot = graph.snapshot();
+        ASSERT_TRUE(snapshot.ready) << snapshot.error;
+        EXPECT_TRUE(snapshot.daemon_running);
+        EXPECT_FALSE(snapshot.daemon_hosted);
+    }
+
+    EXPECT_TRUE(liquid::runtime::block_on(hosted->shutdown()));
+    EXPECT_TRUE(liquid::runtime::block_on(hosted->wait()));
+}
+#endif
+
+} // namespace

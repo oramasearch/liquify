@@ -53,6 +53,33 @@ This keeps the tree-sitter fallback usable while liquid #66 supplies the product
 list as a graph input. The diagnostics query reads and decodes that value; it does not parse a
 second diagnostics format or retain a parallel compiler result.
 
+## Editor runtime and daemon
+
+`liquify::EditorGraph` owns the application-facing lifetime. Its worker starts
+`liquid::daemon::start` with the checkout; `errc::already_exists` switches to
+`liquid::daemon::attach`, so the first liquify process hosts capture and later clients attach to
+the same endpoint. Windows retains interactive analysis while reporting liquid's documented
+missing named-pipe transport. A hosted daemon is shut down with the editor; an attached daemon is
+left to its owner.
+
+The daemon owns working-tree capture, its persisted graph and the `liquid status` data. The
+registered editor query kinds remain in the in-process `InteractiveAnalysis` graph at
+`.liquid/liquify-graph`; both stay inside libliquid and no query crosses the daemon socket. The
+daemon's public construction API does not accept an additional query registry. `.liquid/**` is
+excluded from capture so graph persistence cannot create editor drips.
+
+Buffer open, close and edit operations are serialized on the worker. Cursor and diagnostic
+demands run concurrently with that worker, allowing the next edit to invalidate an active query
+instead of waiting for it. Results carry monotonically increasing request generations; a late
+answer cannot replace a newer hover, completion, definition or diagnostic result. The render
+thread copies one `EditorGraphSnapshot` containing those answers, graph statistics, daemon status,
+repository drip count and the measured edit-to-diagnostic duration.
+
+`publish_build_diagnostics` is the producer boundary for the build path: it writes the
+translation-unit diagnostic input before requesting the editor diagnostic query. Inline build
+launch remains liquify #6; the editor runtime does not introduce another compiler or diagnostics
+parser.
+
 ## Measurement and verification
 
 `liquify-interactive-analysis-bench` extracts stubs for liquid's C/C++ files, keeps only
@@ -71,3 +98,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure -R InteractiveAnalysis
 ./build/liquify-interactive-analysis-bench modules/liquid build/interactive-analysis-state
 ```
+
+`EditorGraph.*` additionally proves first-client daemon hosting, attachment to an existing daemon,
+overlay edit publication, all editor-facing query results, status backlog formatting and
+edit-to-diagnostic measurement.
