@@ -32,10 +32,11 @@ renders N frames (default 30) with no repository and exits 0; `liquify version` 
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is `fca0612` (liquid Phase 1: repository, store, capture, identity and
-VFS). liquid has its own Capy, Corosio and automerge-cpp submodules, so checkouts and pin updates
-must initialize submodules recursively. The pin is not a working copy: change liquid in its own
-repo, push, then bump here in one commit naming the liquid change it takes:
+`liquid::liquid`. The pin is `4a99324` (liquid Phase 1: repository, store, capture, identity, VFS
+and its public-API command client). liquid has its own Capy, Corosio and automerge-cpp submodules,
+so checkouts and pin updates must initialize submodules recursively. The pin is not a working
+copy: change liquid in its own repo, push, then bump here in one commit naming the liquid change
+it takes:
 
 ```sh
 git -C modules/liquid fetch origin && git -C modules/liquid checkout <sha>
