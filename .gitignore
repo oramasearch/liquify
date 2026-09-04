@@ -1,4 +1,6 @@
 build/
+!docs/build/
+!docs/build/ci.md
 build-*/
 .cache/
 compile_commands.json

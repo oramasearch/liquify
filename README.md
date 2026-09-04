@@ -19,6 +19,10 @@ Requirements: CMake ≥ 3.28, Ninja, Clang 17+ (Homebrew LLVM on macOS). liquid 
 (libliquid is built in-tree and linked); SDL3, Dear ImGui and GoogleTest are fetched by CMake;
 SDL is linked static so the result is one binary.
 
+Every push and pull request repeats the clean-clone build on Linux, macOS, and Windows, then
+runs the tests, version command, and display-backed smoke self-test. See
+[`docs/build/ci.md`](docs/build/ci.md) for the runner toolchains and dependency cache.
+
 ```sh
 git clone --recurse-submodules git@github.com:oramasearch/liquify.git
 cd liquify

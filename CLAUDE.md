@@ -66,5 +66,8 @@ editor-buffer rendering decision (liquify #2).
 1. **Document the change in `docs/<topic>/*.md`** (see `docs/README.md`). This is a must.
 2. Does `README.md` still describe what builds and runs? Update the status line and tables.
 3. Does this file's **Status**, **Decisions** and **Open decisions** still hold?
-4. `cmake --build build && ctest --test-dir build` green, and `./build/liquify --smoke` exits 0.
-5. Commit means push.
+4. The full local proof is green: `cmake -S . -B build -G Ninja && cmake --build build &&
+   ctest --test-dir build --output-on-failure && ./build/liquify version &&
+   ./build/liquify --smoke 30`.
+5. Workflow changes have green Linux, macOS and Windows jobs.
+6. Commit means push.
