@@ -7,8 +7,9 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 
 > **Status: retained GPU editor with graph-backed interactive C/C++ analysis.**
 > `liquify <path>` opens a liquid repository through the public coroutine API, renders its root
-> entries, and opens root blobs into an editable in-memory buffer; save writes through libliquid
-> as a drip. Unreadable repositories show liquid's error and make `--print-tree` exit non-zero;
+> entries, loads nested trees on expansion, and opens blobs into an editable in-memory buffer;
+> save writes through libliquid as a drip. Unreadable repositories show liquid's error and make
+> `--print-tree` exit non-zero;
 > `liquify` with no path retains the hello state, and `--smoke` scrolls and edits 50,000 lines.
 > The pin includes liquid's compact-checkpoint repository format, Phase 2 and 3 APIs, and the
 > persisted demand-driven query graph, tree-diff and record-enumeration APIs, per-checkout daemon,
@@ -54,7 +55,7 @@ ctest --test-dir build
 | `include/liquify/app.hpp`, `src/app.cpp` | the application shell: window, renderer, ImGui context, frame loop. **The one TU that includes SDL3 or ImGui.** |
 | `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory text buffer, input modes, and libliquid blob read/write path |
 | `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
-| `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: runs libliquid blocking calls on a worker and exposes root entries or an error |
+| `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: reads the root on a worker, loads nested trees on expansion, and exposes entries, open latency, or an error |
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
 | `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |

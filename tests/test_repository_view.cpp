@@ -5,6 +5,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -67,6 +68,32 @@ TEST(RepositoryView, OpensFixtureCreatedByPinnedLiquid) {
     EXPECT_EQ(view.entries()[1].name, "src");
     EXPECT_EQ(view.entries()[1].kind, liquid::node_kind::tree);
     EXPECT_EQ(view.entries()[1].mode, 0040755U);
+    EXPECT_GE(view.open_time().count(), 0.0);
+}
+
+TEST(RepositoryView, LoadsNestedTreesOnlyWhenRequested) {
+    TemporaryDirectory location;
+    auto created = liquid::runtime::block_on(liquid::repository::create(location.path()));
+    ASSERT_TRUE(created) << created.error().message;
+
+    auto repository = std::move(*created);
+    auto written =
+        liquid::runtime::block_on(repository.write("src/nested/main.cpp", bytes("source")));
+    ASSERT_TRUE(written) << written.error().message;
+
+    auto view = liquify::RepositoryView::open(location.path());
+    ASSERT_TRUE(view.error().empty()) << view.error();
+    ASSERT_EQ(view.entries().size(), 1U);
+    EXPECT_FALSE(view.directory_loaded("src"));
+    view.request_directory("src", view.entries().front().ref);
+    while (view.directory_loading("src")) {
+        view.poll();
+        std::this_thread::yield();
+    }
+    ASSERT_TRUE(view.directory_error("src").empty()) << view.directory_error("src");
+    ASSERT_TRUE(view.directory_loaded("src"));
+    ASSERT_EQ(view.entries("src").size(), 1U);
+    EXPECT_EQ(view.entries("src").front().name, "nested");
 }
 
 TEST(RepositoryView, ReportsLiquidErrorForUnreadableRepository) {

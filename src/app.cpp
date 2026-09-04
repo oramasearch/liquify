@@ -1,5 +1,6 @@
-// The one translation unit that knows SDL3 and Dear ImGui. The shell uses ImGui; the editor
-// submits retained line geometry directly through SDL_Renderer with ImGui's GPU glyph atlas.
+// The one translation unit that knows SDL3 and Dear ImGui. The shell uses
+// ImGui; the editor submits retained line geometry directly through
+// SDL_Renderer with ImGui's GPU glyph atlas.
 #include "liquify/app.hpp"
 
 #include <algorithm>
@@ -491,21 +492,47 @@ void App::position_cursor(float x, float y, bool extend_selection) {
 void App::draw_repository_tree() {
     const auto path = options_.repository_path->string();
     ImGui::Text("Repository: %s", path.c_str());
+    ImGui::TextDisabled("opened in %.3f ms", repository_->open_time().count());
     ImGui::Separator();
     if (!repository_->error().empty()) {
         ImGui::TextWrapped("Unable to open repository: %s",
                            std::string(repository_->error()).c_str());
         return;
     }
-    for (const auto& entry : repository_->entries()) {
-        ImGui::PushID(entry.name.c_str());
+    repository_->poll();
+    draw_repository_entries({});
+}
+
+void App::draw_repository_entries(std::string_view directory) {
+    const auto entries =
+        directory.empty() ? repository_->entries() : repository_->entries(directory);
+    for (const auto& entry : entries) {
+        const auto path =
+            directory.empty() ? entry.name : std::string(directory) + "/" + entry.name;
+        ImGui::PushID(path.c_str());
         if (entry.kind == liquid::node_kind::blob) {
-            if (ImGui::Selectable(entry.name.c_str(),
-                                  editor_ && editor_->display_path() == entry.name)) {
-                open_editor(entry.name, liquid::to_string(entry.id));
+            if (ImGui::Selectable(entry.name.c_str(), editor_ && editor_->display_path() == path)) {
+                open_editor(path, liquid::to_string(entry.id));
+            }
+        } else if (entry.kind == liquid::node_kind::tree) {
+            const auto open = ImGui::TreeNodeEx(entry.name.c_str(), ImGuiTreeNodeFlags_OpenOnArrow);
+            if (open) {
+                if (!repository_->directory_loaded(path) && !repository_->directory_loading(path)) {
+                    repository_->request_directory(path, entry.ref);
+                }
+                if (repository_->directory_loading(path)) {
+                    ImGui::TextDisabled("loading...");
+                } else if (!repository_->directory_error(path).empty()) {
+                    ImGui::TextWrapped("Unable to read directory: %s",
+                                       std::string(repository_->directory_error(path)).c_str());
+                } else {
+                    draw_repository_entries(path);
+                }
+                ImGui::TreePop();
             }
         } else {
-            ImGui::Text("%s/", entry.name.c_str());
+            ImGui::Text(
+                "%s (%s)", entry.name.c_str(), std::string(node_kind_name(entry.kind)).c_str());
         }
         ImGui::PopID();
     }

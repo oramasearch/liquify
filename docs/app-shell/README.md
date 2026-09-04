@@ -5,7 +5,8 @@ one Dear ImGui context, one frame loop, a repository root panel and an editor su
 (static) and Dear ImGui 1.91 use the SDL_Renderer backend. **`src/app.cpp` is the only translation
 unit that includes SDL3 or ImGui.** `RepositoryView` (`src/repository_view.hpp`,
 `src/repository_view.cpp`) is plain C++ and holds either the root `liquid::tree_entry` values or
-an error string.
+an error string. Nested directory trees are requested from libliquid only when their row is
+expanded, then published to the panel after the worker completes.
 
 **Decision.** liquify is a native, cross-platform IDE from the start (Steve, 2026-09-02), not an
 editor extension. The repository panel is its first Phase 1 client. The editor buffer is a retained
@@ -21,11 +22,14 @@ close request), ImGui frame, one full-viewport window, render, present. Shutdown
 **Repository call path.** `liquify <path>` passes the path through `AppOptions` to
 `RepositoryView::open`. That function always launches a `std::async(std::launch::async)` worker;
 only its private worker function calls `liquid::repository::open` and `repository::root` through
-`liquid::runtime::block_on`. The caller waits before the SDL/ImGui lifecycle begins. The render
-thread only reads the copied entry values and never blocks on a liquid task. Every liquid include
-is under `include/liquid/`; no private liquid header is used. An open or root-read failure retains
-liquid's context and message in the view instead of representing the repository as an empty tree.
-The panel renders that error, and `--print-tree` writes it to standard error and exits non-zero.
+`liquid::runtime::block_on`. The caller waits before the SDL/ImGui lifecycle begins. The initial
+worker reads only the shallow root tree. Expanding a directory starts another worker that reopens
+the repository and reads that entry's tree digest; the render thread polls the result and never
+blocks on a liquid task. The panel reports the measured repository-open duration. Every liquid
+include is under `include/liquid/`; no private liquid header is used. An open or root-read failure
+retains liquid's context and message in the view instead of representing the repository as an
+empty tree. The panel renders that error, and `--print-tree` writes it to standard error and exits
+non-zero.
 
 **CLI.** `liquify` opens the hello state; `liquify <path>` opens the repository panel and lets a
 root blob be opened in the editor;

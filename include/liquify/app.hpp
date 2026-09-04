@@ -12,8 +12,9 @@
 struct SDL_Window;
 struct SDL_Renderer;
 
-// The application shell: one window, one renderer, one ImGui context, one frame loop.
-// SDL3 and Dear ImGui appear only in app.cpp; nothing else in liquify includes them.
+// The application shell: one window, one renderer, one ImGui context, one frame
+// loop. SDL3 and Dear ImGui appear only in app.cpp; nothing else in liquify
+// includes them.
 namespace liquify {
 
 class RepositoryView;
@@ -35,8 +36,8 @@ public:
     App(const App&) = delete;
     App& operator=(const App&) = delete;
 
-    // Create the window, renderer and UI context. False (with a message on stderr) on failure,
-    // e.g. no display.
+    // Create the window, renderer and UI context. False (with a message on
+    // stderr) on failure, e.g. no display.
     bool init();
     // Run the frame loop; returns the process exit code.
     int run();
@@ -45,6 +46,7 @@ private:
     void frame();
     void draw_contents();
     void draw_repository_tree();
+    void draw_repository_entries(std::string_view directory);
     void draw_editor();
     void render_editor();
     void open_editor(std::string path, std::string blob_id);
