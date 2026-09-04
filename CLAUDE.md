@@ -8,12 +8,12 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Repository tree, linked to libliquid through Phase 3.** `./build/liquify <path>` opens a liquid
+**Repository tree, linked to the Phase 4 design pin.** `./build/liquify <path>` opens a liquid
 repository off the render thread and shows its root entries; `liquify` with no path shows the
 hello state, unreadable repositories show liquid's error and make `liquify --print-tree <path>`
 exit non-zero, and `liquify --smoke` renders 30 frames and exits 0. liquid is pinned at
-`modules/liquid` through its Phase 3 transport foundation. Next: Phase 4, the editor surface on
-liquid's graph (liquify #1); the editor-buffer rendering decision (liquify #2).
+`modules/liquid` through the Phase 4 incremental-engine design. Next: the editor shell and retained
+GPU text layer from liquify #1; graph integration follows liquid #20 and #21.
 
 ## Decisions — recorded
 
@@ -32,6 +32,9 @@ liquid's graph (liquify #1); the editor-buffer rendering decision (liquify #2).
    library-only and linked as `liquid::liquid`. Everything liquify knows about repositories,
    drips, builds and search comes through that API; liquify never reimplements it. Bump the pin
    deliberately (one commit per bump, naming the liquid change it takes).
+6. **The editor buffer is a retained GPU text layer inside Dear ImGui** (Steve, 2026-09-05).
+   SDL3 and ImGui remain the shell and panel toolkit; the buffer owns a glyph atlas and cached
+   per-blob line layout. This records bridge decision 15 and closes liquify #2's question.
 
 ## Rules
 
@@ -50,9 +53,6 @@ liquid's graph (liquify #1); the editor-buffer rendering decision (liquify #2).
 
 ## Open decisions
 
-- **Editor buffer rendering.** Dear ImGui for chrome and panels is settled for now; the text
-  buffer may need a retained, GPU-rendered text layer (Zed-style) inside it. Decide when the
-  first real editing surface is built.
 - **Plugin ABI.** A stable non-C++ boundary, shared with liquid's codecs and language
   frontends; not before Phase 4.
 

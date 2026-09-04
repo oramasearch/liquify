@@ -5,16 +5,17 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: repository tree, linked to libliquid through Phase 3.** `liquify <path>` opens a liquid
+> **Status: repository tree, linked to the Phase 4 design pin.** `liquify <path>` opens a liquid
 > repository through the public coroutine API and renders its root entries on SDL3 + Dear ImGui;
 > unreadable repositories show liquid's error and make `--print-tree` exit non-zero; `liquify`
 > with no path retains the hello state, and `--smoke` renders a fixed number of frames.
-> The pin includes liquid's compact-checkpoint repository format and Phase 2 and 3 APIs.
+> The pin includes liquid's compact-checkpoint repository format, Phase 2 and 3 APIs, and the
+> Phase 4 incremental-engine design.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
-> Next, per the bridge's action plan (Phase 4): the editor surface backed by liquid's query
-> graph and virtual filesystem.
+> Next, per the bridge's action plan (Phase 4): the editor shell and retained GPU text layer;
+> graph integration follows liquid #20 and #21.
 
 ## Build and run
 

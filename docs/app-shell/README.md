@@ -9,8 +9,8 @@ an error string.
 
 **Decision.** liquify is a native, cross-platform IDE from the start (Steve, 2026-09-02), not an
 editor extension. The repository panel is its first Phase 1 client; editing, diagnostics and the
-incremental graph remain Phase 4 work. The open decision is the editor buffer: Dear ImGui text vs
-a retained GPU text layer (liquify issue #2).
+incremental graph remain Phase 4 work. The editor buffer is a retained GPU text layer inside Dear
+ImGui (bridge decision 15); ImGui continues to own chrome and panels.
 
 **Lifecycle** (mirrors Zetta `src/gui/app.cpp`): `SDL_Init(VIDEO)` → window at 70 % of the usable
 display (floors 900×600), resizable, high-pixel-density → `SDL_CreateRenderer` + vsync → ImGui
@@ -34,8 +34,9 @@ renders N frames (default 30) with no repository and exits 0; `liquify version` 
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is `f8b2155`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
-distribution foundation, and compact shallow repository checkpoints. Checkpoints written before
+`liquid::liquid`. The pin is `5ba292d`: liquid Phase 1, its Phase 2 build engine, Phase 3
+distribution foundation, compact shallow repository checkpoints, and the Phase 4 incremental
+engine design. Checkpoints written before
 the automerge-cpp adoption in liquid #136 do not load. liquid has its own Capy, Corosio and
 automerge-cpp submodules, so checkouts and pin updates must initialize submodules recursively. The
 pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
