@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -46,7 +47,7 @@ auto bytes(std::string_view value) -> std::vector<std::byte> {
     return {source.begin(), source.end()};
 }
 
-TEST(RepositoryView, OpensRepositoryAndListsRootEntries) {
+TEST(RepositoryView, OpensFixtureCreatedByPinnedLiquid) {
     TemporaryDirectory location;
     auto created = liquid::runtime::block_on(liquid::repository::create(location.path()));
     ASSERT_TRUE(created) << created.error().message;
@@ -66,6 +67,20 @@ TEST(RepositoryView, OpensRepositoryAndListsRootEntries) {
     EXPECT_EQ(view.entries()[1].name, "src");
     EXPECT_EQ(view.entries()[1].kind, liquid::node_kind::tree);
     EXPECT_EQ(view.entries()[1].mode, 0040755U);
+}
+
+TEST(RepositoryView, ReportsLiquidErrorForUnreadableRepository) {
+    TemporaryDirectory location;
+    ASSERT_TRUE(std::filesystem::create_directories(location.path()));
+
+    std::ofstream marker{location.path() / "LIQUID_REPO"};
+    ASSERT_TRUE(marker.is_open());
+    marker << "not-a-liquid-digest\n";
+    marker.close();
+
+    const auto view = liquify::RepositoryView::open(location.path());
+    EXPECT_TRUE(view.entries().empty());
+    EXPECT_EQ(view.error(), "not-a-liquid-digest: unknown digest algorithm");
 }
 
 } // namespace

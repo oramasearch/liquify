@@ -23,7 +23,9 @@ close request), ImGui frame, one full-viewport window, render, present. Shutdown
 only its private worker function calls `liquid::repository::open` and `repository::root` through
 `liquid::runtime::block_on`. The caller waits before the SDL/ImGui lifecycle begins. The render
 thread only reads the copied entry values and never blocks on a liquid task. Every liquid include
-is under `include/liquid/`; no private liquid header is used.
+is under `include/liquid/`; no private liquid header is used. An open or root-read failure retains
+liquid's context and message in the view instead of representing the repository as an empty tree.
+The panel renders that error, and `--print-tree` writes it to standard error and exits non-zero.
 
 **CLI.** `liquify` opens the hello state; `liquify <path>` opens the repository panel;
 `liquify --print-tree <path>` prints name, kind and mode without a display; `liquify --smoke [N]`
@@ -32,11 +34,12 @@ renders N frames (default 30) with no repository and exits 0; `liquify version` 
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is `4a99324` (liquid Phase 1: repository, store, capture, identity, VFS
-and its public-API command client). liquid has its own Capy, Corosio and automerge-cpp submodules,
-so checkouts and pin updates must initialize submodules recursively. The pin is not a working
-copy: change liquid in its own repo, push, then bump here in one commit naming the liquid change
-it takes:
+`liquid::liquid`. The pin is `f8b2155`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
+distribution foundation, and compact shallow repository checkpoints. Checkpoints written before
+the automerge-cpp adoption in liquid #136 do not load. liquid has its own Capy, Corosio and
+automerge-cpp submodules, so checkouts and pin updates must initialize submodules recursively. The
+pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
+the liquid change it takes:
 
 ```sh
 git -C modules/liquid fetch origin && git -C modules/liquid checkout <sha>
@@ -45,6 +48,11 @@ git submodule update --init --recursive
 cmake --build build && ./build/liquify --smoke && ctest --test-dir build
 git add modules/liquid && git commit -m "Bump liquid to <sha>: <why>"
 ```
+
+**Tests.** The repository-view fixture is created at test time by the pinned liquid, then written
+and reopened through the same public API. A separate corrupt-marker case proves that the liquid
+error reaches the view and that `--print-tree` exits non-zero with that message. No repository
+bytes are committed as a fixture.
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.

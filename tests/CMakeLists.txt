@@ -4,3 +4,10 @@ add_executable(liquify-tests
 target_link_libraries(liquify-tests PRIVATE liquify-core GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(liquify-tests)
+
+add_test(
+  NAME liquify-print-tree-unreadable
+  COMMAND ${CMAKE_COMMAND}
+          -DLIQUIFY_EXECUTABLE=$<TARGET_FILE:liquify>
+          -DTEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/test_print_tree_error.cmake)
