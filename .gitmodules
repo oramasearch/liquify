@@ -1,3 +1,12 @@
 [submodule "modules/liquid"]
 	path = modules/liquid
 	url = git@github.com:oramasearch/liquid.git
+[submodule "modules/tree-sitter"]
+	path = modules/tree-sitter
+	url = https://github.com/tree-sitter/tree-sitter.git
+[submodule "modules/tree-sitter-c"]
+	path = modules/tree-sitter-c
+	url = https://github.com/tree-sitter/tree-sitter-c.git
+[submodule "modules/tree-sitter-cpp"]
+	path = modules/tree-sitter-cpp
+	url = https://github.com/tree-sitter/tree-sitter-cpp.git

@@ -52,9 +52,11 @@ ctest --test-dir build
 | `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
 | `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: runs libliquid blocking calls on a worker and exposes root entries or an error |
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
+| `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
 | `src/main.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
+| `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |
 
 ## What this is
 
