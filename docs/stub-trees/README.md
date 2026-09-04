@@ -2,12 +2,14 @@
 
 ## What
 
-`liquify::StubTrees` registers `liquify.stub-tree/1` with liquid's public query registry. Its query
+`liquify::StubTrees` registers `liquify.stub-tree/2` with liquid's public query registry. Its query
 argument is the language and BLAKE3 digest of a source blob. The query reads a graph input with that
 same key, extracts the source with tree-sitter, and returns a compact deterministic binary record.
-The record contains each declaration's kind, name, modifiers, normalized signature, and byte and
-zero-based line/column range. The liquid graph persists that value as its record set, keyed by the
-query argument; equal C or equal C++ blobs therefore share one persisted stub value.
+The record contains each declaration's kind, name, modifiers, normalized signature, leading
+documentation comment, and byte and zero-based line/column range. The liquid graph persists that
+value as its record set, keyed by the query argument; equal C or equal C++ blobs therefore share
+one persisted stub value. Version 2 has a separate query kind, so persisted version 1 values cannot
+be decoded as the new record shape.
 
 The extractor uses the tree-sitter runtime at `v0.26.13`, C grammar at `v0.24.2`, and C++ grammar at
 `v0.23.4`, each pinned under `modules/`. It records functions, types, variables, fields, and

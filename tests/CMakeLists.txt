@@ -1,5 +1,6 @@
 add_executable(liquify-tests
   test_editor_buffer.cpp
+  test_interactive_analysis.cpp
   test_repository_view.cpp
   test_text_layout.cpp
   test_stub_tree.cpp

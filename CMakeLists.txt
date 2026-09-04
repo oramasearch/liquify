@@ -113,6 +113,7 @@ target_link_libraries(tree-sitter-cpp-parser PUBLIC tree-sitter-runtime)
 # -----------------------------------------------------------------------------
 add_library(liquify-core STATIC
   src/editor_buffer.cpp
+  src/interactive_analysis.cpp
   src/repository_view.cpp
   src/text_layout.cpp
   src/stub_tree.cpp
@@ -126,6 +127,9 @@ option(LIQUIFY_BUILD_BENCH "Build stub-tree benchmarks" OFF)
 if(LIQUIFY_BUILD_BENCH)
   add_executable(liquify-stub-tree-bench bench/stub_tree_bench.cpp)
   target_link_libraries(liquify-stub-tree-bench PRIVATE liquify-core)
+  add_executable(liquify-interactive-analysis-bench
+    bench/interactive_analysis_bench.cpp)
+  target_link_libraries(liquify-interactive-analysis-bench PRIVATE liquify-core)
 endif()
 
 add_library(liquify-app STATIC src/app.cpp)

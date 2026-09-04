@@ -23,8 +23,8 @@ const TSLanguage *tree_sitter_cpp();
 namespace liquify {
 namespace {
 
-constexpr auto stub_query_kind = "liquify.stub-tree/1";
-constexpr auto stub_version = std::byte{1};
+constexpr auto stub_query_kind = "liquify.stub-tree/2";
+constexpr auto stub_version = std::byte{2};
 
 auto bytes(std::string_view value) -> std::vector<std::byte> {
   auto output = std::vector<std::byte>(value.size());
@@ -97,6 +97,7 @@ auto encode(StubLanguage language,
       append_string(output, modifier);
     }
     append_string(output, declaration.signature);
+    append_string(output, declaration.documentation);
     append_u32(output, declaration.range.start_byte);
     append_u32(output, declaration.range.end_byte);
     append_u32(output, declaration.range.start_line);
@@ -152,6 +153,11 @@ auto decode(std::span<const std::byte> input, liquid::digest blob)
       return std::unexpected(signature.error());
     }
     declaration.signature = std::move(*signature);
+    auto documentation = read_string(input, cursor);
+    if (!documentation) {
+      return std::unexpected(documentation.error());
+    }
+    declaration.documentation = std::move(*documentation);
     auto start_byte = read_u32(input, cursor);
     auto end_byte = read_u32(input, cursor);
     auto start_line = read_u32(input, cursor);
@@ -273,6 +279,55 @@ auto signature(TSNode node, std::string_view source, DeclarationKind kind)
   return normalized(value);
 }
 
+auto leading_documentation(std::string_view source, std::uint32_t start)
+    -> std::string {
+  auto end = static_cast<std::size_t>(start);
+  while (end > 0 && std::isspace(static_cast<unsigned char>(source[end - 1]))) {
+    --end;
+  }
+  if (end >= 2 && source.substr(end - 2, 2) == "*/") {
+    const auto begin = source.rfind("/*", end - 2);
+    if (begin != std::string_view::npos) {
+      auto body = source.substr(begin + 2, end - begin - 4);
+      if (body.starts_with('*')) {
+        body.remove_prefix(1);
+      }
+      return normalized(body);
+    }
+  }
+
+  auto lines = std::vector<std::string>{};
+  while (end > 0) {
+    const auto newline = source.rfind('\n', end - 1);
+    const auto begin = newline == std::string_view::npos ? 0 : newline + 1;
+    auto line = source.substr(begin, end - begin);
+    while (!line.empty() &&
+           std::isspace(static_cast<unsigned char>(line.front()))) {
+      line.remove_prefix(1);
+    }
+    if (!line.starts_with("//")) {
+      break;
+    }
+    line.remove_prefix(2);
+    lines.insert(lines.begin(), normalized(line));
+    if (begin == 0) {
+      break;
+    }
+    end = begin - 1;
+    while (end > 0 && source[end - 1] == '\r') {
+      --end;
+    }
+  }
+  auto output = std::string{};
+  for (const auto &line : lines) {
+    if (!output.empty()) {
+      output.push_back('\n');
+    }
+    output += line;
+  }
+  return output;
+}
+
 auto add_declaration(std::vector<StubDeclaration> &output, DeclarationKind kind,
                      TSNode node, TSNode name_node, std::string_view source)
     -> void {
@@ -281,8 +336,22 @@ auto add_declaration(std::vector<StubDeclaration> &output, DeclarationKind kind,
     return;
   }
   const auto declaration_signature = signature(node, source, kind);
-  output.push_back({kind, name, modifiers(declaration_signature),
-                    declaration_signature, range(node)});
+  output.push_back(
+      {kind, name, modifiers(declaration_signature), declaration_signature,
+       leading_documentation(source, ts_node_start_byte(node)), range(node)});
+}
+
+auto has_node_type(TSNode node, std::string_view expected) -> bool {
+  if (std::string_view(ts_node_type(node)) == expected) {
+    return true;
+  }
+  const auto count = ts_node_named_child_count(node);
+  for (std::uint32_t index = 0; index < count; ++index) {
+    if (has_node_type(ts_node_named_child(node, index), expected)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 auto collect_declarators(std::vector<StubDeclaration> &output,
@@ -294,7 +363,10 @@ auto collect_declarators(std::vector<StubDeclaration> &output,
     const auto child = ts_node_named_child(node, index);
     const auto type = std::string_view(ts_node_type(child));
     if (type == "init_declarator" || type.ends_with("declarator")) {
-      add_declaration(output, kind, node, child, source);
+      const auto actual_kind = has_node_type(child, "function_declarator")
+                                   ? DeclarationKind::function
+                                   : kind;
+      add_declaration(output, actual_kind, node, child, source);
       found = true;
     }
   }

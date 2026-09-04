@@ -29,6 +29,8 @@ struct SourceRange {
   std::uint32_t start_column{};
   std::uint32_t end_line{};
   std::uint32_t end_column{};
+
+  auto operator==(const SourceRange &) const -> bool = default;
 };
 
 struct StubDeclaration {
@@ -36,6 +38,7 @@ struct StubDeclaration {
   std::string name;
   std::vector<std::string> modifiers;
   std::string signature;
+  std::string documentation;
   SourceRange range;
 };
 
