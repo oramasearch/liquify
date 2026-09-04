@@ -10,10 +10,10 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 **Repository tree, linked to libliquid through Phase 3.** `./build/liquify <path>` opens a liquid
 repository off the render thread and shows its root entries; `liquify` with no path shows the
-hello state, `liquify --print-tree <path>` provides display-free evidence, and `liquify --smoke`
-renders 30 frames and exits 0. liquid is pinned at `modules/liquid` through its Phase 3 transport
-foundation. Next: Phase 4, the editor surface on liquid's graph (liquify #1); the editor-buffer
-rendering decision (liquify #2).
+hello state, unreadable repositories show liquid's error and make `liquify --print-tree <path>`
+exit non-zero, and `liquify --smoke` renders 30 frames and exits 0. liquid is pinned at
+`modules/liquid` through its Phase 3 transport foundation. Next: Phase 4, the editor surface on
+liquid's graph (liquify #1); the editor-buffer rendering decision (liquify #2).
 
 ## Decisions — recorded
 
