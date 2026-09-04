@@ -5,7 +5,7 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: editor shell on a retained GPU text layer with graph-backed C/C++ stub trees.**
+> **Status: retained GPU editor with graph-backed interactive C/C++ analysis.**
 > `liquify <path>` opens a liquid repository through the public coroutine API, renders its root
 > entries, and opens root blobs into an editable in-memory buffer; save writes through libliquid
 > as a drip. Unreadable repositories show liquid's error and make `--print-tree` exit non-zero;
@@ -13,11 +13,13 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > The pin includes liquid's compact-checkpoint repository format, Phase 2 and 3 APIs, and the
 > persisted demand-driven query graph, tree-diff and record-enumeration APIs, per-checkout daemon,
 > and C/C++ stub-tree query. Stub trees resolve declarations from closed files without retaining
-> their full parse trees.
+> their full parse trees. Open overlays retain error-tolerant incremental trees and answer node,
+> enclosing-definition, definition, reference, hover, completion and build-diagnostic queries;
+> an edit cancels their in-flight graph work.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
-> Next, per the bridge's action plan (Phase 4): graph integration after liquid #20 and #21.
+> Next, per the bridge's action plan (Phase 4): inline build, test and deploy (liquify #6).
 
 ## Build and run
 
@@ -54,6 +56,7 @@ ctest --test-dir build
 | `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: runs libliquid blocking calls on a worker and exposes root entries or an error |
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
+| `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |
 | `src/main.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |

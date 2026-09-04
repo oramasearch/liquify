@@ -19,3 +19,8 @@ layouts, and tabs plus UTF-8 retain byte-to-column positioning.
 API, checks the exact declaration lists and modifiers, verifies graph persistence and equal-blob
 reuse, resolves a declaration across separate stub trees, and proves an edited blob recomputes
 without recomputing an unchanged blob.
+
+`test_interactive_analysis.cpp` keeps an invalid C++ fixture open as a volatile overlay and checks
+all seven registered analysis queries. It covers closed-file stub hover and definition lookup,
+compiler-symbol precedence, translation-unit diagnostics, completion order, local references,
+tree-sitter changed-range reuse, cancellation during typing and a successful answer after the edit.

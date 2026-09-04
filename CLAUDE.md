@@ -8,15 +8,17 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Editor shell on a retained GPU text layer, graph-backed C/C++ stub trees.**
+**Retained GPU editor with graph-backed interactive C/C++ analysis.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 and opens root blobs into an editable in-memory buffer; save calls libliquid and produces a drip.
 The standard input mode is non-modal and a modal command/insert mode is available. Unreadable
 repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
 reports frame and typing latency, and exits 0. liquid is pinned at `modules/liquid` through its
 persisted demand-driven query graph. C and C++ stubs are graph query values that resolve
-declarations from closed files without retaining full parse trees. Next: graph-backed editor
-queries (liquify #5).
+declarations from closed files without retaining full parse trees. Graph-backed editor queries run
+over error-tolerant incremental trees for open overlays, resolve through closed-file
+stubs or compiler symbol records, and read build diagnostics by translation unit. Next: inline
+build, test and deploy (liquify #6).
 
 ## Decisions — recorded
 

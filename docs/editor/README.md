@@ -53,12 +53,14 @@ smoke: lines=50000 frames=3000 visible_lines=68 avg_frame_ms=16.778 p95_frame_ms
 The average scroll rate is the display refresh rate. Typing latency is one presented frame on
 average while the viewport crosses the full 50,000-line buffer.
 
-## Deferred graph work
+## Interactive analysis
 
-This is the shell half of liquify #1. Diagnostics, completion, go-to-definition, graph-backed
-overlay inputs, recursive VFS navigation and triggered-query status wait for liquid #20 and #21.
-The editor model calls only the pinned public libliquid repository API; it introduces no substitute
-graph or filesystem implementation.
+[`interactive-analysis.md`](interactive-analysis.md) records the graph-backed analysis service.
+Open C and C++ buffers are volatile overlay inputs with retained error-tolerant trees; edits use
+tree-sitter's incremental parse and cancel active queries. Closed files contribute stubs, optional
+compiler symbol records take precedence, and build diagnostics are read by translation unit.
+Recursive VFS navigation, triggered-query status and inline build/test/deploy remain outside the
+editor surface.
 
 ## Verify
 

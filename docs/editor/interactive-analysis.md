@@ -1,0 +1,73 @@
+# Interactive analysis
+
+## Graph queries
+
+`liquify::InteractiveAnalysis` registers seven versioned query kinds with liquid's public query
+registry:
+
+| Query kind | Result |
+|---|---|
+| `liquify.node-at-position/1` | deepest named error-tolerant syntax node, source range and leading trivia |
+| `liquify.enclosing-definition/1` | containing function, type, enum or namespace definition |
+| `liquify.go-to-definition/1` | compiler-symbol definition when supplied, then an open-buffer declaration, then a closed-file stub |
+| `liquify.find-references/1` | compiler references when supplied, otherwise matching identifiers from open trees plus the stub definition |
+| `liquify.hover/1` | normalized signature and leading documentation from the resolved declaration stub |
+| `liquify.completion/1` | visible open-buffer declarations, compiler symbols and closed-file stub names ordered by source and scope proximity |
+| `liquify.diagnostics/1` | the build-diagnostic value for the translation unit associated with the buffer |
+
+Cursor arguments are a normalized path plus UTF-8 byte position. Each cursor query reads the
+buffer's volatile overlay. Cross-file queries also read an encoded low-durability stub/symbol input
+and a volatile open-buffer revision. Diagnostics read the overlay, the buffer-to-translation-unit
+input and that translation unit's diagnostic input. The resulting graph dependencies make an edit
+invalidate exactly the interactive work that observed the overlay.
+
+## Open-buffer tree lifecycle
+
+Only open buffers own a `TSParser` and full `TSTree`. `open_buffer` parses once and publishes the
+source as `graph_input_kind::overlay_buffer`. `apply_edit` validates the byte range, calls
+`ts_tree_edit` on a copy of the previous tree and passes that edited tree back to
+`ts_parser_parse_string`. The replacement tree and immutable query snapshot become visible
+together under the buffer lock. `close_buffer` clears the graph overlay and destroys the parser,
+tree and snapshot.
+
+`IncrementalParseReport` exposes the exact edit, tree-sitter's changed ranges, leaf ranges inside
+those changes, and the count of leaves outside them. The locality test changes one numeric token
+in a valid three-declaration buffer and proves that every affected leaf intersects a reported
+tree-sitter range while the leaves outside it are reused. The invalid fixture separately proves
+that all cursor queries continue to answer through error recovery.
+
+## Cancellation and fallback data
+
+Every public demand records its active query key before entering liquid. At edit start the service
+invalidates those active keys, which covers a query's first execution before liquid has recorded
+its input dependencies. Once a query has completed, liquid's recorded reverse dependencies cancel
+later executions through the overlay input. Each compute function reads the overlay again before
+returning, so a stopped computation is discarded and cannot publish a stale result.
+
+Closed files enter through `add_stub`; no full parse tree is retained for them. Stub version 2 adds
+the leading documentation comment used by hover. `set_symbol_records` accepts the frontend
+module's compiler-derived locations when they exist and definition/reference queries prefer them.
+This keeps the tree-sitter fallback usable while liquid #66 supplies the production symbol record.
+
+`set_build_diagnostics` records the buffer's translation unit and writes that build diagnostic
+list as a graph input. The diagnostics query reads and decodes that value; it does not parse a
+second diagnostics format or retain a parallel compiler result.
+
+## Measurement and verification
+
+`liquify-interactive-analysis-bench` extracts stubs for liquid's C/C++ files, keeps only
+`src/graph.cpp` open, and measures 200 definition and completion demands at identifiers found in
+that file. On the Apple M3 Max macOS host on 2026-09-04 with the pinned liquid tree:
+
+```text
+interactive analysis: files=252 open_buffers=1 samples=200 go_to_definition_p95_ms=125.561 completion_p95_ms=194.551
+```
+
+Run the focused proof with a new state directory under the build tree:
+
+```sh
+cmake -S . -B build -G Ninja -DLIQUIFY_BUILD_BENCH=ON
+cmake --build build
+ctest --test-dir build --output-on-failure -R InteractiveAnalysis
+./build/liquify-interactive-analysis-bench modules/liquid build/interactive-analysis-state
+```
