@@ -5,9 +5,10 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: repository tree, backed by libliquid Phase 1.** `liquify <path>` opens a liquid
+> **Status: repository tree, linked to libliquid through Phase 3.** `liquify <path>` opens a liquid
 > repository through the public coroutine API and renders its root entries on SDL3 + Dear ImGui;
 > `liquify` with no path retains the hello state, and `--smoke` renders a fixed number of frames.
+> The pin includes liquid's compact-checkpoint repository format and Phase 2 and 3 APIs.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
