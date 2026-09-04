@@ -15,9 +15,10 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 
 ## Build and run
 
-Requirements: CMake ≥ 3.28, Ninja, Clang 17+ (Homebrew LLVM on macOS). liquid is a submodule
-(libliquid is built in-tree and linked); SDL3, Dear ImGui and GoogleTest are fetched by CMake;
-SDL is linked static so the result is one binary.
+Requirements: CMake ≥ 3.28, Ninja, Clang 17+ (Homebrew LLVM on macOS), OpenSSL and zlib. Linux
+also needs pkg-config and FUSE3 development files. liquid is a submodule (libliquid is built
+in-tree and linked); SDL3, Dear ImGui and GoogleTest are fetched by CMake; SDL is linked static
+so the result is one binary.
 
 Every push and pull request repeats the clean-clone build on Linux, macOS, and Windows, then
 runs the tests, version command, and display-backed smoke self-test. See
@@ -26,6 +27,7 @@ runs the tests, version command, and display-backed smoke self-test. See
 ```sh
 git clone --recurse-submodules git@github.com:oramasearch/liquify.git
 cd liquify
+git submodule update --init --recursive
 cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build

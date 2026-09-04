@@ -85,8 +85,10 @@ target_compile_options(imgui PRIVATE -w)
 # libliquid — liquify is a client of liquid's library, pinned as a submodule.
 # Library only: no CLI, no liquid tests in this build.
 # -----------------------------------------------------------------------------
+find_package(OpenSSL REQUIRED)
 set(LIQUID_BUILD_CLI   OFF CACHE BOOL "" FORCE)
 set(LIQUID_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LIQUID_BUILD_BENCH OFF CACHE BOOL "" FORCE)
 add_subdirectory(modules/liquid EXCLUDE_FROM_ALL)
 
 # -----------------------------------------------------------------------------

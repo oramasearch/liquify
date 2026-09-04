@@ -13,17 +13,19 @@ secret, a run fails during checkout, before the build commands. The root build k
 same library-only submodule configuration as a local build.
 
 **Dependencies.** SDL3 3.2, Dear ImGui 1.91.5, and GoogleTest remain CMake `FetchContent`
-dependencies. `actions/cache` stores only `build/_deps`; each platform has its own key containing
-the hash of `CMakeLists.txt`. A new key starts empty and CMake fetches every dependency before
-building.
+dependencies. liquid adds nested Capy, Corosio and automerge-cpp submodules; its exported target
+links Capy publicly. OpenSSL supplies Corosio's TLS implementation, zlib supplies automerge-cpp's
+compression support, and Linux installs FUSE3 for liquid's VFS. `actions/cache` stores only
+`build/_deps`; each platform has its own key containing the hash of `CMakeLists.txt`. A new key
+starts empty and CMake fetches every dependency before building.
 
 ## Platform coverage
 
 | Runner | Compiler and display | Verification |
 |---|---|---|
-| `ubuntu-24.04` | Clang 19 from apt.llvm.org with GCC 14's standard library headers; SDL's static X11 and Wayland build dependencies; Xvfb | configure, build, `ctest`, `liquify version`, `xvfb-run -a ./build/liquify --smoke 30` |
-| `macos-15` | Homebrew's current `llvm`; native runner display | configure, build, `ctest`, `liquify version`, `./build/liquify --smoke 30` |
-| `windows-2022` | Chocolatey's newest available LLVM after entering the Visual Studio x64 developer environment; native runner display | configure, build, `ctest`, `liquify version`, `liquify --smoke 30` |
+| `ubuntu-24.04` | Clang 19 from apt.llvm.org with GCC 14's standard library headers; OpenSSL, FUSE3, SDL's static X11 and Wayland build dependencies; Xvfb | configure, build, `ctest`, `liquify version`, `xvfb-run -a ./build/liquify --smoke 30` |
+| `macos-15` | Homebrew's current `llvm` and `openssl@3`; native runner display | configure, build, `ctest`, `liquify version`, `./build/liquify --smoke 30` |
+| `windows-2022` | Chocolatey's newest available LLVM and OpenSSL after entering the Visual Studio x64 developer environment; native runner display | configure, build, `ctest`, `liquify version`, `liquify --smoke 30` |
 
 The workflow prints the selected compiler version on every runner. Windows uses `clang-cl` with
 the Visual Studio standard library and SDK so C++26 `<print>` is checked with the newest LLVM
