@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux (Clang 19)
+            os: ubuntu-24.04
+          - name: macOS (Homebrew LLVM)
+            os: macos-15
+          - name: Windows (latest LLVM)
+            os: windows-2022
+
+    steps:
+      - name: Check out with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.ORAMA_SUBMODULES_TOKEN }}
+
+      - name: Install Linux toolchain and SDL dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl gnupg lsb-release software-properties-common wget
+          curl -fsSL https://apt.llvm.org/llvm.sh -o /tmp/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 19
+          sudo apt-get install -y \
+            clang-19 \
+            libstdc++-14-dev \
+            ninja-build \
+            pkg-config \
+            xauth \
+            xvfb \
+            libasound2-dev \
+            libaudio-dev \
+            libdbus-1-dev \
+            libdecor-0-dev \
+            libdrm-dev \
+            libegl1-mesa-dev \
+            libgbm-dev \
+            libgl1-mesa-dev \
+            libgles2-mesa-dev \
+            libibus-1.0-dev \
+            libjack-dev \
+            libpipewire-0.3-dev \
+            libpulse-dev \
+            libsndio-dev \
+            libudev-dev \
+            liburing-dev \
+            libwayland-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxext-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            libxrandr-dev \
+            libxss-dev \
+            libxtst-dev
+
+      - name: Install macOS toolchain
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install llvm
+          llvm_prefix="$(brew --prefix llvm)"
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+
+      - name: Install Windows toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco upgrade llvm -y --no-progress --limit-output
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Restore fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: liquify-${{ matrix.os }}-deps-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure, build, and test on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          CC: clang-19
+          CXX: clang++-19
+        run: |
+          clang++-19 --version
+          cmake -S . -B build -G Ninja
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+          ./build/liquify version
+          xvfb-run -a ./build/liquify --smoke 30
+
+      - name: Configure, build, and test on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          "$CXX" --version
+          cmake -S . -B build -G Ninja
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+          ./build/liquify version
+          ./build/liquify --smoke 30
+
+      - name: Configure, build, and test on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          cmd.exe /s /c "`"$devcmd`" -arch=x64 -host_arch=x64 && set" | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') {
+              Set-Item -Path "Env:$($matches[1])" -Value $matches[2]
+            }
+          }
+
+          & 'C:\Program Files\LLVM\bin\clang-cl.exe' --version
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_C_COMPILER='C:/Program Files/LLVM/bin/clang-cl.exe' `
+            -DCMAKE_CXX_COMPILER='C:/Program Files/LLVM/bin/clang-cl.exe'
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+          .\build\liquify.exe version
+          .\build\liquify.exe --smoke 30
