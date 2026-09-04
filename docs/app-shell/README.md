@@ -22,11 +22,15 @@ the display-required self-test; `liquify version` prints `liquify <v> (libliquid
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is not a working copy: change liquid in its own repo, push, then bump
-here in one commit naming the liquid change it takes:
+`liquid::liquid`. The pin is `fca0612` (liquid Phase 1: repository, store, capture, identity and
+VFS). liquid has its own Capy, Corosio and automerge-cpp submodules, so checkouts and pin updates
+must initialize submodules recursively. The pin is not a working copy: change liquid in its own
+repo, push, then bump here in one commit naming the liquid change it takes:
 
 ```sh
 git -C modules/liquid fetch origin && git -C modules/liquid checkout <sha>
+git add modules/liquid
+git submodule update --init --recursive
 cmake --build build && ./build/liquify --smoke && ctest --test-dir build
 git add modules/liquid && git commit -m "Bump liquid to <sha>: <why>"
 ```
