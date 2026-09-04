@@ -5,9 +5,10 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: hello world, linked to libliquid.** `liquify` opens a window on SDL3 + Dear ImGui,
-> shows the linked liquid version, prints its version, and can self-test
-> by rendering a fixed number of frames. The specification lives in
+> **Status: repository tree, backed by libliquid Phase 1.** `liquify <path>` opens a liquid
+> repository through the public coroutine API and renders its root entries on SDL3 + Dear ImGui;
+> `liquify` with no path retains the hello state, and `--smoke` renders a fixed number of frames.
+> The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
 > Next, per the bridge's action plan (Phase 4): the editor surface backed by liquid's query
@@ -32,6 +33,8 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build
 ./build/liquify            # open the IDE
+./build/liquify <path>     # open a liquid repository and render its root tree
+./build/liquify --print-tree <path>
 ./build/liquify --smoke    # render 30 frames and exit 0 (needs a display)
 ./build/liquify version
 ```
@@ -41,8 +44,9 @@ ctest --test-dir build
 | Path | Role |
 |---|---|
 | `include/liquify/app.hpp`, `src/app.cpp` | the application shell: window, renderer, ImGui context, frame loop. **The one TU that includes SDL3 or ImGui.** |
+| `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: runs libliquid blocking calls on a worker and exposes root entries or an error |
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
-| `src/main.cpp` | CLI: `version`, `--smoke [N]`, `--help` |
+| `src/main.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 

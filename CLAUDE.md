@@ -8,11 +8,11 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Hello world, linked to libliquid** (bridge `docs/action-plan.md`, Phase 0.5). `./build/liquify`
-opens a window that shows the linked liquid version, `liquify version` prints both versions,
-`liquify --smoke` renders 30 frames and exits 0, `ctest` is green. liquid is pinned at
-`modules/liquid`. Next: Phase 4, the editor surface on liquid's graph (liquify #1); the
-editor-buffer rendering decision (liquify #2).
+**Repository tree, backed by libliquid Phase 1.** `./build/liquify <path>` opens a liquid
+repository off the render thread and shows its root entries; `liquify` with no path shows the
+hello state, `liquify --print-tree <path>` provides display-free evidence, and `liquify --smoke`
+renders 30 frames and exits 0. liquid is pinned at `modules/liquid`. Next: Phase 4, the editor
+surface on liquid's graph (liquify #1); the editor-buffer rendering decision (liquify #2).
 
 ## Decisions — recorded
 

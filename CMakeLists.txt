@@ -94,12 +94,15 @@ add_subdirectory(modules/liquid EXCLUDE_FROM_ALL)
 # -----------------------------------------------------------------------------
 # liquify
 # -----------------------------------------------------------------------------
-add_library(liquify-core STATIC src/version.cpp)
+add_library(liquify-core STATIC
+  src/repository_view.cpp
+  src/version.cpp)
 target_include_directories(liquify-core PUBLIC include)
+target_link_libraries(liquify-core PUBLIC liquid::liquid)
 
 add_library(liquify-app STATIC src/app.cpp)
 target_include_directories(liquify-app PUBLIC include)
-target_link_libraries(liquify-app PUBLIC liquify-core liquid::liquid PRIVATE imgui)
+target_link_libraries(liquify-app PUBLIC liquify-core PRIVATE imgui)
 
 add_executable(liquify src/main.cpp)
 target_link_libraries(liquify PRIVATE liquify-app)

@@ -6,19 +6,27 @@
 #include <cstdio>
 #include <string>
 
-#include <SDL3/SDL.h>
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
+#include <SDL3/SDL.h>
 
 #include "liquid/liquid.hpp"
 #include "liquify/version.hpp"
+#include "repository_view.hpp"
 
 namespace liquify {
 
-App::App(AppOptions options) : options_(std::move(options)) {}
+App::App(AppOptions options) : options_(std::move(options)) {
+    if (options_.repository_path) {
+        repository_ =
+            std::make_unique<RepositoryView>(RepositoryView::open(*options_.repository_path));
+    }
+}
 
-App::~App() { shutdown(); }
+App::~App() {
+    shutdown();
+}
 
 bool App::init() {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -27,15 +35,18 @@ bool App::init() {
     }
     int win_w = 1280, win_h = 800;
     SDL_Rect usable{};
-    if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 && usable.h > 0) {
+    if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 &&
+        usable.h > 0) {
         win_w = static_cast<int>(usable.w * 0.70f);
         win_h = static_cast<int>(usable.h * 0.70f);
-        if (win_w < 900) win_w = 900;
-        if (win_h < 600) win_h = 600;
+        if (win_w < 900)
+            win_w = 900;
+        if (win_h < 600)
+            win_h = 600;
     }
     const std::string title = options_.title + " " + std::string(version_string());
-    window_ = SDL_CreateWindow(title.c_str(), win_w, win_h,
-                               SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    window_ = SDL_CreateWindow(
+        title.c_str(), win_w, win_h, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (window_ == nullptr) {
         std::fprintf(stderr, "liquify: SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();
@@ -55,7 +66,7 @@ bool App::init() {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.IniFilename = nullptr;  // no imgui.ini next to the binary
+    io.IniFilename = nullptr; // no imgui.ini next to the binary
     ImGui::StyleColorsLight();
     ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
     ImGui_ImplSDLRenderer3_Init(renderer_);
@@ -71,13 +82,42 @@ void App::frame() {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos);
     ImGui::SetNextWindowSize(vp->WorkSize);
-    ImGui::Begin("liquify", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
-    ImGui::TextUnformatted("hello from liquify");
-    ImGui::Text("version %s", std::string(version_string()).c_str());
-    ImGui::Separator();
-    ImGui::Text("libliquid %s linked", std::string(liquid::version_string()).c_str());
-    ImGui::TextUnformatted("The IDE for liquid: instant open at any size, diagnostics from the build graph, drips.");
+    ImGui::Begin("liquify",
+                 nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoSavedSettings);
+    if (!repository_) {
+        ImGui::TextUnformatted("hello from liquify");
+        ImGui::Text("version %s", std::string(version_string()).c_str());
+        ImGui::Separator();
+        ImGui::Text("libliquid %s linked", std::string(liquid::version_string()).c_str());
+        ImGui::TextUnformatted("The IDE for liquid: instant open at any size, diagnostics from the "
+                               "build graph, drips.");
+    } else {
+        const auto path = options_.repository_path->string();
+        ImGui::Text("Repository: %s", path.c_str());
+        ImGui::Separator();
+        if (!repository_->error().empty()) {
+            ImGui::TextWrapped("Unable to open repository: %s",
+                               std::string(repository_->error()).c_str());
+        } else if (ImGui::BeginTable(
+                       "repository-tree", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Name");
+            ImGui::TableSetupColumn("Kind");
+            ImGui::TableSetupColumn("Mode");
+            ImGui::TableHeadersRow();
+            for (const auto& entry : repository_->entries()) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(entry.name.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextUnformatted(node_kind_name(entry.kind).data());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::Text("%06o", static_cast<unsigned int>(entry.mode));
+            }
+            ImGui::EndTable();
+        }
+    }
     ImGui::End();
 
     ImGui::Render();
@@ -88,35 +128,41 @@ void App::frame() {
 }
 
 int App::run() {
-    if (!initialized_) return 1;
+    if (!initialized_)
+        return 1;
     int frames = 0;
     while (!quit_) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL3_ProcessEvent(&event);
-            if (event.type == SDL_EVENT_QUIT) quit_ = true;
+            if (event.type == SDL_EVENT_QUIT)
+                quit_ = true;
             if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
                 event.window.windowID == SDL_GetWindowID(window_))
                 quit_ = true;
         }
         frame();
         ++frames;
-        if (options_.max_frames > 0 && frames >= options_.max_frames) quit_ = true;
+        if (options_.max_frames > 0 && frames >= options_.max_frames)
+            quit_ = true;
     }
     return 0;
 }
 
 void App::shutdown() {
-    if (!initialized_) return;
+    if (!initialized_)
+        return;
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
-    if (renderer_) SDL_DestroyRenderer(renderer_);
-    if (window_) SDL_DestroyWindow(window_);
+    if (renderer_)
+        SDL_DestroyRenderer(renderer_);
+    if (window_)
+        SDL_DestroyWindow(window_);
     SDL_Quit();
     renderer_ = nullptr;
     window_ = nullptr;
     initialized_ = false;
 }
 
-}  // namespace liquify
+} // namespace liquify

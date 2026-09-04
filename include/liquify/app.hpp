@@ -1,4 +1,7 @@
 #pragma once
+#include <filesystem>
+#include <memory>
+#include <optional>
 #include <string>
 
 struct SDL_Window;
@@ -8,9 +11,12 @@ struct SDL_Renderer;
 // SDL3 and Dear ImGui appear only in app.cpp; nothing else in liquify includes them.
 namespace liquify {
 
+class RepositoryView;
+
 struct AppOptions {
     std::string title = "liquify";
-    int max_frames = 0;  // 0 = run until the window is closed; N = render N frames and exit
+    int max_frames = 0; // 0 = run until the window is closed; N = render N frames and exit
+    std::optional<std::filesystem::path> repository_path;
 };
 
 class App {
@@ -31,10 +37,11 @@ private:
     void shutdown();
 
     AppOptions options_;
+    std::unique_ptr<RepositoryView> repository_;
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     bool initialized_ = false;
     bool quit_ = false;
 };
 
-}  // namespace liquify
+} // namespace liquify
