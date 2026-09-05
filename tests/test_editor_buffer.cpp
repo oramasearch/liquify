@@ -68,6 +68,7 @@ TEST(EditorBuffer, EditsSelectionAndLinesInMemory) {
     buffer.set_cursor({1, 0});
     buffer.move_right(true);
     buffer.move_right(true);
+    EXPECT_EQ(buffer.byte_offset(buffer.cursor()), 8U);
     const auto erased = buffer.backspace();
     ASSERT_TRUE(erased);
     EXPECT_EQ(buffer.text(), "alpha\nmma\nbeta");
@@ -101,6 +102,7 @@ TEST(EditorBuffer, SaveWritesThroughLiquid) {
     ASSERT_TRUE(buffer.insert_text(" after"));
     ASSERT_TRUE(buffer.save()) << buffer.error();
     EXPECT_FALSE(buffer.dirty());
+    EXPECT_GE(buffer.pending_drips(), 1U);
 
     auto reopened = liquid::runtime::block_on(liquid::repository::open(location.path()));
     ASSERT_TRUE(reopened) << reopened.error().message;

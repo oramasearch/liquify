@@ -1,10 +1,13 @@
-// The one translation unit that knows SDL3 and Dear ImGui. The shell uses ImGui; the editor
-// submits retained line geometry directly through SDL_Renderer with ImGui's GPU glyph atlas.
+// The one translation unit that knows SDL3 and Dear ImGui. The shell uses
+// ImGui; the editor submits retained line geometry directly through
+// SDL_Renderer with ImGui's GPU glyph atlas.
 #include "liquify/app.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -16,6 +19,8 @@
 #include "editor_buffer.hpp"
 #include "liquid/hash.hpp"
 #include "liquid/liquid.hpp"
+#include "liquify/editor_graph.hpp"
+#include "liquify/stub_tree.hpp"
 #include "liquify/version.hpp"
 #include "repository_view.hpp"
 #include "text_layout.hpp"
@@ -61,6 +66,31 @@ auto average(const std::vector<double>& values) -> double {
     return total / static_cast<double>(values.size());
 }
 
+auto source_edit_between(std::string_view before, std::string_view after)
+    -> std::optional<SourceEdit> {
+    if (before == after) {
+        return std::nullopt;
+    }
+    auto first = std::size_t{};
+    while (first < before.size() && first < after.size() && before[first] == after[first]) {
+        ++first;
+    }
+    auto before_end = before.size();
+    auto after_end = after.size();
+    while (before_end > first && after_end > first &&
+           before[before_end - 1] == after[after_end - 1]) {
+        --before_end;
+        --after_end;
+    }
+    if (first > std::numeric_limits<std::uint32_t>::max() ||
+        before_end > std::numeric_limits<std::uint32_t>::max()) {
+        return std::nullopt;
+    }
+    return SourceEdit{static_cast<std::uint32_t>(first),
+                      static_cast<std::uint32_t>(before_end),
+                      std::string(after.substr(first, after_end - first))};
+}
+
 } // namespace
 
 class RetainedTextLayer {
@@ -80,6 +110,7 @@ public:
     auto render(SDL_Renderer* renderer,
                 EditorBuffer& buffer,
                 TextLayoutCache& layouts,
+                std::span<const Diagnostic> diagnostics,
                 float x,
                 float y,
                 float width,
@@ -133,6 +164,16 @@ public:
                                static_cast<int>(frame_indices_.size()));
         }
 
+        draw_diagnostics(renderer,
+                         buffer,
+                         diagnostics,
+                         x,
+                         y,
+                         first_line,
+                         last_line,
+                         line_height,
+                         cell_width,
+                         horizontal_scroll);
         draw_cursor(renderer,
                     buffer,
                     layouts,
@@ -259,6 +300,59 @@ private:
         SDL_RenderFillRect(renderer, &rectangle);
     }
 
+    static void draw_diagnostics(SDL_Renderer* renderer,
+                                 EditorBuffer& buffer,
+                                 std::span<const Diagnostic> diagnostics,
+                                 float x,
+                                 float y,
+                                 std::size_t first_line,
+                                 std::size_t last_line,
+                                 float line_height,
+                                 float cell_width,
+                                 float horizontal_scroll) {
+        for (const auto& diagnostic : diagnostics) {
+            if (diagnostic.location.path.generic_string() != buffer.display_path()) {
+                continue;
+            }
+            const auto& range = diagnostic.location.range;
+            const auto begin_line =
+                std::max(first_line, static_cast<std::size_t>(range.start_line));
+            const auto end_line = std::min(last_line, static_cast<std::size_t>(range.end_line) + 1);
+            if (diagnostic.severity == DiagnosticSeverity::error) {
+                SDL_SetRenderDrawColor(renderer, 205, 46, 46, 255);
+            } else if (diagnostic.severity == DiagnosticSeverity::warning) {
+                SDL_SetRenderDrawColor(renderer, 204, 128, 0, 255);
+            } else {
+                SDL_SetRenderDrawColor(renderer, 52, 101, 164, 255);
+            }
+            for (auto line = begin_line; line < end_line; ++line) {
+                const auto first_column = line == range.start_line ? range.start_column : 0U;
+                auto last_column = line == range.end_line
+                                       ? range.end_column
+                                       : static_cast<std::uint32_t>(buffer.line(line).size());
+                last_column = std::max(last_column, first_column + 1);
+                const auto start_x = x + editor_padding +
+                                     static_cast<float>(first_column) * cell_width -
+                                     horizontal_scroll;
+                const auto finish_x = x + editor_padding +
+                                      static_cast<float>(last_column) * cell_width -
+                                      horizontal_scroll;
+                const auto baseline =
+                    y + static_cast<float>(line - first_line + 1) * line_height - 2.0F;
+                auto upward = true;
+                for (auto position = start_x; position < finish_x; position += 4.0F) {
+                    const auto next = std::min(position + 4.0F, finish_x);
+                    SDL_RenderLine(renderer,
+                                   position,
+                                   baseline + (upward ? 1.0F : -1.0F),
+                                   next,
+                                   baseline + (upward ? -1.0F : 1.0F));
+                    upward = !upward;
+                }
+            }
+        }
+    }
+
     std::vector<std::optional<LineGeometry>> lines_;
     std::vector<SDL_Vertex> frame_vertices_;
     std::vector<int> frame_indices_;
@@ -270,6 +364,9 @@ App::App(AppOptions options) : options_(std::move(options)) {
     if (options_.repository_path) {
         repository_ =
             std::make_unique<RepositoryView>(RepositoryView::open(*options_.repository_path));
+        if (repository_->error().empty()) {
+            editor_graph_ = std::make_unique<EditorGraph>(*options_.repository_path);
+        }
     }
     if (options_.smoke) {
         editor_ = std::make_unique<EditorBuffer>(
@@ -338,6 +435,11 @@ bool App::init() {
 }
 
 void App::open_editor(std::string path, std::string blob_id) {
+    if (analysis_buffer_open_ && editor_graph_ && editor_) {
+        editor_graph_->close_buffer(std::filesystem::path(editor_->display_path()));
+    }
+    analysis_buffer_open_ = false;
+    analysis_text_.clear();
     editor_ = std::make_unique<EditorBuffer>(
         EditorBuffer::open(*options_.repository_path, std::move(path), std::move(blob_id)));
     layouts_ = std::make_unique<TextLayoutCache>();
@@ -348,6 +450,18 @@ void App::open_editor(std::string path, std::string blob_id) {
     horizontal_scroll_ = 0.0F;
     editor_focused_ = true;
     editor_status_.clear();
+    if (!editor_graph_ || !editor_->error().empty()) {
+        return;
+    }
+    auto language = stub_language_for_path(std::filesystem::path(editor_->display_path()));
+    if (!language) {
+        return;
+    }
+    analysis_text_ = editor_->text();
+    analysis_buffer_open_ = true;
+    editor_graph_->open_buffer(
+        std::filesystem::path(editor_->display_path()), *language, analysis_text_);
+    editor_graph_->request_diagnostics(std::filesystem::path(editor_->display_path()));
 }
 
 void App::apply_change(std::size_t first_line,
@@ -357,6 +471,99 @@ void App::apply_change(std::size_t first_line,
     layouts_->apply_change(change);
     text_layer_->apply_change(change);
     editor_status_.clear();
+    sync_editor_graph();
+}
+
+void App::save_editor() {
+    if (!editor_) {
+        return;
+    }
+    if (!editor_->save()) {
+        editor_status_ = std::string(editor_->error());
+        return;
+    }
+    editor_status_ = "saved as a drip";
+    if (editor_graph_) {
+        editor_graph_->note_saved_drip(editor_->pending_drips());
+        editor_graph_->refresh_status();
+    }
+}
+
+void App::sync_editor_graph() {
+    if (!editor_graph_ || !analysis_buffer_open_ || !editor_) {
+        return;
+    }
+    auto current = editor_->text();
+    auto edit = source_edit_between(analysis_text_, current);
+    if (!edit) {
+        if (analysis_text_ != current) {
+            editor_status_ = "analysis overlay exceeds the supported byte range";
+        }
+        return;
+    }
+    const auto path = std::filesystem::path(editor_->display_path());
+    editor_graph_->apply_edit(path, std::move(*edit));
+    analysis_text_ = std::move(current);
+    editor_graph_->request_diagnostics(path);
+}
+
+void App::request_definition() {
+    if (!editor_graph_ || !analysis_buffer_open_ || !editor_) {
+        return;
+    }
+    const auto byte = editor_->byte_offset(editor_->cursor());
+    if (byte <= std::numeric_limits<std::uint32_t>::max()) {
+        editor_graph_->request_definition(std::filesystem::path(editor_->display_path()),
+                                          static_cast<std::uint32_t>(byte));
+    }
+}
+
+void App::request_hover() {
+    if (!editor_graph_ || !analysis_buffer_open_ || !editor_) {
+        return;
+    }
+    const auto byte = editor_->byte_offset(editor_->cursor());
+    if (byte <= std::numeric_limits<std::uint32_t>::max()) {
+        editor_graph_->request_hover(std::filesystem::path(editor_->display_path()),
+                                     static_cast<std::uint32_t>(byte));
+    }
+}
+
+void App::request_completion() {
+    if (!editor_graph_ || !analysis_buffer_open_ || !editor_) {
+        return;
+    }
+    const auto byte = editor_->byte_offset(editor_->cursor());
+    if (byte <= std::numeric_limits<std::uint32_t>::max()) {
+        editor_graph_->request_completion(std::filesystem::path(editor_->display_path()),
+                                          static_cast<std::uint32_t>(byte));
+    }
+}
+
+void App::poll_editor_graph() {
+    if (!editor_graph_) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= next_status_refresh_) {
+        editor_graph_->refresh_status();
+        next_status_refresh_ = now + std::chrono::milliseconds{500};
+    }
+    const auto snapshot = editor_graph_->snapshot();
+    if (snapshot.definition_generation == definition_generation_) {
+        return;
+    }
+    definition_generation_ = snapshot.definition_generation;
+    if (!snapshot.definition) {
+        return;
+    }
+    const auto target = snapshot.definition->path.generic_string();
+    if (!editor_ || editor_->display_path() != target) {
+        open_editor(target, "graph:" + target);
+    }
+    const auto& range = snapshot.definition->declaration.range;
+    editor_->set_cursor({range.start_line, range.start_column});
+    ensure_cursor_visible();
 }
 
 void App::handle_text(std::string_view text) {
@@ -376,7 +583,19 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
     const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
     if (primary && key == SDLK_S) {
-        editor_status_ = editor_->save() ? "saved as a drip" : std::string(editor_->error());
+        save_editor();
+        return;
+    }
+    if (key == SDLK_F12) {
+        request_definition();
+        return;
+    }
+    if (key == SDLK_F1) {
+        request_hover();
+        return;
+    }
+    if (primary && key == SDLK_SPACE) {
+        request_completion();
         return;
     }
     if (primary && key == SDLK_A) {
@@ -491,21 +710,47 @@ void App::position_cursor(float x, float y, bool extend_selection) {
 void App::draw_repository_tree() {
     const auto path = options_.repository_path->string();
     ImGui::Text("Repository: %s", path.c_str());
+    ImGui::TextDisabled("opened in %.3f ms", repository_->open_time().count());
     ImGui::Separator();
     if (!repository_->error().empty()) {
         ImGui::TextWrapped("Unable to open repository: %s",
                            std::string(repository_->error()).c_str());
         return;
     }
-    for (const auto& entry : repository_->entries()) {
-        ImGui::PushID(entry.name.c_str());
+    repository_->poll();
+    draw_repository_entries({});
+}
+
+void App::draw_repository_entries(std::string_view directory) {
+    const auto entries =
+        directory.empty() ? repository_->entries() : repository_->entries(directory);
+    for (const auto& entry : entries) {
+        const auto path =
+            directory.empty() ? entry.name : std::string(directory) + "/" + entry.name;
+        ImGui::PushID(path.c_str());
         if (entry.kind == liquid::node_kind::blob) {
-            if (ImGui::Selectable(entry.name.c_str(),
-                                  editor_ && editor_->display_path() == entry.name)) {
-                open_editor(entry.name, liquid::to_string(entry.id));
+            if (ImGui::Selectable(entry.name.c_str(), editor_ && editor_->display_path() == path)) {
+                open_editor(path, liquid::to_string(entry.id));
+            }
+        } else if (entry.kind == liquid::node_kind::tree) {
+            const auto open = ImGui::TreeNodeEx(entry.name.c_str(), ImGuiTreeNodeFlags_OpenOnArrow);
+            if (open) {
+                if (!repository_->directory_loaded(path) && !repository_->directory_loading(path)) {
+                    repository_->request_directory(path, entry.ref);
+                }
+                if (repository_->directory_loading(path)) {
+                    ImGui::TextDisabled("loading...");
+                } else if (!repository_->directory_error(path).empty()) {
+                    ImGui::TextWrapped("Unable to read directory: %s",
+                                       std::string(repository_->directory_error(path)).c_str());
+                } else {
+                    draw_repository_entries(path);
+                }
+                ImGui::TreePop();
             }
         } else {
-            ImGui::Text("%s/", entry.name.c_str());
+            ImGui::Text(
+                "%s (%s)", entry.name.c_str(), std::string(node_kind_name(entry.kind)).c_str());
         }
         ImGui::PopID();
     }
@@ -513,6 +758,7 @@ void App::draw_repository_tree() {
 
 void App::draw_editor() {
     const auto path = std::string(editor_->display_path());
+    const auto graph_snapshot = editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
     ImGui::Text("%s%s", path.c_str(), editor_->dirty() ? " *" : "");
     ImGui::SameLine();
     if (ImGui::Button(editing_mode_name(editor_->mode()).data())) {
@@ -523,8 +769,22 @@ void App::draw_editor() {
     }
     ImGui::SameLine();
     if (ImGui::Button("Save")) {
-        editor_status_ = editor_->save() ? "saved as a drip" : std::string(editor_->error());
+        save_editor();
         editor_focused_ = true;
+    }
+    if (analysis_buffer_open_) {
+        ImGui::SameLine();
+        if (ImGui::Button("Definition (F12)")) {
+            request_definition();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Hover (F1)")) {
+            request_hover();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Complete")) {
+            request_completion();
+        }
     }
     if (!editor_status_.empty()) {
         ImGui::SameLine();
@@ -534,9 +794,26 @@ void App::draw_editor() {
         const auto error = std::string(editor_->error());
         ImGui::TextUnformatted(error.c_str());
     }
+    if (editor_graph_) {
+        const auto status = editor_graph_status(graph_snapshot);
+        ImGui::TextWrapped("%s", status.c_str());
+        if (!graph_snapshot.query_error.empty()) {
+            ImGui::TextColored(
+                ImVec4(0.75F, 0.12F, 0.12F, 1.0F), "%s", graph_snapshot.query_error.c_str());
+        }
+        if (graph_snapshot.hover) {
+            ImGui::TextWrapped("%s", graph_snapshot.hover->signature.c_str());
+            if (!graph_snapshot.hover->documentation.empty()) {
+                ImGui::TextWrapped("%s", graph_snapshot.hover->documentation.c_str());
+            }
+        }
+    }
 
     const auto available = ImGui::GetContentRegionAvail();
-    const auto size = ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F));
+    const auto panel_height =
+        editor_graph_ ? std::max(0.0F, std::min(140.0F, available.y * 0.30F)) : 0.0F;
+    const auto size =
+        ImVec2(std::max(available.x, 1.0F), std::max(available.y - panel_height, 1.0F));
     const auto position = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton("editor-surface", size, ImGuiButtonFlags_MouseButtonLeft);
     const auto hovered = ImGui::IsItemHovered();
@@ -574,6 +851,51 @@ void App::draw_editor() {
             position_cursor(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y, true);
         }
     }
+
+    if (!editor_graph_) {
+        return;
+    }
+    ImGui::BeginChild("diagnostics-panel",
+                      ImVec2(std::max(available.x, 1.0F), panel_height),
+                      ImGuiChildFlags_Border);
+    ImGui::Text("Diagnostics (%zu)", graph_snapshot.diagnostics.size());
+    if (graph_snapshot.edit_to_diagnostic_ms > 0.0) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("edit to first result %.3f ms", graph_snapshot.edit_to_diagnostic_ms);
+    }
+    for (std::size_t index = 0; index < graph_snapshot.diagnostics.size(); ++index) {
+        const auto& diagnostic = graph_snapshot.diagnostics[index];
+        const auto label = std::string(diagnostic_severity_name(diagnostic.severity)) + ": " +
+                           diagnostic.message + "##diagnostic-" + std::to_string(index);
+        if (ImGui::Selectable(label.c_str())) {
+            const auto target = diagnostic.location.path.generic_string();
+            if (editor_->display_path() != target) {
+                open_editor(target, "graph:" + target);
+            }
+            editor_->set_cursor(
+                {diagnostic.location.range.start_line, diagnostic.location.range.start_column});
+            ensure_cursor_visible();
+        }
+    }
+    if (!graph_snapshot.completions.empty()) {
+        ImGui::Separator();
+        ImGui::Text("Completions (%zu)", graph_snapshot.completions.size());
+        const auto count = std::min<std::size_t>(graph_snapshot.completions.size(), 20);
+        for (std::size_t index = 0; index < count; ++index) {
+            const auto& completion = graph_snapshot.completions[index];
+            const auto display =
+                completion.signature.empty() ? completion.name : completion.signature;
+            const auto label = display + "##completion-" + std::to_string(index);
+            if (ImGui::Selectable(label.c_str())) {
+                const auto change = editor_->insert_text(completion.name);
+                if (change) {
+                    apply_change(change->first_line, change->erased_lines, change->inserted_lines);
+                }
+                editor_focused_ = true;
+            }
+        }
+    }
+    ImGui::EndChild();
 }
 
 void App::draw_contents() {
@@ -620,9 +942,11 @@ void App::render_editor() {
                         static_cast<int>(editor_width_),
                         static_cast<int>(editor_height_)};
     SDL_SetRenderClipRect(renderer_, &clip);
+    const auto graph_snapshot = editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
     visible_lines_ = text_layer_->render(renderer_,
                                          *editor_,
                                          *layouts_,
+                                         graph_snapshot.diagnostics,
                                          editor_x_,
                                          editor_y_,
                                          editor_width_,
@@ -636,6 +960,7 @@ void App::render_editor() {
 }
 
 void App::frame() {
+    poll_editor_graph();
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();

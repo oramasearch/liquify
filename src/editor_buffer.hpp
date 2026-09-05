@@ -55,6 +55,8 @@ public:
     [[nodiscard]] auto dirty() const -> bool;
     [[nodiscard]] auto error() const -> std::string_view;
     [[nodiscard]] auto revision() const -> std::uint64_t;
+    [[nodiscard]] auto byte_offset(TextPosition position) const -> std::size_t;
+    [[nodiscard]] auto pending_drips() const -> std::uint64_t;
 
     void set_mode(EditingMode mode);
     void set_cursor(TextPosition position, bool extend_selection = false);
@@ -91,6 +93,7 @@ private:
     bool dirty_{};
     std::string error_;
     std::uint64_t revision_{};
+    std::uint64_t pending_drips_{};
 };
 
 [[nodiscard]] auto editing_mode_name(EditingMode mode) -> std::string_view;
