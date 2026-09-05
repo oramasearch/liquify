@@ -131,6 +131,8 @@ if(LIQUIFY_BUILD_BENCH)
   add_executable(liquify-interactive-analysis-bench
     bench/interactive_analysis_bench.cpp)
   target_link_libraries(liquify-interactive-analysis-bench PRIVATE liquify-core)
+  add_executable(liquify-editor-graph-bench bench/editor_graph_bench.cpp)
+  target_link_libraries(liquify-editor-graph-bench PRIVATE liquify-core)
 endif()
 
 add_library(liquify-app STATIC src/app.cpp)

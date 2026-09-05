@@ -80,6 +80,27 @@ paths, the sum of target cursor distances as the validation backlog, daemon avai
 pending repository drip count returned by the last editor save. Recursive repository navigation
 loads directory trees lazily as recorded in [`../app-shell/README.md`](../app-shell/README.md).
 
+## Phase 4 exit measurement
+
+`liquify-editor-graph-bench` imported liquid's own checkout into a fresh libliquid repository. It
+counted 493 source-tree files while excluding `.git`, `.liquid`, submodules and build directories,
+then loaded only the 17 root entries. The measurement held link completion until the editor graph
+returned its first diagnostic, proving that the diagnostic result did not wait for relinking.
+
+Measured on 2026-09-04 on the same machine as the retained-rendering baseline:
+
+```text
+$ ./build/liquify-editor-graph-bench modules/liquid build/liquid-editor-measure-repository-2
+editor graph: liquid_files=493 root_entries=17 repository_open_ms=221.276 root_read_ms=220.319 edit_to_diagnostic_ms=10.315 diagnostic_before_relink=true
+
+$ ./build/liquify --smoke 3000
+smoke: lines=50000 frames=3000 visible_lines=68 avg_frame_ms=16.821 p95_frame_ms=18.317 achieved_hz=59.4 display_hz=60.0 avg_typing_ms=16.974 p95_typing_ms=18.388
+```
+
+The lazy root open remains independent of repository size. Average typing latency changed from
+16.925 ms in the baseline above to 16.974 ms with the graph integration, a 0.049 ms difference;
+both measurements present an edit in one display frame on average.
+
 ## Verify
 
 ```sh
