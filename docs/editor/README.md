@@ -14,6 +14,8 @@ Opening a root blob calls `liquid::repository::open` and `repository::read` on a
 copies the current bytes to a worker and calls `repository::write`, so the write follows
 libliquid's drip path. The UI never writes repository files directly. The repository and blob path
 stay attached to the buffer; a generated smoke buffer deliberately has no save target.
+The save result retains the repository's pending-drip count before the repository handle closes,
+so the editor status does not reopen and checkpoint the journal merely to display it.
 
 The default mode is standard, non-modal editing. Arrow, Home, End, Page Up, Page Down, selection,
 Backspace, Delete, Return and text input edit directly. The mode button or primary-modifier+M
@@ -57,10 +59,26 @@ average while the viewport crosses the full 50,000-line buffer.
 
 [`interactive-analysis.md`](interactive-analysis.md) records the graph-backed analysis service.
 Open C and C++ buffers are volatile overlay inputs with retained error-tolerant trees; edits use
-tree-sitter's incremental parse and cancel active queries. Closed files contribute stubs, optional
+tree-sitter's incremental parse and cancel active queries. Each buffer mutation computes the exact
+changed byte span and queues it off the render thread. Closed files contribute stubs, optional
 compiler symbol records take precedence, and build diagnostics are read by translation unit.
-Recursive VFS navigation, triggered-query status and inline build/test/deploy remain outside the
-editor surface.
+
+F12 and the Definition button demand go-to-definition; F1 and the Hover button demand hover;
+primary-modifier+Space and the Complete button demand completion. Definition results open their
+target blob and select the declaration. Completion results appear in the analysis panel and insert
+their candidate when selected. Hover shows the signature and leading documentation above the
+buffer.
+
+Diagnostics are demanded after buffer open and every edit. The retained renderer draws a colored
+underline at each source range, while the diagnostics panel lists severity, message and the
+measured edit-to-result duration. Selecting a diagnostic opens its blob and moves the cursor to its
+range. The build diagnostic producer is the `EditorGraph::publish_build_diagnostics` boundary;
+launching inline builds remains liquify #6.
+
+The status line is formatted from `liquid::daemon_status`: the last workspace drip's invalidated
+paths, the sum of target cursor distances as the validation backlog, daemon availability and the
+pending repository drip count returned by the last editor save. Recursive repository navigation
+loads directory trees lazily as recorded in [`../app-shell/README.md`](../app-shell/README.md).
 
 ## Verify
 

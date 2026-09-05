@@ -32,7 +32,8 @@ empty tree. The panel renders that error, and `--print-tree` writes it to standa
 non-zero.
 
 **CLI.** `liquify` opens the hello state; `liquify <path>` opens the repository panel and lets a
-root blob be opened in the editor;
+blob at any expanded depth be opened in the editor. C and C++ buffers add graph-query controls, an
+inline diagnostics layer, diagnostics/completion panel and daemon status line;
 `liquify --print-tree <path>` prints name, kind and mode without a display; `liquify --smoke [N]`
 scrolls and edits a generated 50,000-line buffer for N frames (default 30), prints latency metrics,
 and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`.

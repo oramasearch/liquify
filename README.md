@@ -17,7 +17,9 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > trees resolve declarations from closed files without retaining their full parse trees. Open
 > overlays retain error-tolerant incremental trees and answer node,
 > enclosing-definition, definition, reference, hover, completion and build-diagnostic queries;
-> an edit cancels their in-flight graph work.
+> an edit cancels their in-flight graph work. The editor renders graph diagnostics inline and in a
+> panel, exposes definition, hover and completion controls, and shows daemon drip triggers plus the
+> validation backlog in its status line.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).

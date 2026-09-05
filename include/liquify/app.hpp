@@ -19,6 +19,7 @@ namespace liquify {
 
 class RepositoryView;
 class EditorBuffer;
+class EditorGraph;
 class TextLayoutCache;
 class RetainedTextLayer;
 
@@ -50,6 +51,12 @@ private:
     void draw_editor();
     void render_editor();
     void open_editor(std::string path, std::string blob_id);
+    void save_editor();
+    void sync_editor_graph();
+    void request_definition();
+    void request_hover();
+    void request_completion();
+    void poll_editor_graph();
     void apply_change(std::size_t first_line, std::size_t erased_lines, std::size_t inserted_lines);
     void handle_key(std::uint32_t key, std::uint16_t modifiers);
     void handle_text(std::string_view text);
@@ -62,6 +69,7 @@ private:
     AppOptions options_;
     std::unique_ptr<RepositoryView> repository_;
     std::unique_ptr<EditorBuffer> editor_;
+    std::unique_ptr<EditorGraph> editor_graph_;
     std::unique_ptr<TextLayoutCache> layouts_;
     std::unique_ptr<RetainedTextLayer> text_layer_;
     SDL_Window* window_ = nullptr;
@@ -77,10 +85,14 @@ private:
     std::size_t visible_lines_{};
     bool editor_focused_{};
     bool editor_visible_{};
+    bool analysis_buffer_open_{};
+    std::string analysis_text_;
     std::string editor_status_;
     std::vector<double> frame_times_ms_;
     std::vector<double> typing_times_ms_;
     std::optional<std::chrono::steady_clock::time_point> typing_started_;
+    std::chrono::steady_clock::time_point next_status_refresh_{};
+    std::uint64_t definition_generation_{};
     float display_refresh_hz_{};
     bool initialized_ = false;
     bool quit_ = false;

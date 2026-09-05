@@ -172,6 +172,19 @@ auto EditorBuffer::cursor() const -> TextPosition {
     return cursor_;
 }
 
+auto EditorBuffer::byte_offset(TextPosition position) const -> std::size_t {
+    position = clamped(position);
+    auto offset = std::size_t{};
+    for (std::size_t line = 0; line < position.line; ++line) {
+        offset += lines_[line].size() + 1;
+    }
+    return offset + position.byte;
+}
+
+auto EditorBuffer::pending_drips() const -> std::uint64_t {
+    return pending_drips_;
+}
+
 auto EditorBuffer::selection() const -> std::optional<TextSelection> {
     if (!selection_anchor_ || *selection_anchor_ == cursor_) {
         return std::nullopt;
@@ -407,22 +420,28 @@ auto EditorBuffer::save() -> bool {
             [](std::filesystem::path path, std::string file, std::vector<std::byte> contents) {
                 auto opened = liquid::runtime::block_on(liquid::repository::open(std::move(path)));
                 if (!opened) {
-                    return error_message(opened.error());
+                    return std::pair{error_message(opened.error()), std::uint64_t{}};
                 }
                 auto written =
                     liquid::runtime::block_on(opened->write(std::move(file), std::move(contents)));
                 if (!written) {
-                    return error_message(written.error());
+                    return std::pair{error_message(written.error()), std::uint64_t{}};
                 }
-                return std::string{};
+                auto status = opened->status();
+                if (!status) {
+                    return std::pair{error_message(status.error()), std::uint64_t{}};
+                }
+                return std::pair{std::string{}, status->pending_drips};
             },
             *repository_path_,
             blob_path_,
             bytes(text()));
-        error_ = worker.get();
+        auto [error, pending_drips] = worker.get();
+        error_ = std::move(error);
         if (!error_.empty()) {
             return false;
         }
+        pending_drips_ = pending_drips;
         dirty_ = false;
         return true;
     } catch (const std::exception& error) {

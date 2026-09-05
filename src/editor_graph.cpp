@@ -212,6 +212,18 @@ EditorGraph::~EditorGraph() = default;
 void EditorGraph::open_buffer(std::filesystem::path path,
                               StubLanguage language,
                               std::string source) {
+    {
+        auto lock = std::lock_guard(impl_->mutex);
+        impl_->current.diagnostics.clear();
+        impl_->current.hover.reset();
+        impl_->current.completions.clear();
+        impl_->current.definition.reset();
+        impl_->current.diagnostics_generation = ++impl_->diagnostics_request;
+        impl_->current.hover_generation = ++impl_->hover_request;
+        impl_->current.completion_generation = ++impl_->completion_request;
+        impl_->current.definition_generation = ++impl_->definition_request;
+        impl_->last_edit = {};
+    }
     impl_->enqueue({[implementation = impl_.get(),
                      path = std::move(path),
                      language,
