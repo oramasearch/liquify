@@ -11,7 +11,7 @@ repository. Before starting it requests `daemon::build_plan(build_target{})`, wh
 configured actions, their dependency ordering and their validated hit state. The editor does not
 start the `liquid` executable and does not reconstruct action inputs. The returned `build_handle`
 is consumed as an awaitable event sequence. A save during a build is captured by the daemon; the
-next plan retains unchanged actions as hits.
+editor immediately requests a new plan; unchanged actions remain visible as hits in that plan.
 
 **Tests.** `repository::tests()` supplies the listed targets. The All tests control uses
 `repository::run_tests()` and each target's Run control passes the target name as its filter. A
@@ -50,6 +50,7 @@ liquify configures its vendored SDL3; it does not change the `liquid-linux-ci` i
 
 ```sh
 docker run --rm --privileged --device /dev/fuse \
+  --tmpfs /src/build-linux-liquify --tmpfs /src/modules/liquid/build-linux \
   -e CC=clang-19 -e CXX=clang++-19 \
   -v "$PWD":/src -w /src liquid-linux-ci bash -lc '
     apt-get update

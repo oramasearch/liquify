@@ -507,6 +507,7 @@ void App::save_editor() {
     if (!editor_) {
         return;
     }
+    const auto build_running = editor_graph_ && editor_graph_->snapshot().build_running;
     if (!editor_->save()) {
         editor_status_ = std::string(editor_->error());
         return;
@@ -515,6 +516,10 @@ void App::save_editor() {
     if (editor_graph_) {
         editor_graph_->note_saved_drip(editor_->pending_drips());
         editor_graph_->refresh_status();
+        if (build_running) {
+            editor_graph_->request_build();
+            editor_status_ = "saved as a drip; build replanned";
+        }
     }
 }
 
