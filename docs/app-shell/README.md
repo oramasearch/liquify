@@ -40,14 +40,15 @@ and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`.
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is `4199bf0`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
+`liquid::liquid`. The pin is `486716f`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
 distribution foundation, compact shallow repository checkpoints, the persisted demand-driven
 query graph from liquid #20, tree-diff and record-enumeration APIs, and the per-checkout daemon and
 cursor fan-out from liquid #21. It also includes liquid #65's registered frontend modules and
 per-definition C/C++ graph actions, liquid #181's scheduler and worker fleet, liquid #184's
 per-reference sync authorization, liquid #185's repository search index, and liquid #191's
-continuous clean-rebuild graph validation. Checkpoints written before the automerge-cpp adoption
-in liquid #136 do not load. liquid has its own Capy, Corosio, automerge-cpp and oramacore-cpp
+continuous clean-rebuild graph validation. It adds liquid #192's per-reference push outcomes and
+liquid #193's daemon build-event streams and test actions. Checkpoints written before the
+automerge-cpp adoption in liquid #136 do not load. liquid has its own Capy, Corosio, automerge-cpp and oramacore-cpp
 submodules, so
 checkouts and pin updates must initialize submodules recursively. The
 pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
