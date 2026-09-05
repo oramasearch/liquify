@@ -8,7 +8,7 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed interactive C/C++ analysis.**
+**Retained GPU editor with graph-backed interactive C/C++ analysis, build, test and deploy.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
 libliquid and produces a drip.
@@ -23,8 +23,8 @@ declarations from closed files without retaining full parse trees. Graph-backed 
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor
 surface renders those diagnostics inline and in a panel, exposes definition, hover and completion
-demands, and reports daemon drip triggers and the validation backlog. Next: inline build, test and
-deploy (liquify #6).
+demands, reports daemon drip triggers and the validation backlog, consumes daemon build events,
+runs tests as graph actions, and displays sync reference outcomes for deploy (liquify #6).
 
 ## Decisions — recorded
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -7,11 +8,47 @@
 #include <string>
 #include <vector>
 
+#include "liquid/build.hpp"
 #include "liquid/daemon.hpp"
 #include "liquid/graph.hpp"
+#include "liquid/sync.hpp"
 #include "liquify/interactive_analysis.hpp"
 
 namespace liquify {
+
+enum class BuildActionState : std::uint8_t {
+    queued,
+    running_local,
+    running_remote,
+    hit,
+    done,
+    failed,
+};
+
+struct BuildActionSnapshot {
+    std::string identity;
+    BuildActionState state{BuildActionState::queued};
+    std::string worker;
+    std::string scheduling_choice;
+    bool critical{};
+    std::vector<Diagnostic> diagnostics;
+};
+
+struct TestSnapshot {
+    std::string name;
+    bool passed{};
+    bool hit{};
+    std::string output;
+    std::chrono::milliseconds duration{};
+};
+
+struct DeploySnapshot {
+    bool running{};
+    std::string error;
+    std::uint64_t objects{};
+    std::uint64_t bytes{};
+    std::vector<liquid::sync_ref_outcome> references;
+};
 
 struct EditorGraphSnapshot {
     bool ready{};
@@ -31,6 +68,14 @@ struct EditorGraphSnapshot {
     std::uint64_t completion_generation{};
     std::uint64_t definition_generation{};
     double edit_to_diagnostic_ms{};
+    bool build_running{};
+    std::string build_result;
+    std::vector<BuildActionSnapshot> build_actions;
+    std::vector<liquid::critical_action> critical_path;
+    std::vector<liquid::test_target> tests;
+    std::vector<TestSnapshot> test_results;
+    std::vector<Diagnostic> build_diagnostics;
+    DeploySnapshot deploy;
 };
 
 class EditorGraph {
@@ -53,6 +98,12 @@ public:
     void request_hover(std::filesystem::path path, std::uint32_t byte);
     void request_completion(std::filesystem::path path, std::uint32_t byte);
     void request_definition(std::filesystem::path path, std::uint32_t byte);
+    void request_build(liquid::build_target target = {});
+    void request_tests(std::string filter = {});
+    void refresh_tests();
+    void request_deploy();
+    void publish_build_event(liquid::build_event event);
+    void publish_deploy_report(liquid::sync_report report);
     void note_saved_drip(std::uint64_t repository_pending_drips);
     void refresh_status();
 

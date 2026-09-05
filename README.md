@@ -5,7 +5,7 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: retained GPU editor with graph-backed interactive C/C++ analysis.**
+> **Status: retained GPU editor with graph-backed interactive C/C++ analysis, build, test and deploy.**
 > `liquify <path>` opens a liquid repository through the public coroutine API, renders its root
 > entries, loads nested trees on expansion, and opens blobs into an editable in-memory buffer;
 > save writes through libliquid as a drip. Unreadable repositories show liquid's error and make
@@ -16,7 +16,8 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > registered frontend modules with per-definition C/C++ actions, the scheduler and worker fleet,
 > authorized sync reference updates with per-reference outcomes, repository search, continuous
 > clean-rebuild validation, configured repository build plans, daemon build-event streams, test actions,
-> and the C/C++ stub-tree query. Stub
+> and the C/C++ stub-tree query. The editor consumes daemon build events for action state, critical
+> paths and diagnostics; it runs graph-backed tests and displays configured sync push outcomes. Stub
 > trees resolve declarations from closed files without retaining their full parse trees. Open
 > overlays retain error-tolerant incremental trees and answer node,
 > enclosing-definition, definition, reference, hover, completion and build-diagnostic queries;
@@ -26,7 +27,7 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
-> Next, per the bridge's action plan (Phase 4): inline build, test and deploy (liquify #6).
+> Inline build, test and deploy are available through liquid's graph actions and sync transport.
 
 ## Build and run
 

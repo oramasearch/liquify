@@ -73,7 +73,15 @@ Diagnostics are demanded after buffer open and every edit. The retained renderer
 underline at each source range, while the diagnostics panel lists severity, message and the
 measured edit-to-result duration. Selecting a diagnostic opens its blob and moves the cursor to its
 range. The build diagnostic producer is the `EditorGraph::publish_build_diagnostics` boundary;
-launching inline builds remains liquify #6.
+failed actions also publish their diagnostics from the daemon event stream directly to the retained
+line layer.
+
+## Build, test and deploy
+
+[`build.md`](build.md) describes the graph-backed panels. F7 requests the configured repository
+build through the in-process daemon, F8 runs registered graph tests, F9 pushes saved drips to the
+configured sync remote, and primary-modifier+P opens the corresponding command-palette entries.
+The status line shows active actions and the most recent result.
 
 The status line is formatted from `liquid::daemon_status`: the last workspace drip's invalidated
 paths, the sum of target cursor distances as the validation backlog, daemon availability and the

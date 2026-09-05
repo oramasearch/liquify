@@ -103,6 +103,63 @@ TEST(EditorGraph, PublishesOverlayQueriesAndRepositoryStatus) {
               std::string::npos);
 }
 
+TEST(EditorGraph, PresentsBuildEventsTestsAndRefusedReferences) {
+    TemporaryDirectory location;
+    auto repository = create_repository(location.path(), "int answer = 42;\n");
+    static_cast<void>(repository);
+    liquify::EditorGraph graph(location.path());
+    graph.wait_until_idle();
+
+    graph.open_buffer("main.cpp", liquify::StubLanguage::cpp, "int answer = 42;\n");
+    graph.publish_build_event({.kind = liquid::build_event_kind::action_queued, .sequence = 1});
+    graph.publish_build_event(
+        {.kind = liquid::build_event_kind::action_started,
+         .sequence = 2,
+         .execution = liquid::action_execution{liquid::action_execution_kind::remote, "worker-a"}});
+    graph.publish_build_event(
+        {.kind = liquid::build_event_kind::action_failed,
+         .sequence = 3,
+         .diagnostics = {{.file = "main.cpp",
+                          .line = 1,
+                          .column = 5,
+                          .severity = liquid::frontend_diagnostic_severity::error,
+                          .message = "expected expression"}}});
+    graph.publish_build_event(
+        {.kind = liquid::build_event_kind::test_result,
+         .sequence = 4,
+         .test = liquid::test_result{"alpha", liquid::test_status::passed, "", {}, false}});
+    graph.publish_build_event(
+        {.kind = liquid::build_event_kind::test_result,
+         .sequence = 5,
+         .test = liquid::test_result{"alpha", liquid::test_status::passed, "", {}, true}});
+    auto snapshot = graph.snapshot();
+    ASSERT_EQ(snapshot.test_results.size(), 1U);
+    EXPECT_TRUE(snapshot.test_results.front().hit);
+    graph.publish_build_event(
+        {.kind = liquid::build_event_kind::test_result,
+         .sequence = 6,
+         .test = liquid::test_result{"alpha", liquid::test_status::passed, "", {}, false}});
+    graph.publish_deploy_report(
+        {.sent = {.objects = 3, .bytes = 96},
+         .references = {{"main", liquid::sync_ref_outcome_kind::refused, "protected reference"},
+                        {"release", liquid::sync_ref_outcome_kind::applied, ""}}});
+
+    snapshot = graph.snapshot();
+    ASSERT_EQ(snapshot.build_actions.size(), 1U);
+    EXPECT_EQ(snapshot.build_actions.front().state, liquify::BuildActionState::failed);
+    EXPECT_EQ(snapshot.build_actions.front().worker, "worker-a");
+    ASSERT_EQ(snapshot.build_diagnostics.size(), 1U);
+    EXPECT_EQ(snapshot.build_diagnostics.front().location.path, "main.cpp");
+    EXPECT_EQ(snapshot.build_diagnostics.front().location.range.start_line, 0U);
+    EXPECT_FALSE(snapshot.test_results.front().hit);
+    ASSERT_EQ(snapshot.deploy.references.size(), 2U);
+    EXPECT_EQ(snapshot.deploy.references.front().outcome,
+              liquid::sync_ref_outcome_kind::refused);
+    EXPECT_EQ(snapshot.deploy.references.front().reason, "protected reference");
+    EXPECT_EQ(snapshot.deploy.objects, 3U);
+    EXPECT_EQ(snapshot.deploy.bytes, 96U);
+}
+
 #ifndef _WIN32
 TEST(EditorGraph, AttachesWhenTheDaemonAlreadyOwnsTheCheckout) {
     TemporaryDirectory location;
