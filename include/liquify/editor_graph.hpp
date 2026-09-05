@@ -70,6 +70,8 @@ struct EditorGraphSnapshot {
     double edit_to_diagnostic_ms{};
     bool build_running{};
     std::string build_result;
+    std::chrono::milliseconds build_first_action{};
+    std::chrono::milliseconds build_finished{};
     std::vector<BuildActionSnapshot> build_actions;
     std::vector<liquid::critical_action> critical_path;
     std::vector<liquid::test_target> tests;

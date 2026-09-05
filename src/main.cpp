@@ -1,5 +1,6 @@
 #include <charconv>
 #include <filesystem>
+#include <optional>
 #include <print>
 #include <string>
 #include <string_view>
@@ -7,6 +8,7 @@
 
 #include "liquid/liquid.hpp"
 #include "liquify/app.hpp"
+#include "liquify/measure.hpp"
 #include "liquify/version.hpp"
 #include "repository_view.hpp"
 
@@ -16,6 +18,8 @@ void usage() {
     std::println("  liquify [PATH]              open the IDE, optionally on a liquid repository");
     std::println("  liquify --print-tree PATH   print a repository root tree and exit");
     std::println("  liquify --smoke [N]         scroll 50,000 lines for N frames and exit");
+    std::println("  liquify --measure-build PATH [--target TARGET]");
+    std::println("                              measure configured build and one test without a window");
     std::println("  liquify version             print the version");
 }
 
@@ -44,6 +48,8 @@ auto print_tree(const std::filesystem::path& path) -> int {
 int main(int argc, char** argv) {
     liquify::AppOptions opts;
     bool should_print_tree = false;
+    std::optional<std::filesystem::path> measure_repository;
+    std::string measure_target;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
         if (arg == "version" || arg == "--version") {
@@ -69,6 +75,22 @@ int main(int argc, char** argv) {
                     ++i;
                 }
             }
+            continue;
+        }
+        if (arg == "--measure-build") {
+            if (i + 1 == argc || measure_repository) {
+                std::println(stderr, "liquify: --measure-build requires one repository path");
+                return 2;
+            }
+            measure_repository = std::filesystem::path(argv[++i]);
+            continue;
+        }
+        if (arg == "--target") {
+            if (i + 1 == argc || !measure_target.empty()) {
+                std::println(stderr, "liquify: --target requires one build target");
+                return 2;
+            }
+            measure_target = argv[++i];
             continue;
         }
         if (arg == "--print-tree") {
@@ -97,6 +119,17 @@ int main(int argc, char** argv) {
     }
     if (opts.max_frames > 0 && opts.repository_path) {
         std::println(stderr, "liquify: --smoke does not open a repository");
+        return 2;
+    }
+    if (measure_repository) {
+        if (opts.max_frames > 0 || opts.repository_path || should_print_tree) {
+            std::println(stderr, "liquify: --measure-build cannot be combined with another mode");
+            return 2;
+        }
+        return liquify::measure_build(*measure_repository, std::move(measure_target));
+    }
+    if (!measure_target.empty()) {
+        std::println(stderr, "liquify: --target requires --measure-build");
         return 2;
     }
     if (should_print_tree) {

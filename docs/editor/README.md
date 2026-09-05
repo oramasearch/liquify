@@ -88,6 +88,12 @@ paths, the sum of target cursor distances as the validation backlog, daemon avai
 pending repository drip count returned by the last editor save. Recursive repository navigation
 loads directory trees lazily as recorded in [`../app-shell/README.md`](../app-shell/README.md).
 
+## Headless build measurement
+
+[`build.md`](build.md#headless-measurement) records the privileged `liquid-linux-ci` command used
+to measure a wrapped liquid checkout without a macFUSE installation. The result below is filled
+from that command's JSON output and includes the container load average beside each latency.
+
 ## Phase 4 exit measurement
 
 `liquify-editor-graph-bench` imported liquid's own checkout into a fresh libliquid repository. It

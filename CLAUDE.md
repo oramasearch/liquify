@@ -25,6 +25,8 @@ stubs or compiler symbol records, and read build diagnostics by translation unit
 surface renders those diagnostics inline and in a panel, exposes definition, hover and completion
 demands, reports daemon drip triggers and the validation backlog, consumes daemon build events,
 runs tests as graph actions, and displays sync reference outcomes for deploy (liquify #6).
+`liquify --measure-build <repository> [--target <target>]` drives those build and test controller
+paths without a window and writes JSON timing and load-average records for a wrapped build.
 
 ## Decisions — recorded
 

@@ -265,8 +265,11 @@ struct EditorGraph::Impl {
 
     void reset_build() {
         auto lock = std::lock_guard(mutex);
+        build_requested_at = std::chrono::steady_clock::now();
         current.build_running = true;
         current.build_result.clear();
+        current.build_first_action = {};
+        current.build_finished = {};
         current.build_actions.clear();
         current.critical_path.clear();
         current.test_results.clear();
@@ -310,6 +313,10 @@ struct EditorGraph::Impl {
             return;
         }
         if (event.kind == liquid::build_event_kind::action_started) {
+            if (current.build_first_action == std::chrono::milliseconds{}) {
+                current.build_first_action = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - build_requested_at);
+            }
             if (auto* action = find_action()) {
                 if (event.action) {
                     action->identity = action_identity(event.action, event.sequence);
@@ -388,6 +395,8 @@ struct EditorGraph::Impl {
         }
         if (event.kind == liquid::build_event_kind::build_finished && event.summary) {
             current.build_running = false;
+            current.build_finished = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - build_requested_at);
             current.build_result = std::format("{}: actions={} hits={} failures={}",
                                                event.summary->exit == 0 ? "passed" : "failed",
                                                event.summary->actions,
@@ -513,6 +522,7 @@ struct EditorGraph::Impl {
     std::uint64_t completion_request{};
     std::uint64_t definition_request{};
     std::chrono::steady_clock::time_point last_edit{};
+    std::chrono::steady_clock::time_point build_requested_at{};
     bool initialized{};
     bool daemon_hosted{};
     bool draining{};

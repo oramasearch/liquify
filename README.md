@@ -28,6 +28,8 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
 > Inline build, test and deploy are available through liquid's graph actions and sync transport.
+> `liquify --measure-build <repository> [--target <target>]` runs the build and test panel
+> controller headlessly and writes JSON timing and load-average records for a wrapped repository.
 
 ## Build and run
 
@@ -51,6 +53,7 @@ ctest --test-dir build
 ./build/liquify <path>     # open a liquid repository and render its root tree
 ./build/liquify --print-tree <path>
 ./build/liquify --smoke    # scroll/edit 50,000 lines for 30 frames, report latency, exit 0
+./build/liquify --measure-build modules/liquid # headless configured-build and one-test timing
 ./build/liquify version
 ```
 
@@ -66,7 +69,7 @@ ctest --test-dir build
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
 | `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |
 | `include/liquify/editor_graph.hpp`, `src/editor_graph.cpp` | background editor-query runtime, daemon host/attach lifetime, asynchronous query snapshots and status data |
-| `src/main.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, `--help` |
+| `src/main.cpp`, `src/measure.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, headless `--measure-build PATH [--target TARGET]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 | `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |
