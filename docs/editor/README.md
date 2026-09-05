@@ -1,5 +1,8 @@
 # The editor surface
 
+[`ai.md`](ai.md) records the optional assistant, its offline switch guarantee, graph-derived
+inspectable context, provider contract, keyboard commands, and accept-only edit path.
+
 **Decision.** The editor buffer is a retained GPU text layer inside Dear ImGui (bridge decision
 15). ImGui owns the window, repository panel and controls. `src/app.cpp` uses the SDL renderer
 directly for buffer text, selection and cursor; no other translation unit includes SDL or ImGui.
@@ -100,6 +103,24 @@ smoke: lines=50000 frames=3000 visible_lines=68 avg_frame_ms=16.821 p95_frame_ms
 The lazy root open remains independent of repository size. Average typing latency changed from
 16.925 ms in the baseline above to 16.974 ms with the graph integration, a 0.049 ms difference;
 both measurements present an edit in one display frame on average.
+
+## Assistant context measurement
+
+`liquify-ai-context-bench` loads liquid's C and C++ declarations into `InteractiveAnalysis`, opens
+`src/repository/repository_impl.cpp`, selects its `repository` definition, resolves 20 referenced
+definitions through the graph, and assembles the structured context 1,000 times. The comparison
+uses the source file bytes as the naive whole-file context. Build benchmarks with
+`-DLIQUIFY_BUILD_BENCH=ON`.
+
+Measured on 2026-09-05 on the same machine as the editor measurements above:
+
+```text
+$ ./build/liquify-ai-context-bench modules/liquid build/ai-context-state
+ai context: definition=repository references=20 bytes=3215 whole_file_bytes=275451 percent_of_whole_file=1.16718 assembly_us=69.522
+```
+
+The graph context is 1.17% of the naive file payload and names every omission when a configured
+budget excludes a fact.
 
 ## Verify
 

@@ -30,12 +30,16 @@ starts empty and CMake fetches every dependency before building.
 | Runner | Compiler and display | Verification |
 |---|---|---|
 | `ubuntu-24.04` | Clang 19 from apt.llvm.org with GCC 14's standard library headers; OpenSSL, FUSE3, SDL's static X11 and Wayland build dependencies; Xvfb | configure, build, `ctest`, `liquify version`, `xvfb-run -a ./build/liquify --smoke 30` |
-| `macos-15` | Homebrew's current `llvm` and `openssl@3`; native runner display | configure, build, `ctest`, `liquify version`, `./build/liquify --smoke 30` |
+| `macos-15` | Homebrew's current `llvm` and `openssl@3`; native runner display | configure, build, `ctest`, `liquify version`, AI-off smoke with continuous `lsof` TCP inspection |
 | `windows-2022` | Chocolatey's newest available LLVM and OpenSSL after entering the Visual Studio x64 developer environment; native runner display | configure, build, `ctest`, `liquify version`, `liquify --smoke 30` |
 
 The workflow prints the selected compiler version on every runner. Windows uses `clang-cl` with
 the Visual Studio standard library and SDK so C++26 `<print>` is checked with the newest LLVM
 package available to that image.
+
+The macOS smoke uses the default-off configuration and inspects the process for owned TCP sockets
+until it exits. Any socket fails the job. The connection-counting unit test provides the same
+invariant without relying on process inspection and runs on every platform.
 
 ## Local equivalent
 

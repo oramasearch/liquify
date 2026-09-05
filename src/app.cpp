@@ -14,11 +14,14 @@
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
+#include "misc/cpp/imgui_stdlib.h"
 #include <SDL3/SDL.h>
 
 #include "editor_buffer.hpp"
 #include "liquid/hash.hpp"
 #include "liquid/liquid.hpp"
+#include "liquify/ai_config.hpp"
+#include "liquify/assistant.hpp"
 #include "liquify/editor_graph.hpp"
 #include "liquify/stub_tree.hpp"
 #include "liquify/version.hpp"
@@ -366,6 +369,20 @@ App::App(AppOptions options) : options_(std::move(options)) {
             std::make_unique<RepositoryView>(RepositoryView::open(*options_.repository_path));
         if (repository_->error().empty()) {
             editor_graph_ = std::make_unique<EditorGraph>(*options_.repository_path);
+            auto config = load_ai_config(*options_.repository_path);
+            if (!config) {
+                editor_status_ = config.error().message;
+            } else {
+                ai_context_bytes_ = config->context_bytes;
+                auto key = ConfiguredSecret{};
+                if (config->enabled) {
+                    key = anthropic_api_key();
+                }
+                const auto secret = key.value;
+                assistant_ = std::make_unique<Assistant>(*config, key.configured, [secret] {
+                    return std::make_unique<AnthropicProvider>(secret);
+                });
+            }
         }
     }
     if (options_.smoke) {
@@ -540,6 +557,111 @@ void App::request_completion() {
     }
 }
 
+void App::request_assistant_context(std::optional<AssistantAction> action) {
+    if (!assistant_ || !editor_graph_ || !analysis_buffer_open_ || !editor_) {
+        return;
+    }
+    if (action && !assistant_->snapshot().enabled) {
+        editor_status_ = "AI is off";
+        return;
+    }
+    const auto cursor = editor_->cursor();
+    const auto cursor_byte = editor_->byte_offset(cursor);
+    if (cursor_byte > std::numeric_limits<std::uint32_t>::max() ||
+        editor_->text().size() > std::numeric_limits<std::uint32_t>::max()) {
+        editor_status_ = "assistant context exceeds the supported byte range";
+        return;
+    }
+    auto selection_range = std::optional<SourceRange>{};
+    auto selected_source = std::string{};
+    if (const auto selection = editor_->selection()) {
+        const auto start = editor_->byte_offset(selection->begin);
+        const auto end = editor_->byte_offset(selection->end);
+        selection_range = SourceRange{static_cast<std::uint32_t>(start),
+                                      static_cast<std::uint32_t>(end),
+                                      static_cast<std::uint32_t>(selection->begin.line),
+                                      static_cast<std::uint32_t>(selection->begin.byte),
+                                      static_cast<std::uint32_t>(selection->end.line),
+                                      static_cast<std::uint32_t>(selection->end.byte)};
+        selected_source = editor_->text().substr(start, end - start);
+    }
+    const auto snapshot = editor_graph_->snapshot();
+    ai_context_generation_ = snapshot.ai_context_generation;
+    pending_assistant_action_ = action;
+    pending_assistant_prompt_ = assistant_prompt_;
+    if (action == AssistantAction::explain_diagnostic && pending_assistant_prompt_.empty()) {
+        pending_assistant_prompt_ = "Explain the diagnostic at the cursor.";
+    } else if (action == AssistantAction::propose_edit && pending_assistant_prompt_.empty()) {
+        pending_assistant_prompt_ = "Propose a focused correction.";
+    }
+    context_preview_open_ = !action.has_value();
+    editor_graph_->request_ai_context(std::filesystem::path(editor_->display_path()),
+                                      static_cast<std::uint32_t>(cursor_byte),
+                                      selection_range,
+                                      std::move(selected_source),
+                                      editor_->text().size(),
+                                      ai_context_bytes_);
+    editor_status_ = "building graph context";
+}
+
+void App::accept_assistant_edit() {
+    if (!assistant_ || !editor_ || !options_.repository_path) {
+        return;
+    }
+    assistant_->accept();
+    const auto accepted = assistant_->take_accepted();
+    if (!accepted) {
+        return;
+    }
+    const auto change = editor_->apply_edit(*accepted);
+    if (!change) {
+        editor_status_ = "assistant edit no longer matches this buffer";
+        assistant_->reject();
+        return;
+    }
+    apply_change(change->first_line, change->erased_lines, change->inserted_lines);
+    save_editor();
+    if (editor_->dirty()) {
+        return;
+    }
+    const auto recorded = record_assisted_edit(
+        *options_.repository_path, std::filesystem::path(editor_->display_path()), *accepted);
+    if (!recorded) {
+        editor_status_ = recorded.error().message;
+    } else {
+        editor_status_ = "accepted assisted edit as one drip";
+    }
+}
+
+void App::toggle_assistant() {
+    if (!assistant_ || !options_.repository_path) {
+        return;
+    }
+    const auto enable = !assistant_->snapshot().enabled;
+    const auto saved = set_repository_ai_enabled(*options_.repository_path, enable);
+    if (!saved) {
+        editor_status_ = saved.error().message;
+        return;
+    }
+    if (!enable) {
+        assistant_->set_enabled(false);
+        editor_status_ = "AI off";
+        return;
+    }
+    auto config = load_ai_config(*options_.repository_path);
+    if (!config) {
+        editor_status_ = config.error().message;
+        return;
+    }
+    config->enabled = true;
+    ai_context_bytes_ = config->context_bytes;
+    auto key = anthropic_api_key();
+    const auto secret = key.value;
+    assistant_ = std::make_unique<Assistant>(
+        *config, key.configured, [secret] { return std::make_unique<AnthropicProvider>(secret); });
+    editor_status_ = key.configured ? "AI on" : "AI on; key not configured";
+}
+
 void App::poll_editor_graph() {
     if (!editor_graph_) {
         return;
@@ -550,20 +672,33 @@ void App::poll_editor_graph() {
         next_status_refresh_ = now + std::chrono::milliseconds{500};
     }
     const auto snapshot = editor_graph_->snapshot();
-    if (snapshot.definition_generation == definition_generation_) {
-        return;
+    if (snapshot.ai_context_generation != ai_context_generation_) {
+        ai_context_generation_ = snapshot.ai_context_generation;
+        if (snapshot.ai_context) {
+            context_preview_ = snapshot.ai_context->text;
+            context_omissions_ = snapshot.ai_context->omissions;
+            if (pending_assistant_action_) {
+                assistant_->submit(*pending_assistant_action_,
+                                   std::move(pending_assistant_prompt_),
+                                   *snapshot.ai_context,
+                                   snapshot.ai_context_focus);
+                pending_assistant_action_.reset();
+            }
+            editor_status_.clear();
+        }
     }
-    definition_generation_ = snapshot.definition_generation;
-    if (!snapshot.definition) {
-        return;
+    if (snapshot.definition_generation != definition_generation_) {
+        definition_generation_ = snapshot.definition_generation;
+        if (snapshot.definition) {
+            const auto target = snapshot.definition->path.generic_string();
+            if (!editor_ || editor_->display_path() != target) {
+                open_editor(target, "graph:" + target);
+            }
+            const auto& range = snapshot.definition->declaration.range;
+            editor_->set_cursor({range.start_line, range.start_column});
+            ensure_cursor_visible();
+        }
     }
-    const auto target = snapshot.definition->path.generic_string();
-    if (!editor_ || editor_->display_path() != target) {
-        open_editor(target, "graph:" + target);
-    }
-    const auto& range = snapshot.definition->declaration.range;
-    editor_->set_cursor({range.start_line, range.start_column});
-    ensure_cursor_visible();
 }
 
 void App::handle_text(std::string_view text) {
@@ -582,6 +717,40 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     }
     const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
     const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+    if (primary && shift && key == SDLK_P) {
+        command_palette_open_ = true;
+        return;
+    }
+    if (primary && shift && key == SDLK_L) {
+        toggle_assistant();
+        return;
+    }
+    if (primary && shift && key == SDLK_A) {
+        request_assistant_context(AssistantAction::ask);
+        return;
+    }
+    if (primary && shift && key == SDLK_E) {
+        request_assistant_context(AssistantAction::explain_diagnostic);
+        return;
+    }
+    if (primary && shift && key == SDLK_I) {
+        request_assistant_context(AssistantAction::propose_edit);
+        return;
+    }
+    if (primary && shift && key == SDLK_C) {
+        request_assistant_context(std::nullopt);
+        return;
+    }
+    if (primary && (key == SDLK_RETURN || key == SDLK_KP_ENTER)) {
+        accept_assistant_edit();
+        return;
+    }
+    if (primary && key == SDLK_BACKSPACE) {
+        if (assistant_) {
+            assistant_->reject();
+        }
+        return;
+    }
     if (primary && key == SDLK_S) {
         save_editor();
         return;
@@ -756,6 +925,110 @@ void App::draw_repository_entries(std::string_view directory) {
     }
 }
 
+void App::draw_assistant() {
+    if (!assistant_) {
+        return;
+    }
+    const auto snapshot = assistant_->snapshot();
+    ImGui::Text("Assistant: %s", snapshot.status.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("What will be sent")) {
+        request_assistant_context(std::nullopt);
+    }
+    ImGui::InputTextWithHint(
+        "##assistant-prompt", "Ask about the selection or current definition", &assistant_prompt_);
+    ImGui::BeginDisabled(!snapshot.enabled || snapshot.running);
+    if (ImGui::Button("Ask")) {
+        request_assistant_context(AssistantAction::ask);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Explain diagnostic")) {
+        request_assistant_context(AssistantAction::explain_diagnostic);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Propose edit")) {
+        request_assistant_context(AssistantAction::propose_edit);
+    }
+    ImGui::EndDisabled();
+    if (!snapshot.enabled) {
+        ImGui::TextUnformatted("AI is off. No provider exists and no connection can be opened.");
+    } else if (!snapshot.key_configured) {
+        ImGui::TextUnformatted("Anthropic key: not configured");
+    } else {
+        ImGui::TextUnformatted("Anthropic key: configured");
+    }
+    if (snapshot.refusal) {
+        ImGui::TextColored(
+            ImVec4(0.65F, 0.30F, 0.05F, 1.0F), "Refusal: %s", snapshot.response.c_str());
+    } else if (!snapshot.response.empty()) {
+        ImGui::TextWrapped("%s", snapshot.response.c_str());
+    }
+    if (snapshot.proposal) {
+        ImGui::Separator();
+        ImGui::Text("Proposed replacement for bytes %u..%u",
+                    snapshot.proposal->start_byte,
+                    snapshot.proposal->old_end_byte);
+        ImGui::TextWrapped("%s", snapshot.proposal->text.c_str());
+        if (ImGui::Button("Accept edit")) {
+            accept_assistant_edit();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Reject edit")) {
+            assistant_->reject();
+        }
+    }
+    if (context_preview_open_) {
+        ImGui::OpenPopup("What will be sent");
+        context_preview_open_ = false;
+    }
+    if (ImGui::BeginPopupModal("What will be sent", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Structured graph context: %zu bytes", context_preview_.size());
+        if (!context_omissions_.empty()) {
+            ImGui::TextWrapped("Omissions: %s", context_omissions_.front().c_str());
+        }
+        ImGui::InputTextMultiline("##context-preview",
+                                  &context_preview_,
+                                  ImVec2(720.0F, 420.0F),
+                                  ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::Button("Close")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void App::draw_command_palette() {
+    if (command_palette_open_) {
+        ImGui::OpenPopup("Command palette");
+        command_palette_open_ = false;
+    }
+    if (!ImGui::BeginPopupModal("Command palette", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+    const auto command = [this](const char* label, auto invoke) {
+        if (ImGui::Selectable(label)) {
+            invoke();
+            ImGui::CloseCurrentPopup();
+        }
+    };
+    command("Assistant: Ask (Primary+Shift+A)",
+            [this] { request_assistant_context(AssistantAction::ask); });
+    command("Assistant: Explain diagnostic (Primary+Shift+E)",
+            [this] { request_assistant_context(AssistantAction::explain_diagnostic); });
+    command("Assistant: Propose edit (Primary+Shift+I)",
+            [this] { request_assistant_context(AssistantAction::propose_edit); });
+    command("Assistant: Accept edit (Primary+Enter)", [this] { accept_assistant_edit(); });
+    command("Assistant: Reject edit (Primary+Backspace)", [this] {
+        if (assistant_) {
+            assistant_->reject();
+        }
+    });
+    command("Assistant: Toggle (Primary+Shift+L)", [this] { toggle_assistant(); });
+    command("Assistant: What will be sent (Primary+Shift+C)",
+            [this] { request_assistant_context(std::nullopt); });
+    ImGui::EndPopup();
+}
+
 void App::draw_editor() {
     const auto path = std::string(editor_->display_path());
     const auto graph_snapshot = editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
@@ -771,6 +1044,13 @@ void App::draw_editor() {
     if (ImGui::Button("Save")) {
         save_editor();
         editor_focused_ = true;
+    }
+    if (assistant_) {
+        ImGui::SameLine();
+        const auto enabled = assistant_->snapshot().enabled;
+        if (ImGui::Button(enabled ? "AI: on" : "AI: off")) {
+            toggle_assistant();
+        }
     }
     if (analysis_buffer_open_) {
         ImGui::SameLine();
@@ -811,7 +1091,7 @@ void App::draw_editor() {
 
     const auto available = ImGui::GetContentRegionAvail();
     const auto panel_height =
-        editor_graph_ ? std::max(0.0F, std::min(140.0F, available.y * 0.30F)) : 0.0F;
+        editor_graph_ ? std::max(0.0F, std::min(320.0F, available.y * 0.45F)) : 0.0F;
     const auto size =
         ImVec2(std::max(available.x, 1.0F), std::max(available.y - panel_height, 1.0F));
     const auto position = ImGui::GetCursorScreenPos();
@@ -858,6 +1138,8 @@ void App::draw_editor() {
     ImGui::BeginChild("diagnostics-panel",
                       ImVec2(std::max(available.x, 1.0F), panel_height),
                       ImGuiChildFlags_Border);
+    draw_assistant();
+    ImGui::Separator();
     ImGui::Text("Diagnostics (%zu)", graph_snapshot.diagnostics.size());
     if (graph_snapshot.edit_to_diagnostic_ms > 0.0) {
         ImGui::SameLine();
@@ -922,6 +1204,7 @@ void App::draw_contents() {
         ImGui::TextUnformatted("Select a file from the repository tree.");
     }
     ImGui::EndGroup();
+    draw_command_palette();
 }
 
 void App::render_editor() {

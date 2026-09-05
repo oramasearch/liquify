@@ -125,7 +125,19 @@ jobs:
           cmake --build build
           ctest --test-dir build --output-on-failure
           ./build/liquify version
-          ./build/liquify --smoke 30
+          ./build/liquify --smoke 300 &
+          smoke_pid=$!
+          while kill -0 "$smoke_pid" 2>/dev/null; do
+            connections="$(lsof -a -p "$smoke_pid" -iTCP -nP 2>/dev/null || true)"
+            if [[ -n "$connections" ]]; then
+              echo "$connections"
+              echo "AI-off smoke opened a TCP connection" >&2
+              kill "$smoke_pid" || true
+              wait "$smoke_pid" || true
+              exit 1
+            fi
+          done
+          wait "$smoke_pid"
 
       - name: Configure, build, and test on Windows
         if: runner.os == 'Windows'

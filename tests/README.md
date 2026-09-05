@@ -31,3 +31,10 @@ tree-sitter changed-range reuse, cancellation during typing and a successful ans
 attaches when a daemon already owns the checkout, serializes overlay mutations, publishes
 diagnostics and cursor-query results, records edit-to-diagnostic latency and formats the validation
 backlog from daemon status.
+
+`test_ai.cpp` verifies the default-off repository and global setting, zero provider constructions
+and zero connections against a counting network double, graph-derived context with a byte budget
+and explicit omissions, and the Anthropic Messages request over an in-process TLS server. Its SSE
+cases cover a normal streamed answer, a refusal stop reason, and a connection ending mid-stream.
+It also proves a proposed replacement leaves repository content unchanged until acceptance, then
+creates exactly one drip and a local assisted-edit record without recording the prompt.
