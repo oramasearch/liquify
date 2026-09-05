@@ -12,6 +12,12 @@ secret, a run fails during checkout, before the build commands. The root build k
 `LIQUID_BUILD_CLI` and `LIQUID_BUILD_TESTS` off and links the library target, which exercises the
 same library-only submodule configuration as a local build.
 
+liquify has two additional permitted private submodules: `modules/corosio` at
+`9f8e865a7b5728a4093e9345456bc077194dbeff` and `modules/http` at
+`af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4`. They pin the assistant transport independently of
+liquid. The pins match liquid's nested copies, so the single Boost target instances created while
+configuring libliquid also compile the provider. No other liquify source contains network code.
+
 **Dependencies.** SDL3 3.2, Dear ImGui 1.91.5, and GoogleTest remain CMake `FetchContent`
 dependencies. liquid adds nested Capy, Corosio and automerge-cpp submodules; its exported target
 links Capy publicly. OpenSSL supplies Corosio's TLS implementation, zlib supplies automerge-cpp's
