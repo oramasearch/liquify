@@ -40,20 +40,22 @@ and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`.
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is `4a7306e`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
+`liquid::liquid`. The pin is `4199bf0`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
 distribution foundation, compact shallow repository checkpoints, the persisted demand-driven
 query graph from liquid #20, tree-diff and record-enumeration APIs, and the per-checkout daemon and
 cursor fan-out from liquid #21. It also includes liquid #65's registered frontend modules and
-per-definition C/C++ graph actions. Checkpoints written before the automerge-cpp adoption in
-liquid #136 do not load. liquid has its own Capy, Corosio and automerge-cpp submodules, so
+per-definition C/C++ graph actions, liquid #181's scheduler and worker fleet, liquid #184's
+per-reference sync authorization, liquid #185's repository search index, and liquid #191's
+continuous clean-rebuild graph validation. Checkpoints written before the automerge-cpp adoption
+in liquid #136 do not load. liquid has its own Capy, Corosio, automerge-cpp and oramacore-cpp
+submodules, so
 checkouts and pin updates must initialize submodules recursively. The
 pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
 the liquid change it takes:
 
 ```sh
 git -C modules/liquid fetch origin && git -C modules/liquid checkout <sha>
-git add modules/liquid
-git submodule update --init --recursive
+git -C modules/liquid submodule update --init --recursive
 cmake --build build && ./build/liquify --smoke && ctest --test-dir build
 git add modules/liquid && git commit -m "Bump liquid to <sha>: <why>"
 ```
