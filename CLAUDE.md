@@ -17,7 +17,8 @@ repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50
 reports frame and typing latency, and exits 0. liquid is pinned at `modules/liquid` through its
 persisted demand-driven query graph, scheduler and worker fleet, authorized sync reference
 updates with per-reference outcomes, repository search, continuous clean-rebuild validation,
-daemon build-event streams and test actions. C and C++ stubs are graph query values that resolve
+configured repository build plans, daemon build-event streams and test actions. C and C++ stubs are
+graph query values that resolve
 declarations from closed files without retaining full parse trees. Graph-backed editor queries run
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor

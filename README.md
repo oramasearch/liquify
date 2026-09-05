@@ -15,7 +15,8 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > persisted demand-driven query graph, tree-diff and record-enumeration APIs, per-checkout daemon,
 > registered frontend modules with per-definition C/C++ actions, the scheduler and worker fleet,
 > authorized sync reference updates with per-reference outcomes, repository search, continuous
-> clean-rebuild validation, daemon build-event streams, test actions, and the C/C++ stub-tree query. Stub
+> clean-rebuild validation, configured repository build plans, daemon build-event streams, test actions,
+> and the C/C++ stub-tree query. Stub
 > trees resolve declarations from closed files without retaining their full parse trees. Open
 > overlays retain error-tolerant incremental trees and answer node,
 > enclosing-definition, definition, reference, hover, completion and build-diagnostic queries;
