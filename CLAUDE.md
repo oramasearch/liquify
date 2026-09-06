@@ -8,7 +8,7 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed interactive C/C++ analysis.**
+**Retained GPU editor with graph-backed interactive C/C++ analysis and optional AI.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
 libliquid and produces a drip.
@@ -20,8 +20,10 @@ declarations from closed files without retaining full parse trees. Graph-backed 
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor
 surface renders those diagnostics inline and in a panel, exposes definition, hover and completion
-demands, and reports daemon drip triggers and the validation backlog. Next: inline build, test and
-deploy (liquify #6).
+demands, and reports daemon drip triggers and the validation backlog. A default-off assistant
+assembles inspectable context from the same graph, streams through a pinned provider transport,
+and previews edits until the user accepts one normal drip. When off it constructs no provider and
+opens no connection. Next: inline build, test and deploy (liquify #6).
 
 ## Decisions — recorded
 
@@ -43,6 +45,10 @@ deploy (liquify #6).
 6. **The editor buffer is a retained GPU text layer inside Dear ImGui** (Steve, 2026-09-05).
    SDL3 and ImGui remain the shell and panel toolkit; the buffer owns a glyph atlas and cached
    per-blob line layout. This records bridge decision 15 and closes liquify #2's question.
+7. **AI is a first-class but optional editor surface and is off by default** (2026-09-05).
+   Its visible repository switch is the network boundary: off constructs no provider and opens no
+   socket. Context comes from editor, symbol, build and dependency graph facts, is byte-budgeted,
+   and is shown before sending. Proposed edits require user acceptance and produce one user drip.
 
 ## Rules
 
@@ -58,6 +64,11 @@ deploy (liquify #6).
   unit tests runnable without a display.
 - `modules/liquid` is a pin, not a working copy: never commit liquid changes from inside
   liquify. Change liquid in its own repo, push, then bump the pin here.
+- `src/ai_provider.cpp` is the only liquify network implementation. It uses the separately pinned
+  Corosio and Boost.HTTP submodules on liquid's Capy runtime context. Do not add another network
+  client or bypass the AI switch.
+- Credentials come from the OS credential store or `ANTHROPIC_API_KEY`. Never persist, log, or
+  display their value; UI state is only configured or not configured.
 
 ## Open decisions
 

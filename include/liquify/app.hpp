@@ -17,6 +17,8 @@ struct SDL_Renderer;
 // includes them.
 namespace liquify {
 
+class Assistant;
+enum class AssistantAction : std::uint8_t;
 class RepositoryView;
 class EditorBuffer;
 class EditorGraph;
@@ -56,6 +58,11 @@ private:
     void request_definition();
     void request_hover();
     void request_completion();
+    void request_assistant_context(std::optional<AssistantAction> action);
+    void accept_assistant_edit();
+    void toggle_assistant();
+    void draw_assistant();
+    void draw_command_palette();
     void poll_editor_graph();
     void apply_change(std::size_t first_line, std::size_t erased_lines, std::size_t inserted_lines);
     void handle_key(std::uint32_t key, std::uint16_t modifiers);
@@ -70,6 +77,7 @@ private:
     std::unique_ptr<RepositoryView> repository_;
     std::unique_ptr<EditorBuffer> editor_;
     std::unique_ptr<EditorGraph> editor_graph_;
+    std::unique_ptr<Assistant> assistant_;
     std::unique_ptr<TextLayoutCache> layouts_;
     std::unique_ptr<RetainedTextLayer> text_layer_;
     SDL_Window* window_ = nullptr;
@@ -88,13 +96,22 @@ private:
     bool analysis_buffer_open_{};
     std::string analysis_text_;
     std::string editor_status_;
+    std::string assistant_prompt_;
+    std::optional<AssistantAction> pending_assistant_action_;
+    std::string pending_assistant_prompt_;
+    std::string context_preview_;
+    std::vector<std::string> context_omissions_;
     std::vector<double> frame_times_ms_;
     std::vector<double> typing_times_ms_;
     std::optional<std::chrono::steady_clock::time_point> typing_started_;
     std::chrono::steady_clock::time_point next_status_refresh_{};
     std::uint64_t definition_generation_{};
+    std::uint64_t ai_context_generation_{};
+    std::size_t ai_context_bytes_{64 * 1024};
     float display_refresh_hz_{};
     bool initialized_ = false;
+    bool command_palette_open_{};
+    bool context_preview_open_{};
     bool quit_ = false;
 };
 

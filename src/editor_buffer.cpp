@@ -409,6 +409,37 @@ auto EditorBuffer::delete_forward() -> std::optional<BufferChange> {
     return replace(TextSelection{cursor_, end}, "");
 }
 
+auto EditorBuffer::position_for_byte(std::size_t byte) const -> std::optional<TextPosition> {
+    auto offset = std::size_t{};
+    for (auto line_index = std::size_t{}; line_index < lines_.size(); ++line_index) {
+        const auto line_end = offset + lines_[line_index].size();
+        if (byte <= line_end) {
+            const auto column = byte - offset;
+            if (column < lines_[line_index].size() && column > 0 &&
+                (static_cast<unsigned char>(lines_[line_index][column]) & 0xc0U) == 0x80U) {
+                return std::nullopt;
+            }
+            return TextPosition{line_index, column};
+        }
+        offset = line_end + 1;
+    }
+    return std::nullopt;
+}
+
+auto EditorBuffer::apply_edit(const SourceEdit& edit) -> std::optional<BufferChange> {
+    if (edit.start_byte > edit.old_end_byte) {
+        error_ = "edit start is after its end";
+        return std::nullopt;
+    }
+    const auto begin = position_for_byte(edit.start_byte);
+    const auto end = position_for_byte(edit.old_end_byte);
+    if (!begin || !end) {
+        error_ = "edit range is outside the buffer or splits a UTF-8 codepoint";
+        return std::nullopt;
+    }
+    return replace(TextSelection{*begin, *end}, edit.text);
+}
+
 auto EditorBuffer::save() -> bool {
     if (!repository_path_) {
         error_ = "buffer is not backed by a liquid repository";

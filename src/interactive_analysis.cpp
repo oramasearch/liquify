@@ -2045,6 +2045,81 @@ auto InteractiveAnalysis::diagnostics(const std::filesystem::path& path)
     return decode_diagnostics(*value);
 }
 
+auto InteractiveAnalysis::definition_context(const std::filesystem::path& path, std::uint32_t byte)
+    -> liquid::result<DefinitionContext> {
+    auto output = DefinitionContext{};
+    auto enclosing = enclosing_definition(path, byte);
+    if (!enclosing) {
+        return std::unexpected(enclosing.error());
+    }
+    output.enclosing_definition = std::move(*enclosing);
+    if (!output.enclosing_definition) {
+        return output;
+    }
+
+    auto current = std::shared_ptr<const BufferSnapshot>{};
+    auto snapshots = std::vector<std::pair<std::string, std::shared_ptr<const BufferSnapshot>>>{};
+    auto index = AnalysisIndex{};
+    {
+        auto lock = std::scoped_lock(impl_->state->mutex);
+        auto found = impl_->state->buffers.find(path_key(path));
+        if (found == impl_->state->buffers.end()) {
+            return std::unexpected(failure("interactive buffer is not open", path_key(path)));
+        }
+        current = found->second->snapshot;
+        snapshots.reserve(impl_->state->buffers.size());
+        for (const auto& [buffer_path, buffer] : impl_->state->buffers) {
+            snapshots.emplace_back(buffer_path, buffer->snapshot);
+        }
+        index = impl_->index;
+    }
+
+    const auto& enclosing_range = output.enclosing_definition->range;
+    const DeclarationEntry* enclosing_declaration = nullptr;
+    for (const auto& entry : current->declarations) {
+        if (entry.declaration.range.start_byte != enclosing_range.start_byte ||
+            entry.declaration.range.end_byte != enclosing_range.end_byte) {
+            continue;
+        }
+        enclosing_declaration = &entry;
+        break;
+    }
+    auto enclosing_name = std::string{};
+    if (enclosing_declaration != nullptr) {
+        enclosing_name = enclosing_declaration->declaration.name;
+        if (const auto* symbol = find_symbol_record(index, enclosing_name); symbol != nullptr) {
+            output.enclosing_symbol = *symbol;
+        } else {
+            auto synthesized = SymbolRecord{};
+            synthesized.name = enclosing_name;
+            synthesized.definition = SymbolLocation{path, enclosing_declaration->declaration};
+            const auto references =
+                collect_references(index, snapshots, path_key(path), enclosing_name);
+            for (const auto& reference : references) {
+                if (!reference.is_definition) {
+                    synthesized.references.push_back(reference.location);
+                }
+            }
+            output.enclosing_symbol = std::move(synthesized);
+        }
+    }
+
+    auto seen = std::set<std::string>{};
+    for (const auto& identifier : current->identifiers) {
+        if (!ranges_intersect(identifier.range, enclosing_range) ||
+            identifier.name == enclosing_name || !seen.insert(identifier.name).second) {
+            continue;
+        }
+        auto definition = find_definition(index, snapshots, path_key(path), identifier.name);
+        if (!definition) {
+            continue;
+        }
+        output.referenced_definitions.push_back(
+            {identifier.name, definition->declaration.signature, std::move(*definition)});
+    }
+    return output;
+}
+
 auto InteractiveAnalysis::measure_latency(const std::filesystem::path& path,
                                           std::span<const std::uint32_t> positions)
     -> liquid::result<InteractiveLatency> {

@@ -77,6 +77,18 @@ struct SymbolRecord {
     std::vector<SourceLocation> references;
 };
 
+struct ReferencedDefinition {
+    std::string name;
+    std::string signature;
+    SymbolLocation definition;
+};
+
+struct DefinitionContext {
+    std::optional<SyntaxNodeInfo> enclosing_definition;
+    std::optional<SymbolRecord> enclosing_symbol;
+    std::vector<ReferencedDefinition> referenced_definitions;
+};
+
 struct SourceEdit {
     std::uint32_t start_byte{};
     std::uint32_t old_end_byte{};
@@ -136,6 +148,8 @@ public:
         -> liquid::result<std::vector<CompletionCandidate>>;
     [[nodiscard]] auto diagnostics(const std::filesystem::path& path)
         -> liquid::result<std::vector<Diagnostic>>;
+    [[nodiscard]] auto definition_context(const std::filesystem::path& path, std::uint32_t byte)
+        -> liquid::result<DefinitionContext>;
     [[nodiscard]] auto measure_latency(const std::filesystem::path& path,
                                        std::span<const std::uint32_t> positions)
         -> liquid::result<InteractiveLatency>;

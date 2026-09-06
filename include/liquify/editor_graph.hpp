@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -9,6 +10,7 @@
 
 #include "liquid/daemon.hpp"
 #include "liquid/graph.hpp"
+#include "liquify/context_builder.hpp"
 #include "liquify/interactive_analysis.hpp"
 
 namespace liquify {
@@ -26,10 +28,13 @@ struct EditorGraphSnapshot {
     std::optional<HoverInfo> hover;
     std::vector<CompletionCandidate> completions;
     std::optional<SymbolLocation> definition;
+    std::optional<ContextBlock> ai_context;
+    SourceRange ai_context_focus;
     std::uint64_t diagnostics_generation{};
     std::uint64_t hover_generation{};
     std::uint64_t completion_generation{};
     std::uint64_t definition_generation{};
+    std::uint64_t ai_context_generation{};
     double edit_to_diagnostic_ms{};
 };
 
@@ -53,6 +58,12 @@ public:
     void request_hover(std::filesystem::path path, std::uint32_t byte);
     void request_completion(std::filesystem::path path, std::uint32_t byte);
     void request_definition(std::filesystem::path path, std::uint32_t byte);
+    void request_ai_context(std::filesystem::path path,
+                            std::uint32_t byte,
+                            std::optional<SourceRange> selection,
+                            std::string selected_source,
+                            std::size_t whole_file_bytes,
+                            std::size_t byte_budget);
     void note_saved_drip(std::uint64_t repository_pending_drips);
     void refresh_status();
 

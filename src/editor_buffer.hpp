@@ -10,6 +10,8 @@
 #include <string_view>
 #include <vector>
 
+#include "liquify/interactive_analysis.hpp"
+
 namespace liquify {
 
 struct TextPosition {
@@ -72,12 +74,14 @@ public:
     [[nodiscard]] auto insert_newline() -> BufferChange;
     [[nodiscard]] auto backspace() -> std::optional<BufferChange>;
     [[nodiscard]] auto delete_forward() -> std::optional<BufferChange>;
+    [[nodiscard]] auto apply_edit(const SourceEdit& edit) -> std::optional<BufferChange>;
     [[nodiscard]] auto save() -> bool;
 
 private:
     [[nodiscard]] auto replace(TextSelection range, std::string_view text) -> BufferChange;
     [[nodiscard]] auto insertion_range() const -> TextSelection;
     [[nodiscard]] auto clamped(TextPosition position) const -> TextPosition;
+    [[nodiscard]] auto position_for_byte(std::size_t byte) const -> std::optional<TextPosition>;
     void prepare_movement(bool extend_selection);
     void finish_movement(bool extend_selection);
 

@@ -1,16 +1,25 @@
 #include "liquify/editor_graph.hpp"
 
+#include <charconv>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <format>
 #include <functional>
+#include <limits>
+#include <map>
 #include <mutex>
 #include <numeric>
+#include <ranges>
+#include <span>
 #include <thread>
 #include <utility>
 
+#include "liquid/build.hpp"
+#include "liquid/frontend.hpp"
+#include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
+#include "liquify/stub_tree.hpp"
 
 namespace liquify {
 namespace {
@@ -32,6 +41,253 @@ auto short_digest(const liquid::digest& value) -> std::string {
         text.resize(12);
     }
     return text;
+}
+
+auto source_range(const liquid::frontend_source_range& range) -> std::optional<SourceRange> {
+    const auto limit = std::numeric_limits<std::uint32_t>::max();
+    if (range.start.byte > limit || range.end.byte > limit || range.start.line > limit ||
+        range.end.line > limit || range.start.column > limit || range.end.column > limit) {
+        return std::nullopt;
+    }
+    return SourceRange{
+        static_cast<std::uint32_t>(range.start.byte),
+        static_cast<std::uint32_t>(range.end.byte),
+        static_cast<std::uint32_t>(range.start.line == 0 ? 0 : range.start.line - 1),
+        static_cast<std::uint32_t>(range.start.column == 0 ? 0 : range.start.column - 1),
+        static_cast<std::uint32_t>(range.end.line == 0 ? 0 : range.end.line - 1),
+        static_cast<std::uint32_t>(range.end.column == 0 ? 0 : range.end.column - 1)};
+}
+
+auto declaration_kind(liquid::symbol_kind kind) -> DeclarationKind {
+    switch (kind) {
+    case liquid::symbol_kind::function:
+        return DeclarationKind::function;
+    case liquid::symbol_kind::type:
+        return DeclarationKind::type;
+    case liquid::symbol_kind::field:
+        return DeclarationKind::field;
+    case liquid::symbol_kind::namespace_:
+        return DeclarationKind::namespace_;
+    case liquid::symbol_kind::variable:
+    case liquid::symbol_kind::parameter:
+    case liquid::symbol_kind::unknown:
+        return DeclarationKind::variable;
+    }
+    return DeclarationKind::variable;
+}
+
+auto split_path(const std::filesystem::path& path) -> std::vector<std::string> {
+    auto output = std::vector<std::string>{};
+    for (const auto& component : path.lexically_normal()) {
+        const auto value = component.generic_string();
+        if (!value.empty() && value != ".") {
+            output.push_back(value);
+        }
+    }
+    return output;
+}
+
+auto find_blob(liquid::repository& repository,
+               liquid::tree tree,
+               std::span<const std::string> components,
+               std::size_t index) -> liquid::result<std::optional<liquid::digest>> {
+    if (index >= components.size()) {
+        return std::optional<liquid::digest>{};
+    }
+    const auto found =
+        std::ranges::find(tree.entries, components[index], &liquid::tree_entry::name);
+    if (found == tree.entries.end()) {
+        return std::optional<liquid::digest>{};
+    }
+    if (index + 1 == components.size()) {
+        if (found->kind != liquid::node_kind::blob) {
+            return std::optional<liquid::digest>{};
+        }
+        return found->id;
+    }
+    if (found->kind != liquid::node_kind::tree) {
+        return std::optional<liquid::digest>{};
+    }
+    auto child = liquid::runtime::block_on(repository.tree(found->id));
+    if (!child) {
+        return std::unexpected(child.error());
+    }
+    return find_blob(repository, std::move(*child), components, index + 1);
+}
+
+auto signature_for(std::string_view name, const StubTree& stubs) -> const StubDeclaration* {
+    const auto found = std::ranges::find(stubs.declarations, name, &StubDeclaration::name);
+    return found == stubs.declarations.end() ? nullptr : &*found;
+}
+
+auto editor_symbols(const std::filesystem::path& path,
+                    const liquid::symbol_record& record,
+                    const StubTree& stubs) -> std::vector<SymbolRecord> {
+    auto records = std::map<std::string, SymbolRecord>{};
+    for (const auto& occurrence : record.occurrences) {
+        const auto range = source_range(occurrence.range);
+        if (!range) {
+            continue;
+        }
+        auto& symbol = records[occurrence.symbol];
+        symbol.name = occurrence.name;
+        if (occurrence.role == liquid::symbol_role::definition) {
+            auto declaration = StubDeclaration{};
+            if (const auto* stub = signature_for(occurrence.name, stubs); stub != nullptr) {
+                declaration = *stub;
+            } else {
+                declaration.kind = declaration_kind(occurrence.kind);
+                declaration.name = occurrence.name;
+                declaration.signature = occurrence.name;
+                declaration.range = *range;
+            }
+            declaration.range = *range;
+            if (occurrence.documentation) {
+                declaration.documentation = *occurrence.documentation;
+            }
+            symbol.definition = SymbolLocation{path, std::move(declaration)};
+        } else {
+            symbol.references.push_back(SourceLocation{path, *range});
+        }
+    }
+    auto output = std::vector<SymbolRecord>{};
+    output.reserve(records.size());
+    for (auto& [id, record_value] : records) {
+        static_cast<void>(id);
+        if (!record_value.definition.declaration.name.empty()) {
+            output.push_back(std::move(record_value));
+        }
+    }
+    return output;
+}
+
+auto load_editor_symbols(const std::filesystem::path& repository_path,
+                         const std::filesystem::path& path,
+                         const StubTree& stubs) -> liquid::result<std::vector<SymbolRecord>> {
+    auto opened = liquid::runtime::block_on(liquid::repository::open(repository_path));
+    if (!opened) {
+        return std::unexpected(opened.error());
+    }
+    auto root = liquid::runtime::block_on(opened->root());
+    if (!root) {
+        return std::unexpected(root.error());
+    }
+    const auto components = split_path(path);
+    auto blob = find_blob(*opened, std::move(*root), components, 0);
+    if (!blob) {
+        return std::unexpected(blob.error());
+    }
+    if (!*blob) {
+        return std::vector<SymbolRecord>{};
+    }
+    auto symbols = liquid::runtime::block_on(opened->symbols(**blob));
+    if (!symbols) {
+        if (symbols.error().code == liquid::errc::not_found) {
+            return std::vector<SymbolRecord>{};
+        }
+        return std::unexpected(symbols.error());
+    }
+    return editor_symbols(path, *symbols, stubs);
+}
+
+auto cache_status_name(liquid::cache_status status) -> std::string {
+    switch (status) {
+    case liquid::cache_status::miss:
+        return "miss";
+    case liquid::cache_status::hit:
+        return "hit";
+    case liquid::cache_status::divergent:
+        return "divergent";
+    }
+    return "unknown";
+}
+
+auto cache_miss_name(liquid::cache_miss_reason reason) -> std::string_view {
+    switch (reason) {
+    case liquid::cache_miss_reason::input_changed:
+        return "input changed";
+    case liquid::cache_miss_reason::command_changed:
+        return "command changed";
+    case liquid::cache_miss_reason::environment_changed:
+        return "environment changed";
+    case liquid::cache_miss_reason::toolchain_changed:
+        return "toolchain changed";
+    case liquid::cache_miss_reason::sandbox_changed:
+        return "sandbox changed";
+    case liquid::cache_miss_reason::never_built:
+        return "never built";
+    case liquid::cache_miss_reason::divergent_result_quarantined:
+        return "divergent result quarantined";
+    case liquid::cache_miss_reason::policy_refused:
+        return "policy refused";
+    case liquid::cache_miss_reason::non_hermetic_read:
+        return "non-hermetic read";
+    case liquid::cache_miss_reason::unknown:
+        return "unknown";
+    }
+    return "unknown";
+}
+
+auto why_text(const std::optional<liquid::cache_miss>& why) -> std::string {
+    if (!why) {
+        return "cache hit";
+    }
+    auto output = std::string(cache_miss_name(why->reason));
+    if (!why->path.empty()) {
+        output += ": " + why->path;
+    }
+    if (!why->detail.empty()) {
+        output += ": " + why->detail;
+    }
+    return output;
+}
+
+auto command_mentions(const liquid::action_input& input, const std::filesystem::path& path)
+    -> bool {
+    const auto target = path.generic_string();
+    return std::ranges::any_of(input.command, [&target](const auto& argument) {
+        return argument == target || argument.ends_with("/" + target);
+    });
+}
+
+void append_build_facts(const std::filesystem::path& repository_path,
+                        const std::filesystem::path& path,
+                        ContextFacts& facts) {
+    auto opened = liquid::runtime::block_on(liquid::repository::open(repository_path));
+    if (!opened) {
+        return;
+    }
+    auto plan = liquid::runtime::block_on(opened->build_plan());
+    if (!plan) {
+        return;
+    }
+    const auto action = std::ranges::find_if(
+        *plan, [&path](const auto& candidate) { return command_mentions(candidate.input, path); });
+    if (action == plan->end()) {
+        return;
+    }
+    if (action->result) {
+        auto result = liquid::runtime::block_on(liquid::build::result(*opened, *action->result));
+        if (result) {
+            facts.build_result = ContextBuildResult{liquid::to_string(action->action),
+                                                    result->exit,
+                                                    cache_status_name(result->cache),
+                                                    why_text(result->why)};
+        }
+    }
+    const auto action_name = liquid::to_string(action->action);
+    for (const auto& dependency : action->dependencies) {
+        facts.dependency_edges.push_back({liquid::to_string(dependency), action_name});
+    }
+    for (const auto& candidate : *plan) {
+        const auto depends_on_action =
+            std::ranges::any_of(candidate.dependencies, [&action_name](const auto& dependency) {
+                return liquid::to_string(dependency) == action_name;
+            });
+        if (depends_on_action) {
+            facts.dependency_edges.push_back({action_name, liquid::to_string(candidate.action)});
+        }
+    }
 }
 
 } // namespace
@@ -84,11 +340,15 @@ struct EditorGraph::Impl {
     void initialize() {
         initialize_daemon();
         auto opened = InteractiveAnalysis::open(repository_path / ".liquid" / "liquify-graph");
+        auto opened_stubs = StubTrees::open(repository_path / ".liquid" / "liquify-stub-graph");
         auto lock = std::lock_guard(mutex);
         if (!opened) {
             current.error = error_message(opened.error());
+        } else if (!opened_stubs) {
+            current.error = error_message(opened_stubs.error());
         } else {
             analysis = std::make_shared<InteractiveAnalysis>(std::move(*opened));
+            stubs.emplace(std::move(*opened_stubs));
             current.ready = true;
             current.graph = analysis->statistics();
         }
@@ -190,6 +450,7 @@ struct EditorGraph::Impl {
     std::condition_variable idle;
     std::deque<Task> tasks;
     std::shared_ptr<InteractiveAnalysis> analysis;
+    std::optional<StubTrees> stubs;
     std::optional<liquid::daemon> daemon;
     EditorGraphSnapshot current;
     std::thread worker;
@@ -198,6 +459,7 @@ struct EditorGraph::Impl {
     std::uint64_t hover_request{};
     std::uint64_t completion_request{};
     std::uint64_t definition_request{};
+    std::uint64_t ai_context_request{};
     std::chrono::steady_clock::time_point last_edit{};
     bool initialized{};
     bool stopping{};
@@ -218,25 +480,42 @@ void EditorGraph::open_buffer(std::filesystem::path path,
         impl_->current.hover.reset();
         impl_->current.completions.clear();
         impl_->current.definition.reset();
+        impl_->current.ai_context.reset();
         impl_->current.diagnostics_generation = ++impl_->diagnostics_request;
         impl_->current.hover_generation = ++impl_->hover_request;
         impl_->current.completion_generation = ++impl_->completion_request;
         impl_->current.definition_generation = ++impl_->definition_request;
+        impl_->current.ai_context_generation = ++impl_->ai_context_request;
         impl_->last_edit = {};
     }
     impl_->enqueue({[implementation = impl_.get(),
                      path = std::move(path),
                      language,
                      source = std::move(source)]() mutable {
-        if (!implementation->analysis) {
+        if (!implementation->analysis || !implementation->stubs) {
             return;
         }
+        auto stub = implementation->stubs->for_source(language, source);
         auto opened = implementation->analysis->open_buffer(path, language, std::move(source));
         if (!opened) {
             implementation->record_query_error(opened.error());
-        } else {
-            implementation->clear_query_error();
+            return;
         }
+        if (!stub) {
+            implementation->record_query_error(stub.error());
+            return;
+        }
+        auto symbols = load_editor_symbols(implementation->repository_path, path, *stub);
+        if (!symbols) {
+            implementation->record_query_error(symbols.error());
+            return;
+        }
+        auto stored = implementation->analysis->set_symbol_records(std::move(*symbols));
+        if (!stored) {
+            implementation->record_query_error(stored.error());
+            return;
+        }
+        implementation->clear_query_error();
     }});
 }
 
@@ -393,6 +672,80 @@ void EditorGraph::request_definition(std::filesystem::path path, std::uint32_t b
                             implementation->current.definition_generation = request;
                             implementation->current.query_error.clear();
                         }
+                    },
+                    true});
+}
+
+void EditorGraph::request_ai_context(std::filesystem::path path,
+                                     std::uint32_t byte,
+                                     std::optional<SourceRange> selection,
+                                     std::string selected_source,
+                                     std::size_t whole_file_bytes,
+                                     std::size_t byte_budget) {
+    auto request = std::uint64_t{};
+    {
+        auto lock = std::lock_guard(impl_->mutex);
+        request = ++impl_->ai_context_request;
+    }
+    impl_->enqueue({[implementation = impl_.get(),
+                     path = std::move(path),
+                     byte,
+                     selection,
+                     selected_source = std::move(selected_source),
+                     whole_file_bytes,
+                     byte_budget,
+                     request]() mutable {
+                        if (!implementation->analysis) {
+                            return;
+                        }
+                        auto definition = implementation->analysis->definition_context(path, byte);
+                        if (!definition) {
+                            implementation->record_query_error(definition.error());
+                            return;
+                        }
+                        auto diagnostics = implementation->analysis->diagnostics(path);
+                        if (!diagnostics) {
+                            implementation->record_query_error(diagnostics.error());
+                            return;
+                        }
+                        auto facts = ContextFacts{};
+                        facts.path = path;
+                        facts.whole_file_bytes = whole_file_bytes;
+                        facts.enclosing_definition = definition->enclosing_definition;
+                        facts.enclosing_symbol = definition->enclosing_symbol;
+                        if (selection) {
+                            facts.focus = *selection;
+                            facts.selected_source = std::move(selected_source);
+                        } else if (definition->enclosing_definition) {
+                            facts.focus = definition->enclosing_definition->range;
+                            facts.selected_source = definition->enclosing_definition->spelling;
+                        } else {
+                            facts.focus = SourceRange{byte, byte, 0, 0, 0, 0};
+                        }
+                        for (auto& reference : definition->referenced_definitions) {
+                            facts.referenced_definitions.push_back(
+                                {std::move(reference.name),
+                                 std::move(reference.signature),
+                                 SourceLocation{reference.definition.path,
+                                                reference.definition.declaration.range}});
+                        }
+                        for (const auto& diagnostic : *diagnostics) {
+                            if (diagnostic.location.path == path) {
+                                facts.file_diagnostics.push_back(diagnostic);
+                            } else {
+                                facts.translation_unit_diagnostics.push_back(diagnostic);
+                            }
+                        }
+                        append_build_facts(implementation->repository_path, path, facts);
+                        auto context = ContextBuilder(byte_budget).build(facts);
+                        auto lock = std::lock_guard(implementation->mutex);
+                        if (request != implementation->ai_context_request) {
+                            return;
+                        }
+                        implementation->current.ai_context = std::move(context);
+                        implementation->current.ai_context_focus = facts.focus;
+                        implementation->current.ai_context_generation = request;
+                        implementation->current.query_error.clear();
                     },
                     true});
 }

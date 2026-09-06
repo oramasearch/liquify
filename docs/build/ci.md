@@ -12,6 +12,12 @@ secret, a run fails during checkout, before the build commands. The root build k
 `LIQUID_BUILD_CLI` and `LIQUID_BUILD_TESTS` off and links the library target, which exercises the
 same library-only submodule configuration as a local build.
 
+liquify has two additional permitted private submodules: `modules/corosio` at
+`9f8e865a7b5728a4093e9345456bc077194dbeff` and `modules/http` at
+`af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4`. They pin the assistant transport independently of
+liquid. The pins match liquid's nested copies, so the single Boost target instances created while
+configuring libliquid also compile the provider. No other liquify source contains network code.
+
 **Dependencies.** SDL3 3.2, Dear ImGui 1.91.5, and GoogleTest remain CMake `FetchContent`
 dependencies. liquid adds nested Capy, Corosio and automerge-cpp submodules; its exported target
 links Capy publicly. OpenSSL supplies Corosio's TLS implementation, zlib supplies automerge-cpp's
@@ -24,12 +30,16 @@ starts empty and CMake fetches every dependency before building.
 | Runner | Compiler and display | Verification |
 |---|---|---|
 | `ubuntu-24.04` | Clang 19 from apt.llvm.org with GCC 14's standard library headers; OpenSSL, FUSE3, SDL's static X11 and Wayland build dependencies; Xvfb | configure, build, `ctest`, `liquify version`, `xvfb-run -a ./build/liquify --smoke 30` |
-| `macos-15` | Homebrew's current `llvm` and `openssl@3`; native runner display | configure, build, `ctest`, `liquify version`, `./build/liquify --smoke 30` |
+| `macos-15` | Homebrew's current `llvm` and `openssl@3`; native runner display | configure, build, `ctest`, `liquify version`, AI-off smoke with continuous `lsof` TCP inspection |
 | `windows-2022` | Chocolatey's newest available LLVM and OpenSSL after entering the Visual Studio x64 developer environment; native runner display | configure, build, `ctest`, `liquify version`, `liquify --smoke 30` |
 
 The workflow prints the selected compiler version on every runner. Windows uses `clang-cl` with
 the Visual Studio standard library and SDK so C++26 `<print>` is checked with the newest LLVM
 package available to that image.
+
+The macOS smoke uses the default-off configuration and inspects the process for owned TCP sockets
+until it exits. Any socket fails the job. The connection-counting unit test provides the same
+invariant without relying on process inspection and runs on every platform.
 
 ## Local equivalent
 
