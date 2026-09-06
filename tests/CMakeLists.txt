@@ -14,6 +14,7 @@ target_link_libraries(liquify-tests PRIVATE
 add_dependencies(liquify-tests liquify-sample-plugin)
 target_compile_definitions(liquify-tests PRIVATE LIQUIFY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_definitions(liquify-tests PRIVATE
+  LIQUIFY_SAMPLE_PLUGIN="$<TARGET_FILE:liquify-sample-plugin>"
   LIQUIFY_C_COMPILER="${CMAKE_C_COMPILER}"
   LIQUIFY_EXECUTABLE="$<TARGET_FILE:liquify>"
   LIQUIFY_CXX_COMPILER="${CMAKE_CXX_COMPILER}")

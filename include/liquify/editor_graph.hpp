@@ -52,7 +52,8 @@ struct EditorGraphSnapshot {
 
 class EditorGraph {
 public:
-  explicit EditorGraph(std::filesystem::path repository_path);
+  explicit EditorGraph(std::filesystem::path repository_path,
+                       std::shared_ptr<PluginHost> plugins = {});
   ~EditorGraph();
   EditorGraph(const EditorGraph &) = delete;
   auto operator=(const EditorGraph &) -> EditorGraph & = delete;

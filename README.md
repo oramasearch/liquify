@@ -79,6 +79,8 @@ ctest --test-dir build
 | `include/liquify/ai_provider.hpp`, `src/ai_provider.cpp` | streaming provider interface and Anthropic Messages implementation |
 | `include/liquify/ai_config.hpp`, `src/ai_config.cpp` | default-off repository/global configuration and credential lookup |
 | `include/liquify/assistant.hpp`, `src/assistant.cpp` | assistant state, proposal acceptance, and local assisted-edit record |
+| `include/liquify/plugin.hpp`, `src/plugin.cpp` | checked native plugin host, global/repository configuration, canonical-CBOR validation, graph query registration, commands, and panel view models |
+| `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
 | `src/main.cpp` | CLI: optional repository path, `--print-tree`, `--apply-edits`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |

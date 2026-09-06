@@ -326,7 +326,20 @@ App::App(AppOptions options) : options_(std::move(options)) {
     repository_ = std::make_unique<RepositoryView>(
         RepositoryView::open(*options_.repository_path));
     if (repository_->error().empty()) {
-      editor_graph_ = std::make_unique<EditorGraph>(*options_.repository_path);
+      auto plugins = load_configured_plugins(*options_.repository_path);
+      if (!plugins) {
+        plugin_host_ = std::make_shared<PluginHost>();
+        auto message = plugins.error().message;
+        if (!plugins.error().context.empty()) {
+          message += ": " + plugins.error().context;
+        }
+        plugin_failures_.push_back({{}, std::move(message)});
+      } else {
+        plugin_host_ = std::move(plugins->host);
+        plugin_failures_ = std::move(plugins->failures);
+      }
+      editor_graph_ =
+          std::make_unique<EditorGraph>(*options_.repository_path, plugin_host_);
       auto config = load_ai_config(*options_.repository_path);
       if (!config) {
         editor_status_ = config.error().message;
@@ -1237,6 +1250,17 @@ void App::draw_command_palette() {
           [this] { toggle_assistant(); });
   command("Assistant: What will be sent (Primary+Shift+C)",
           [this] { request_assistant_context(std::nullopt); });
+  if (plugin_host_) {
+    for (const auto &plugin_command : plugin_host_->commands()) {
+      auto label = "Plugin: " + plugin_command.name;
+      if (!plugin_command.default_binding.empty()) {
+        label += " (" + plugin_command.default_binding + ")";
+      }
+      command(label.c_str(), [this, name = plugin_command.name] {
+        invoke_plugin_command(name);
+      });
+    }
+  }
   ImGui::EndPopup();
 }
 
@@ -1387,61 +1411,57 @@ void App::draw_structural_editing() {
 }
 
 void App::invoke_plugin_command(std::string_view name) {
-    if (!plugin_host_) {
-        return;
+  if (!plugin_host_) {
+    return;
+  }
+  auto invoked = plugin_host_->invoke_command(name, plugin_empty_map_cbor());
+  if (!invoked) {
+    editor_status_ = invoked.error().message;
+    if (!invoked.error().context.empty()) {
+      editor_status_ += ": " + invoked.error().context;
     }
-    auto invoked = plugin_host_->invoke_command(name, plugin_empty_map_cbor());
-    if (!invoked) {
-        editor_status_ = invoked.error().message;
-        if (!invoked.error().context.empty()) {
-            editor_status_ += ": " + invoked.error().context;
-        }
-        return;
-    }
-    editor_status_ = "plugin command completed: " + std::string(name);
+    return;
+  }
+  editor_status_ = "plugin command completed: " + std::string(name);
 }
 
 void App::poll_plugins() {
-    const auto now = std::chrono::steady_clock::now();
-    if (!plugin_host_ || now < next_plugin_refresh_) {
-        return;
-    }
-    plugin_panels_ = plugin_host_->panels(plugin_null_cbor());
-    next_plugin_refresh_ = now + std::chrono::milliseconds(500);
+  const auto now = std::chrono::steady_clock::now();
+  if (!plugin_host_ || now < next_plugin_refresh_) {
+    return;
+  }
+  plugin_panels_ = plugin_host_->panels(plugin_null_cbor());
+  next_plugin_refresh_ = now + std::chrono::milliseconds(500);
 }
 
 void App::draw_plugin_panels() {
-    if (plugin_failures_.empty() && plugin_panels_.empty()) {
-        return;
+  if (plugin_failures_.empty() && plugin_panels_.empty()) {
+    return;
+  }
+  ImGui::Separator();
+  ImGui::TextUnformatted("Plugins");
+  for (const auto &failure : plugin_failures_) {
+    const auto path = failure.path.empty() ? std::string("configuration")
+                                           : failure.path.generic_string();
+    ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F), "%s: %s",
+                       path.c_str(), failure.error.c_str());
+  }
+  for (const auto &panel : plugin_panels_) {
+    const auto panel_name = panel.plugin + "/" + panel.name;
+    if (!panel.error.empty()) {
+      ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F), "%s: %s",
+                         panel_name.c_str(), panel.error.c_str());
+      continue;
     }
-    ImGui::Separator();
-    ImGui::TextUnformatted("Plugins");
-    for (const auto& failure : plugin_failures_) {
-        const auto path =
-            failure.path.empty() ? std::string("configuration") : failure.path.generic_string();
-        ImGui::TextColored(
-            ImVec4(0.75F, 0.20F, 0.15F, 1.0F), "%s: %s", path.c_str(), failure.error.c_str());
+    auto model = decode_plugin_text_panel(panel.view_model_cbor);
+    if (!model) {
+      ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F), "%s: %s",
+                         panel_name.c_str(), model.error().message.c_str());
+      continue;
     }
-    for (const auto& panel : plugin_panels_) {
-        const auto panel_name = panel.plugin + "/" + panel.name;
-        if (!panel.error.empty()) {
-            ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
-                               "%s: %s",
-                               panel_name.c_str(),
-                               panel.error.c_str());
-            continue;
-        }
-        auto model = decode_plugin_text_panel(panel.view_model_cbor);
-        if (!model) {
-            ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
-                               "%s: %s",
-                               panel_name.c_str(),
-                               model.error().message.c_str());
-            continue;
-        }
-        ImGui::Text("%s: %s", panel_name.c_str(), model->title.c_str());
-        ImGui::TextWrapped("%s", model->text.c_str());
-    }
+    ImGui::Text("%s: %s", panel_name.c_str(), model->title.c_str());
+    ImGui::TextWrapped("%s", model->text.c_str());
+  }
 }
 
 void App::draw_editor() {
@@ -1606,6 +1626,7 @@ void App::draw_editor() {
       }
     }
   }
+  draw_plugin_panels();
   ImGui::EndChild();
 }
 
@@ -1671,6 +1692,7 @@ void App::render_editor() {
 
 void App::frame() {
   poll_editor_graph();
+  poll_plugins();
   ImGui_ImplSDLRenderer3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
