@@ -102,6 +102,7 @@ int main(int argc, char** argv) {
         return apply_edits(argv[2], argv[3]);
     }
     liquify::AppOptions opts;
+    opts.executable_path = argv[0];
     bool should_print_tree = false;
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
@@ -110,9 +111,8 @@ int main(int argc, char** argv) {
                 std::println(stderr, "liquify: version accepts no other arguments");
                 return 2;
             }
-            std::println("liquify {} (libliquid {})",
-                         liquify::version_string(),
-                         liquid::version_string());
+            std::println(
+                "liquify {} (libliquid {})", liquify::version_string(), liquid::version_string());
             return 0;
         }
         if (arg == "--help" || arg == "-h") {

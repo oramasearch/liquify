@@ -35,7 +35,7 @@ retains liquid's context and message in the view instead of representing the rep
 empty tree. The panel renders that error, and `--print-tree` writes it to standard error and exits
 non-zero.
 
-**CLI.** `liquify` opens the hello state; `liquify <path>` opens the repository panel and lets a
+**CLI.** `liquify` opens the repository front door; `liquify <path>` opens the repository panel and lets a
 blob at any expanded depth be opened in the editor. C and C++ buffers add graph-query controls, an
 inline diagnostics layer, diagnostics/completion and configured plugin panels, plugin commands in
 the command palette, and a daemon status line;
@@ -51,6 +51,13 @@ dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md),
 50,000-line buffer for N frames (default 30), prints latency metrics, and exits 0; `liquify
 version` prints `liquify <v> (libliquid <v>)`. The complete build, test and run sequence is
 [`../build/local.md`](../build/local.md).
+
+The front door opens a folder through the native SDL dialog, clones a lake repository through
+libliquid's drive API, reopens persisted recent repositories, establishes a local TAAP identity,
+and creates additional Liquify processes for independent windows. A successful open replaces the
+repository-scoped graph, plugins, assistant, review and shell state in the current process.
+Unreadable repositories and offline clone failures retain their inputs for retry. The identity
+state file contains the public actor and custody description, never a credential.
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as

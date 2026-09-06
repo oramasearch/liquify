@@ -3,7 +3,9 @@
 Liquify starts at a repository front door when no path is supplied. The front door can open a
 local folder, clone a lake repository into a new local folder, reopen a recent repository, create
 another Liquify window, or establish a local TAAP identity session. Opening another repository
-replaces the active repository services in the same process; no restart is required.
+replaces the active repository services in the same process; no restart is required. The active
+repository name in the status bar returns to this front door, while each recent row can open in the
+current window or a new one.
 
 The lifecycle is a plain C++ state machine. `welcome`, `opening`, `cloning`, `open`, `unreadable`,
 `offline`, and `failed` are explicit states so a missing or unreadable local repository is not
