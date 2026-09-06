@@ -48,16 +48,16 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-Issue #38's general screenshot leaf has not landed, so this change supplies the smaller path
-needed to review the shell. `--screenshot` selects one of nine seeded shell states, SDL's dummy
-video driver and software renderer produce a hidden fixed 1440×900 frame, and the in-tree PNG
-writer captures RGBA output. No display, repository, network, or container is involved.
+The named screenshot registry in [`README.md`](README.md) selects nine seeded shell states in
+light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
+frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
+container is involved.
 The structural capture uses a fixed edit-preview model, avoiding frame-timed caret state while the
 live rename and extract-function modals keep their normal input behavior.
 
 ```sh
-./build/liquify --screenshot editor --theme dark --out editor-dark.png
-./tools/ui/screenshot.sh ./build/liquify
+./build/liquify --screenshot editor-cpp-dark --out editor-dark.png
+LIQUIFY_BINARY=./build/liquify ./tools/ui/screenshot.sh
 ```
 
 The committed evidence is:
@@ -66,14 +66,15 @@ The committed evidence is:
 |---|---|---|
 | Welcome | [light](screenshots/welcome-light.png) | [dark](screenshots/welcome-dark.png) |
 | Repository | [light](screenshots/repository-light.png) | [dark](screenshots/repository-dark.png) |
-| Editor tabs and split | [light](screenshots/editor-light.png) | [dark](screenshots/editor-dark.png) |
+| Editor tabs and split | [light](screenshots/editor-cpp-light.png) | [dark](screenshots/editor-cpp-dark.png) |
 | Diagnostics | [light](screenshots/diagnostics-light.png) | [dark](screenshots/diagnostics-dark.png) |
 | Build/test/deploy | [light](screenshots/build-light.png) | [dark](screenshots/build-dark.png) |
 | Assistant | [light](screenshots/assistant-light.png) | [dark](screenshots/assistant-dark.png) |
 | Review | [light](screenshots/review-light.png) | [dark](screenshots/review-dark.png) |
 | Plugins | [light](screenshots/plugins-light.png) | [dark](screenshots/plugins-dark.png) |
-| Structural editing | [light](screenshots/structural-light.png) | [dark](screenshots/structural-dark.png) |
+| Structural editing | [light](screenshots/structural-editing-light.png) | [dark](screenshots/structural-editing-dark.png) |
 
-`Png.WritesRgbaPixelsWithTheRequestedDimensions` checks the encoder signature and dimensions;
-`AppShellState` tests cover repository-local round trips and invalid state. The screenshot script
-checks the complete matrix and each capture command reports its dimensions.
+`Screenshot.EditorRendersSelectedSource` and `Screenshot.PanelRendersDiagnostics` read the
+generated PNG files and check stable shell pixels; `AppShellState` tests cover repository-local
+round trips and invalid state. The screenshot script checks the complete matrix and each capture
+command reports its dimensions.

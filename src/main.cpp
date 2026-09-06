@@ -1,4 +1,3 @@
-#include <array>
 #include <charconv>
 #include <filesystem>
 #include <fstream>
@@ -14,6 +13,7 @@
 #include "liquid/liquid.hpp"
 #include "liquify/app.hpp"
 #include "liquify/interactive_analysis.hpp"
+#include "liquify/screenshot.hpp"
 #include "liquify/structural_edit.hpp"
 #include "liquify/version.hpp"
 #include "repository_view.hpp"
@@ -31,8 +31,8 @@ void usage() {
                  "return result CBOR");
     std::println("  liquify --smoke [N]         scroll 50,000 lines for N frames "
                  "and exit");
-    std::println("  liquify --screenshot STATE --theme light|dark --out FILE");
-    std::println("                              render a deterministic 1440x900 PNG");
+    std::println("  liquify --screenshot STATE --out PNG");
+    std::println("                              render a fixed headless UI state");
     std::println("  liquify version             print the version");
 }
 
@@ -136,32 +136,24 @@ int main(int argc, char** argv) {
                 std::println(stderr, "liquify: --screenshot requires a state");
                 return 2;
             }
+            if (opts.screenshot_state) {
+                std::println(stderr, "liquify: --screenshot may be specified once");
+                return 2;
+            }
             opts.screenshot_state = std::string{argv[++i]};
             opts.max_frames = 2;
             continue;
         }
         if (arg == "--out") {
             if (i + 1 == argc) {
-                std::println(stderr, "liquify: --out requires a path");
+                std::println(stderr, "liquify: --out requires a PNG path");
+                return 2;
+            }
+            if (opts.screenshot_output) {
+                std::println(stderr, "liquify: --out may be specified once");
                 return 2;
             }
             opts.screenshot_output = std::filesystem::path(argv[++i]);
-            continue;
-        }
-        if (arg == "--theme") {
-            if (i + 1 == argc) {
-                std::println(stderr, "liquify: --theme requires light or dark");
-                return 2;
-            }
-            const auto theme = std::string_view(argv[++i]);
-            if (theme == "light") {
-                opts.forced_theme = liquify::ThemePreference::light;
-            } else if (theme == "dark") {
-                opts.forced_theme = liquify::ThemePreference::dark;
-            } else {
-                std::println(stderr, "liquify: --theme requires light or dark");
-                return 2;
-            }
             continue;
         }
         if (arg == "--print-tree") {
@@ -201,7 +193,7 @@ int main(int argc, char** argv) {
         opts.repository_path = std::filesystem::path(arg);
     }
     if (opts.max_frames > 0 && opts.repository_path) {
-        std::println(stderr, "liquify: --smoke does not open a repository");
+        std::println(stderr, "liquify: headless modes do not open a repository");
         return 2;
     }
     if (opts.lake_url && !opts.repository_path) {
@@ -209,29 +201,25 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (opts.screenshot_state) {
-        constexpr auto states = std::array<std::string_view, 9>{"welcome",
-                                                                "repository",
-                                                                "editor",
-                                                                "diagnostics",
-                                                                "build",
-                                                                "assistant",
-                                                                "review",
-                                                                "plugins",
-                                                                "structural"};
-        if (std::ranges::find(states, *opts.screenshot_state) == states.end()) {
+        if (liquify::find_screenshot_state(*opts.screenshot_state) == nullptr) {
             std::println(stderr, "liquify: unknown screenshot state {}", *opts.screenshot_state);
+            std::print(stderr, "liquify: states:");
+            for (const auto& state : liquify::screenshot_states()) {
+                std::print(stderr, " {}", state.name);
+            }
+            std::println(stderr);
             return 2;
         }
-        if (!opts.screenshot_output || !opts.forced_theme) {
-            std::println(stderr, "liquify: --screenshot requires --theme and --out");
+        if (!opts.screenshot_output) {
+            std::println(stderr, "liquify: --screenshot requires --out");
             return 2;
         }
         if (opts.repository_path || opts.smoke || opts.lake_url) {
             std::println(stderr, "liquify: --screenshot cannot open a repository or run smoke");
             return 2;
         }
-    } else if (opts.screenshot_output || opts.forced_theme) {
-        std::println(stderr, "liquify: --theme and --out require --screenshot");
+    } else if (opts.screenshot_output) {
+        std::println(stderr, "liquify: --out requires --screenshot");
         return 2;
     }
     if (should_print_tree) {

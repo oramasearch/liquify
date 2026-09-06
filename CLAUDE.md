@@ -14,7 +14,9 @@ loads nested trees when expanded, and opens blobs into an editable in-memory buf
 libliquid and produces a drip.
 The standard input mode is non-modal and a modal command/insert mode is available. Unreadable
 repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
-reports frame and typing latency, and exits 0. liquid is pinned at `modules/liquid` through its
+reports frame and typing latency, and exits 0. `liquify --screenshot` renders the fixed welcome,
+repository, C++ editor and panel registry in light and dark through a headless software renderer,
+with committed PNG proof and pixel-region tests. liquid is pinned at `modules/liquid` through its
 persisted demand-driven query graph, text-anchor mapping, and coroutine-native forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
 embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The

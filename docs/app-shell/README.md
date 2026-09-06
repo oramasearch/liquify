@@ -43,11 +43,12 @@ the command palette, and a daemon status line;
 `liquify --apply-edits <file> <path>` applies canonical-CBOR structural edits without a display
 and writes the result record to standard output
 ([`../editor/structural-editing.md`](../editor/structural-editing.md));
-`liquify --screenshot <state> --theme light|dark --out <path>` renders the deterministic shell
-evidence described in [`../ui/app-shell.md`](../ui/app-shell.md); `liquify --smoke [N]`
-scrolls and edits a generated 50,000-line buffer for N frames (default 30), prints latency metrics,
-and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`. The complete build, test and
-run sequence is [`../build/local.md`](../build/local.md).
+`liquify --screenshot <state> --out <png>` renders one named, fixed shell state through SDL's
+dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md),
+[`../ui/app-shell.md`](../ui/app-shell.md)); `liquify --smoke [N]` scrolls and edits a generated
+50,000-line buffer for N frames (default 30), prints latency metrics, and exits 0; `liquify version` prints
+`liquify <v> (libliquid <v>)`. The complete build, test and run sequence is
+[`../build/local.md`](../build/local.md).
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
@@ -81,9 +82,9 @@ layout-cache unit tests cover editing, UTF-8 cursor movement, save, reuse and li
 invalidation. No repository fixture bytes are committed.
 Plugin tests cover configured global and repository paths; a bad module remains a visible load
 failure while later valid modules register normally.
-App-shell state tests cover repository-local round trips and invalid state. The PNG test checks
-the screenshot encoder's signature and dimensions, and `tools/ui/screenshot.sh` renders the full
-light/dark state matrix.
+App-shell state tests cover repository-local round trips and invalid state. Screenshot tests read
+the in-tree PNG output and inspect stable pixel regions, and `tools/ui/screenshot.sh` renders the
+full light/dark state matrix.
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.

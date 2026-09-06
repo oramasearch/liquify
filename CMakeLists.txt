@@ -134,9 +134,9 @@ add_library(liquify-core STATIC
   src/editor_graph.cpp
   src/interactive_analysis.cpp
   src/plugin.cpp
-  src/png.cpp
   src/repository_view.cpp
   src/review.cpp
+  src/screenshot.cpp
   src/structural_edit.cpp
   src/text_layout.cpp
   src/stub_tree.cpp
@@ -147,8 +147,7 @@ target_include_directories(liquify-core
 target_link_libraries(liquify-core
   PUBLIC liquid::liquid
   PRIVATE Boost::corosio Boost::corosio_openssl Boost::http Boost::json
-          tree-sitter-c-parser tree-sitter-cpp-parser)
-target_link_libraries(liquify-core PRIVATE ZLIB::ZLIB)
+          tree-sitter-c-parser tree-sitter-cpp-parser ZLIB::ZLIB)
 if(APPLE)
   target_link_libraries(liquify-core PRIVATE "-framework Security")
 elseif(WIN32)

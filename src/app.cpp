@@ -29,7 +29,7 @@
 #include "liquify/assistant.hpp"
 #include "liquify/design_tokens.generated.hpp"
 #include "liquify/editor_graph.hpp"
-#include "liquify/png.hpp"
+#include "liquify/screenshot.hpp"
 #include "liquify/stub_tree.hpp"
 #include "liquify/version.hpp"
 #include "repository_view.hpp"
@@ -667,7 +667,14 @@ App::App(AppOptions options) : options_(std::move(options)) {
         text_layer_->reset(editor_->line_count());
         editor_focused_ = true;
     }
-    if (screenshot_mode() && *options_.screenshot_state != "welcome") {
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    if (screenshot != nullptr) {
+        options_.forced_theme = screenshot->theme == ScreenshotTheme::dark
+                                    ? ThemePreference::dark
+                                    : ThemePreference::light;
+    }
+    if (screenshot != nullptr && screenshot->view != ScreenshotView::welcome) {
         editor_ = std::make_unique<EditorBuffer>(
             EditorBuffer::from_text("screenshot-main", "src/app.cpp", screenshot_text()));
         layouts_ = std::make_unique<TextLayoutCache>();
@@ -675,18 +682,19 @@ App::App(AppOptions options) : options_(std::move(options)) {
         text_layer_ = std::make_unique<RetainedTextLayer>();
         text_layer_->reset(editor_->line_count());
         editor_focused_ = true;
-        const auto& state = *options_.screenshot_state;
-        shell_state_.sidebar =
-            state == "review" ? SidebarSection::review : SidebarSection::repository;
-        shell_state_.bottom_panel_visible = state == "diagnostics" || state == "build" ||
-                                            state == "assistant" || state == "plugins" ||
-                                            state == "structural";
-        shell_state_.editor_split = state == "editor";
-        if (state == "build") {
+        shell_state_.sidebar = screenshot->view == ScreenshotView::review
+                                   ? SidebarSection::review
+                                   : SidebarSection::repository;
+        shell_state_.bottom_panel_visible = screenshot->view == ScreenshotView::diagnostics ||
+                                            screenshot->view == ScreenshotView::build ||
+                                            screenshot->view == ScreenshotView::assistant ||
+                                            screenshot->view == ScreenshotView::plugins;
+        shell_state_.editor_split = screenshot->view == ScreenshotView::editor_cpp;
+        if (screenshot->view == ScreenshotView::build) {
             shell_state_.bottom_panel = BottomPanelTab::build;
-        } else if (state == "assistant") {
+        } else if (screenshot->view == ScreenshotView::assistant) {
             shell_state_.bottom_panel = BottomPanelTab::assistant;
-        } else if (state == "plugins") {
+        } else if (screenshot->view == ScreenshotView::plugins) {
             shell_state_.bottom_panel = BottomPanelTab::plugins;
         } else {
             shell_state_.bottom_panel = BottomPanelTab::diagnostics;
@@ -699,37 +707,47 @@ App::~App() {
 }
 
 bool App::init() {
-    if (screenshot_mode()) {
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    if (options_.screenshot_state && screenshot == nullptr) {
+        std::fprintf(
+            stderr, "liquify: unknown screenshot state: %s\n", options_.screenshot_state->c_str());
+        return false;
+    }
+    if (options_.screenshot_state.has_value() != options_.screenshot_output.has_value()) {
+        std::fprintf(stderr, "liquify: screenshot state and output must be set together\n");
+        return false;
+    }
+    if (screenshot != nullptr) {
         SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
     }
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::fprintf(stderr, "liquify: SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
-    int window_width = 1280;
-    int window_height = 800;
+    int window_width = static_cast<int>(screenshot_width);
+    int window_height = static_cast<int>(screenshot_height);
     SDL_Rect usable{};
-    if (screenshot_mode()) {
-        window_width = 1440;
-        window_height = 900;
-    } else if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 &&
-               usable.h > 0) {
+    if (screenshot == nullptr &&
+        SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 &&
+        usable.h > 0) {
         window_width = static_cast<int>(usable.w * 0.70F);
         window_height = static_cast<int>(usable.h * 0.70F);
         window_width = std::max(window_width, 900);
         window_height = std::max(window_height, 600);
     }
     const std::string title = options_.title + " " + std::string(version_string());
-    const auto window_flags = screenshot_mode()
-                                  ? SDL_WINDOW_HIDDEN
-                                  : SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    const auto window_flags = screenshot == nullptr
+                                  ? SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+                                  : SDL_WINDOW_HIDDEN;
     window_ = SDL_CreateWindow(title.c_str(), window_width, window_height, window_flags);
     if (window_ == nullptr) {
         std::fprintf(stderr, "liquify: SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();
         return false;
     }
-    renderer_ = SDL_CreateRenderer(window_, screenshot_mode() ? "software" : nullptr);
+    renderer_ = SDL_CreateRenderer(window_, screenshot == nullptr ? nullptr : "software");
     if (renderer_ == nullptr) {
         std::fprintf(stderr, "liquify: SDL_CreateRenderer failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(window_);
@@ -737,9 +755,11 @@ bool App::init() {
         SDL_Quit();
         return false;
     }
-    SDL_SetRenderVSync(renderer_, 1);
-    if (const auto* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay())) {
-        display_refresh_hz_ = mode->refresh_rate;
+    SDL_SetRenderVSync(renderer_, screenshot == nullptr ? 1 : 0);
+    if (screenshot == nullptr) {
+        if (const auto* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay())) {
+            display_refresh_hz_ = mode->refresh_rate;
+        }
     }
 
     IMGUI_CHECKVERSION();
@@ -747,7 +767,12 @@ bool App::init() {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.IniFilename = nullptr;
-    display_scale_ = std::max(SDL_GetWindowDisplayScale(window_), 1.0F);
+    display_scale_ =
+        screenshot == nullptr ? std::max(SDL_GetWindowDisplayScale(window_), 1.0F) : 1.0F;
+    if (screenshot != nullptr) {
+        io.DisplayFramebufferScale = ImVec2(1.0F, 1.0F);
+        SDL_SetRenderScale(renderer_, 1.0F, 1.0F);
+    }
     load_font_atlas(display_scale_);
     apply_theme();
     ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
@@ -948,23 +973,27 @@ void App::capture_screenshot() {
         screenshot_failed_ = true;
         return;
     }
-    const auto bytes =
-        std::span(static_cast<const std::uint8_t*>(rgba->pixels),
-                  static_cast<std::size_t>(rgba->pitch) * static_cast<std::size_t>(rgba->h));
-    const auto error =
-        write_rgba_png(*options_.screenshot_output, rgba->w, rgba->h, rgba->pitch, bytes);
     const auto width = rgba->w;
     const auto height = rgba->h;
+    auto image = ScreenshotImage{};
+    image.width = static_cast<std::uint32_t>(width);
+    image.height = static_cast<std::uint32_t>(height);
+    image.rgba.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+    const auto* source = static_cast<const std::uint8_t*>(rgba->pixels);
+    for (int row = 0; row < height; ++row) {
+        const auto offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(rgba->pitch);
+        image.rgba.insert(image.rgba.end(), source + offset, source + offset + width * 4);
+    }
     SDL_DestroySurface(rgba);
-    if (!error.empty()) {
-        std::fprintf(stderr, "liquify: screenshot failed: %s\n", error.c_str());
+    const auto written = write_png(*options_.screenshot_output, image);
+    if (!written) {
+        std::fprintf(stderr, "liquify: screenshot failed: %s\n", written.error().c_str());
         screenshot_failed_ = true;
         return;
     }
     screenshot_written_ = true;
-    std::printf("screenshot: state=%s theme=%s size=%dx%d out=%s\n",
+    std::printf("screenshot: state=%s size=%dx%d out=%s\n",
                 options_.screenshot_state->c_str(),
-                *options_.forced_theme == ThemePreference::dark ? "dark" : "light",
                 width,
                 height,
                 options_.screenshot_output->string().c_str());
@@ -2164,7 +2193,9 @@ void App::draw_command_palette() {
 }
 
 void App::draw_structural_editing() {
-    if (screenshot_mode() && *options_.screenshot_state == "structural") {
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    if (screenshot != nullptr && screenshot->view == ScreenshotView::structural_editing) {
         const auto center = ImGui::GetMainViewport()->GetCenter();
         ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5F, 0.5F));
         ImGui::SetNextWindowSize(ImVec2(420.0F, 210.0F), ImGuiCond_Always);

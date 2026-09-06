@@ -8,7 +8,7 @@ libliquid's public API.
 |---|---|
 | `include/liquify/app.hpp`, `src/app.cpp` | the token-derived application shell: window, native macOS menus, renderer, ImGui context, persisted panel layout, frame loop, and screenshot renderer. **The one TU that includes SDL3 or ImGui.** |
 | `include/liquify/app_state.hpp`, `src/app_state.cpp` | bounded repository-local shell layout, active surfaces, and theme persistence |
-| `include/liquify/png.hpp`, `src/png.cpp` | dependency-light RGBA PNG writer for deterministic shell captures |
+| `include/liquify/screenshot.hpp`, `src/screenshot.cpp` | named screenshot registry plus the in-tree RGBA PNG reader and writer |
 | `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory text buffer, input modes, and libliquid blob read/write path |
 | `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
 | `design/`, `include/liquify/design_tokens.generated.hpp` | stamped Orama DTCG and IBM Plex inputs, reviewed role map, dependency-free compiler, generated native palettes and type scale, and tamper/staleness gate |
@@ -27,9 +27,9 @@ libliquid's public API.
 | `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
 | `packaging/` | hand-built macOS, Windows, AppImage, and Flatpak release inputs used until liquid's projection targets land |
 | `bench/` | stub-tree benchmarks, built with `LIQUIFY_BUILD_BENCH` |
-| `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `--screenshot STATE --theme light\|dark --out FILE`, `version`, `--smoke [N]`, `--help` |
-| `tools/ui/screenshot.sh` | regenerates the nine shell states in light and dark at 1440×900 |
-| `tests/` | GoogleTest; `ctest --test-dir build` |
+| `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `--screenshot STATE --out PNG`, `version`, `--smoke [N]`, `--help` |
+| `tests/` | GoogleTest, including screenshot pixel-region assertions; `ctest --test-dir build` |
+| `tools/ui/` | refreshes every named screenshot under `docs/ui/screenshots/` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 | `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |
 | `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |
