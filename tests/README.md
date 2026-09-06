@@ -32,6 +32,10 @@ attaches when a daemon already owns the checkout, serializes overlay mutations, 
 diagnostics and cursor-query results, records edit-to-diagnostic latency and formats the validation
 backlog from daemon status.
 
+`test_review.cpp` runs against libliquid's forge test double. It opens and pulls a review, renders
+text hunks, creates a cursor-anchored comment, advances shifted and deleted anchors through a new
+head, and verifies approval plus the return to an open requested-changes review.
+
 `test_ai.cpp` verifies the default-off repository and global setting, zero provider constructions
 and zero connections against a counting network double, graph-derived context with a byte budget
 and explicit omissions, and the Anthropic Messages request over an in-process TLS server. Its SSE

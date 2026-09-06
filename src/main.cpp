@@ -13,9 +13,13 @@
 namespace {
 void usage() {
     std::println("liquify {}", liquify::version_string());
-    std::println("  liquify [PATH]              open the IDE, optionally on a liquid repository");
+    std::println("  liquify [PATH]              open the IDE, optionally on a "
+                 "liquid repository");
+    std::println("  liquify --lake URL PATH     open repository reviews from a "
+                 "lake forge");
     std::println("  liquify --print-tree PATH   print a repository root tree and exit");
-    std::println("  liquify --smoke [N]         scroll 50,000 lines for N frames and exit");
+    std::println("  liquify --smoke [N]         scroll 50,000 lines for N frames "
+                 "and exit");
     std::println("  liquify version             print the version");
 }
 
@@ -84,6 +88,18 @@ int main(int argc, char** argv) {
             opts.repository_path = std::filesystem::path(argv[++i]);
             continue;
         }
+        if (arg == "--lake") {
+            if (i + 1 == argc) {
+                std::println(stderr, "liquify: --lake requires a repository URL");
+                return 2;
+            }
+            if (opts.lake_url) {
+                std::println(stderr, "liquify: --lake may be specified once");
+                return 2;
+            }
+            opts.lake_url = std::string{argv[++i]};
+            continue;
+        }
         if (arg.starts_with("-")) {
             std::println(stderr, "liquify: unknown option {}", arg);
             usage();
@@ -97,6 +113,10 @@ int main(int argc, char** argv) {
     }
     if (opts.max_frames > 0 && opts.repository_path) {
         std::println(stderr, "liquify: --smoke does not open a repository");
+        return 2;
+    }
+    if (opts.lake_url && !opts.repository_path) {
+        std::println(stderr, "liquify: --lake requires a repository path");
         return 2;
     }
     if (should_print_tree) {

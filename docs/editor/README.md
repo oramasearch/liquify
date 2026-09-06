@@ -2,6 +2,8 @@
 
 [`ai.md`](ai.md) records the optional assistant, its offline switch guarantee, graph-derived
 inspectable context, provider contract, keyboard commands, and accept-only edit path.
+[`review.md`](review.md) records the lake review panel, retained inline text diff, cursor anchors,
+rebase mapping states, review controls, and keyboard commands.
 
 **Decision.** The editor buffer is a retained GPU text layer inside Dear ImGui (bridge decision
 15). ImGui owns the window, repository panel and controls. `src/app.cpp` uses the SDL renderer
@@ -121,6 +123,24 @@ ai context: definition=repository references=20 bytes=3215 whole_file_bytes=2754
 
 The graph context is 1.17% of the naive file payload and names every omission when a configured
 budget excludes a fact.
+
+## Review measurement
+
+`liquify-review-bench` imports 50 C++, header, and Markdown files from liquid's own tree into one
+change, builds the retained-layer diff rows, then maps 200 anchors in
+`src/repository/repository_impl.cpp` after inserting a line above them. Build benchmarks with
+`-DLIQUIFY_BUILD_BENCH=ON` and use a new output repository for each run.
+
+Measured on 2026-09-06 on the same macOS host as the editor measurements:
+
+```text
+$ ./build/liquify-review-bench modules/liquid build/review-measure-repository-9-a
+review: liquid_files=50 diff_lines=9057 open_to_first_hunk_ms=11.377 comments=200 anchor_mapping_ms=3.95042 moved=200 approximate=0 deleted=0
+```
+
+The first number includes diff computation, blob hydration, and construction of every visible
+text row; the first hunk can be submitted to the retained layer once that call returns. The anchor
+number is the complete batch returned by `repository::map_anchors`.
 
 ## Verify
 

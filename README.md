@@ -5,7 +5,7 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: retained GPU editor with graph-backed analysis and an optional AI surface.**
+> **Status: retained GPU editor with graph-backed analysis, review in place, and optional AI.**
 > `liquify <path>` opens a liquid repository through the public coroutine API, renders its root
 > entries, loads nested trees on expansion, and opens blobs into an editable in-memory buffer;
 > save writes through libliquid as a drip. Unreadable repositories show liquid's error and make
@@ -21,7 +21,10 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > enclosing-definition, definition, reference, hover, completion and build-diagnostic queries;
 > an edit cancels their in-flight graph work. The editor renders graph diagnostics inline and in a
 > panel, exposes definition, hover and completion controls, and shows daemon drip triggers plus the
-> validation backlog in its status line. The default-off assistant builds inspectable, byte-budgeted
+> validation backlog in its status line. With `--lake`, the review panel pulls lake changes,
+> renders retained inline text hunks and conflict values, posts cursor-anchored comments, advances
+> their exact, moved, approximate, or deleted positions across revised heads, and updates review
+> state. The default-off assistant builds inspectable, byte-budgeted
 > context from those graph facts, streams the Anthropic Messages API over pinned Corosio and
 > Boost.HTTP, and applies a proposed edit only after user acceptance. Turning it off constructs no
 > provider and opens no connection.
@@ -51,6 +54,7 @@ cmake --build build
 ctest --test-dir build
 ./build/liquify            # open the IDE
 ./build/liquify <path>     # open a liquid repository and render its root tree
+./build/liquify --lake <repository-url> <path> # add lake reviews; bearer is LIQUID_TOKEN
 ./build/liquify --print-tree <path>
 ./build/liquify --smoke    # scroll/edit 50,000 lines for 30 frames, report latency, exit 0
 ./build/liquify version
@@ -68,11 +72,12 @@ ctest --test-dir build
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
 | `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |
 | `include/liquify/editor_graph.hpp`, `src/editor_graph.cpp` | background editor-query runtime, daemon host/attach lifetime, asynchronous query snapshots and status data |
+| `include/liquify/review.hpp`, `src/review.cpp` | coroutine-native review model/controller: forge listing and state, sync pull, text diff, cursor comments, and anchor advancement |
 | `include/liquify/context_builder.hpp`, `src/context_builder.cpp` | byte-budgeted, inspectable assistant context assembled from graph facts |
 | `include/liquify/ai_provider.hpp`, `src/ai_provider.cpp` | streaming provider interface and Anthropic Messages implementation |
 | `include/liquify/ai_config.hpp`, `src/ai_config.cpp` | default-off repository/global configuration and credential lookup |
 | `include/liquify/assistant.hpp`, `src/assistant.cpp` | assistant state, proposal acceptance, and local assisted-edit record |
-| `src/main.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, `--help` |
+| `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 | `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |

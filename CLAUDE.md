@@ -8,7 +8,7 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed interactive C/C++ analysis and optional AI.**
+**Retained GPU editor with graph-backed C/C++ analysis, review in place, and optional AI.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
 libliquid and produces a drip.
@@ -21,7 +21,10 @@ declarations from closed files without retaining full parse trees. Graph-backed 
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor
 surface renders those diagnostics inline and in a panel, exposes definition, hover and completion
-demands, and reports daemon drip triggers and the validation backlog. A default-off assistant
+demands, and reports daemon drip triggers and the validation backlog. The `--lake` review panel
+pulls changes through liquid, renders retained inline text hunks and conflict values, creates
+cursor-anchored comments, advances them across revised heads, and updates review state. A
+default-off assistant
 assembles inspectable context from the same graph, streams through a pinned provider transport,
 and previews edits until the user accepts one normal drip. When off it constructs no provider and
 opens no connection. Next: inline build, test and deploy (liquify #6).

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <span>
 #include <string>
@@ -121,7 +122,9 @@ public:
                 std::size_t first_line,
                 float line_height,
                 float cell_width,
-                float horizontal_scroll) -> std::size_t {
+                float horizontal_scroll,
+                std::span<const ReviewDiffLine> review_lines,
+                std::span<const std::size_t> comment_lines) -> std::size_t {
         if (cell_width_ != cell_width || font_size_ != ImGui::GetFontSize()) {
             cell_width_ = cell_width;
             font_size_ = ImGui::GetFontSize();
@@ -132,6 +135,8 @@ public:
 
         const auto available_lines = static_cast<std::size_t>(std::ceil(height / line_height)) + 1;
         const auto last_line = std::min(buffer.line_count(), first_line + available_lines);
+        draw_review_backgrounds(
+            renderer, review_lines, x, y, width, first_line, last_line, line_height);
         draw_selection(renderer,
                        buffer,
                        layouts,
@@ -177,6 +182,7 @@ public:
                          line_height,
                          cell_width,
                          horizontal_scroll);
+        draw_review_comments(renderer, comment_lines, x, y, first_line, last_line, line_height);
         draw_cursor(renderer,
                     buffer,
                     layouts,
@@ -303,6 +309,56 @@ private:
         SDL_RenderFillRect(renderer, &rectangle);
     }
 
+    static void draw_review_backgrounds(SDL_Renderer* renderer,
+                                        std::span<const ReviewDiffLine> review_lines,
+                                        float x,
+                                        float y,
+                                        float width,
+                                        std::size_t first_line,
+                                        std::size_t last_line,
+                                        float line_height) {
+        if (review_lines.empty()) {
+            return;
+        }
+        for (auto line = first_line; line < last_line && line < review_lines.size(); ++line) {
+            const auto kind = review_lines[line].kind;
+            if (kind == ReviewDiffLineKind::added) {
+                SDL_SetRenderDrawColor(renderer, 224, 246, 226, 255);
+            } else if (kind == ReviewDiffLineKind::removed) {
+                SDL_SetRenderDrawColor(renderer, 252, 228, 228, 255);
+            } else if (kind == ReviewDiffLineKind::conflict) {
+                SDL_SetRenderDrawColor(renderer, 255, 235, 196, 255);
+            } else if (kind == ReviewDiffLineKind::file || kind == ReviewDiffLineKind::hunk) {
+                SDL_SetRenderDrawColor(renderer, 228, 235, 245, 255);
+            } else {
+                continue;
+            }
+            const SDL_FRect rectangle{
+                x, y + static_cast<float>(line - first_line) * line_height, width, line_height};
+            SDL_RenderFillRect(renderer, &rectangle);
+        }
+    }
+
+    static void draw_review_comments(SDL_Renderer* renderer,
+                                     std::span<const std::size_t> comment_lines,
+                                     float x,
+                                     float y,
+                                     std::size_t first_line,
+                                     std::size_t last_line,
+                                     float line_height) {
+        SDL_SetRenderDrawColor(renderer, 99, 74, 176, 255);
+        for (const auto line : comment_lines) {
+            if (line < first_line || line >= last_line) {
+                continue;
+            }
+            const SDL_FRect marker{x + 1.0F,
+                                   y + static_cast<float>(line - first_line) * line_height + 2.0F,
+                                   4.0F,
+                                   std::max(2.0F, line_height - 4.0F)};
+            SDL_RenderFillRect(renderer, &marker);
+        }
+    }
+
     static void draw_diagnostics(SDL_Renderer* renderer,
                                  EditorBuffer& buffer,
                                  std::span<const Diagnostic> diagnostics,
@@ -383,6 +439,18 @@ App::App(AppOptions options) : options_(std::move(options)) {
                     return std::make_unique<AnthropicProvider>(secret);
                 });
             }
+            if (options_.lake_url) {
+                try {
+                    const auto* token = std::getenv("LIQUID_TOKEN");
+                    review_ = std::make_unique<ReviewController>(
+                        *options_.repository_path,
+                        *options_.lake_url,
+                        token == nullptr ? std::string{} : std::string{token});
+                    review_->request_list();
+                } catch (const std::exception& error) {
+                    editor_status_ = std::string{"review configuration: "} + error.what();
+                }
+            }
         }
     }
     if (options_.smoke) {
@@ -457,6 +525,7 @@ void App::open_editor(std::string path, std::string blob_id) {
     }
     analysis_buffer_open_ = false;
     analysis_text_.clear();
+    review_diff_open_ = false;
     editor_ = std::make_unique<EditorBuffer>(
         EditorBuffer::open(*options_.repository_path, std::move(path), std::move(blob_id)));
     layouts_ = std::make_unique<TextLayoutCache>();
@@ -479,6 +548,183 @@ void App::open_editor(std::string path, std::string blob_id) {
     editor_graph_->open_buffer(
         std::filesystem::path(editor_->display_path()), *language, analysis_text_);
     editor_graph_->request_diagnostics(std::filesystem::path(editor_->display_path()));
+}
+
+void App::show_review_diff(const ReviewSnapshot& review) {
+    if (!review.selected || !review.head) {
+        return;
+    }
+    if (analysis_buffer_open_ && editor_graph_ && editor_) {
+        editor_graph_->close_buffer(std::filesystem::path(editor_->display_path()));
+    }
+    analysis_buffer_open_ = false;
+    analysis_text_.clear();
+    review_diff_lines_ = review.diff;
+    auto text = std::string{};
+    for (std::size_t index = 0; index < review_diff_lines_.size(); ++index) {
+        if (index != 0) {
+            text.push_back('\n');
+        }
+        text += review_diff_lines_[index].text;
+    }
+    const auto title = "Review " + review.selected->id + " — text diff";
+    editor_ = std::make_unique<EditorBuffer>(
+        EditorBuffer::from_text("review:" + review.selected->id, title, std::move(text)));
+    layouts_ = std::make_unique<TextLayoutCache>();
+    layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
+    text_layer_ = std::make_unique<RetainedTextLayer>();
+    text_layer_->reset(editor_->line_count());
+    review_diff_open_ = true;
+    displayed_review_head_ = liquid::to_string(review.head->value);
+    pending_review_id_.clear();
+    scroll_line_ = 0;
+    horizontal_scroll_ = 0.0F;
+    editor_focused_ = true;
+    editor_status_ = std::format("text diff ready in {:.3f} ms", review.open_to_first_hunk_ms);
+}
+
+void App::open_review(std::string id) {
+    if (!review_) {
+        return;
+    }
+    const auto snapshot = review_->snapshot();
+    if (snapshot.review.selected && snapshot.review.selected->id == id && !snapshot.busy) {
+        show_review_diff(snapshot.review);
+        return;
+    }
+    pending_review_id_ = id;
+    review_->request_open(std::move(id));
+    editor_status_ = "pulling review";
+}
+
+void App::navigate_hunk(bool forward) {
+    if (!review_) {
+        return;
+    }
+    if (!review_diff_open_) {
+        const auto snapshot = review_->snapshot();
+        if (!snapshot.review.selected) {
+            return;
+        }
+        show_review_diff(snapshot.review);
+    }
+    if (!editor_) {
+        return;
+    }
+    const auto current = editor_->cursor().line;
+    if (forward) {
+        for (auto line = current + 1; line < review_diff_lines_.size(); ++line) {
+            if (review_diff_lines_[line].kind == ReviewDiffLineKind::hunk) {
+                editor_->set_cursor({line, 0});
+                ensure_cursor_visible();
+                return;
+            }
+        }
+    } else {
+        for (auto line = current; line > 0; --line) {
+            if (review_diff_lines_[line - 1].kind == ReviewDiffLineKind::hunk) {
+                editor_->set_cursor({line - 1, 0});
+                ensure_cursor_visible();
+                return;
+            }
+        }
+    }
+}
+
+void App::navigate_comment() {
+    if (!review_) {
+        return;
+    }
+    const auto snapshot = review_->snapshot();
+    if (snapshot.review.comments.empty()) {
+        editor_status_ = "review has no comments";
+        return;
+    }
+    next_comment_index_ %= snapshot.review.comments.size();
+    const auto& comment = snapshot.review.comments[next_comment_index_++];
+    if (comment.state == ReviewAnchorState::deleted) {
+        editor_status_ = "deleted anchor parked: " + comment.value.body;
+        return;
+    }
+    if (review_diff_open_ && editor_) {
+        const auto found = std::ranges::find_if(review_diff_lines_, [&comment](const auto& line) {
+            return line.path == comment.value.anchor.path && line.new_line &&
+                   *line.new_line == comment.value.anchor.line;
+        });
+        if (found != review_diff_lines_.end()) {
+            const auto line = static_cast<std::size_t>(found - review_diff_lines_.begin());
+            editor_->set_cursor({line, 0});
+            ensure_cursor_visible();
+            return;
+        }
+    }
+    open_editor(comment.value.anchor.path, "review:" + comment.value.anchor.path);
+    if (editor_ && editor_->error().empty()) {
+        const auto line = comment.value.anchor.line == 0 ? 0 : comment.value.anchor.line - 1;
+        const auto column = comment.value.anchor.column == 0 ? 0 : comment.value.anchor.column - 1;
+        editor_->set_cursor({static_cast<std::size_t>(line), static_cast<std::size_t>(column)});
+        ensure_cursor_visible();
+    }
+}
+
+void App::begin_review_comment() {
+    if (!review_ || !review_->snapshot().review.selected) {
+        editor_status_ = "open a review before commenting";
+        return;
+    }
+    review_comment_body_.clear();
+    review_comment_popup_open_ = true;
+}
+
+void App::submit_review_comment() {
+    if (!review_ || !editor_ || review_comment_body_.empty()) {
+        return;
+    }
+    auto path = std::string{};
+    auto line = std::uint64_t{};
+    auto column = std::uint64_t{};
+    const auto cursor = editor_->cursor();
+    if (review_diff_open_) {
+        if (cursor.line >= review_diff_lines_.size() || !review_diff_lines_[cursor.line].new_line) {
+            editor_status_ = "comments require a current-side diff line";
+            return;
+        }
+        const auto& diff_line = review_diff_lines_[cursor.line];
+        path = diff_line.path;
+        line = *diff_line.new_line;
+        column = cursor.byte > 2 ? cursor.byte - 1 : 1;
+    } else {
+        path = std::string(editor_->display_path());
+        line = cursor.line + 1;
+        column = cursor.byte + 1;
+    }
+    review_->request_comment(review_comment_body_, std::move(path), line, column);
+    review_comment_body_.clear();
+    editor_status_ = "posting review comment";
+}
+
+void App::poll_review() {
+    if (!review_) {
+        return;
+    }
+    const auto snapshot = review_->snapshot();
+    if (snapshot.generation != review_generation_) {
+        review_generation_ = snapshot.generation;
+        if (!snapshot.error.empty()) {
+            editor_status_ = snapshot.error;
+        } else if (snapshot.review.selected && snapshot.review.head) {
+            const auto head = liquid::to_string(snapshot.review.head->value);
+            if (pending_review_id_ == snapshot.review.selected->id ||
+                (!displayed_review_head_.empty() && displayed_review_head_ != head)) {
+                show_review_diff(snapshot.review);
+            }
+        }
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (snapshot.review.selected && !snapshot.busy && now >= next_review_refresh_) {
+        review_->request_refresh();
+        next_review_refresh_ = now + std::chrono::seconds{2};
+    }
 }
 
 void App::apply_change(std::size_t first_line,
@@ -702,7 +948,8 @@ void App::poll_editor_graph() {
 }
 
 void App::handle_text(std::string_view text) {
-    if (!editor_ || !editor_focused_ || editor_->mode() == EditingMode::modal_command) {
+    if (!editor_ || !editor_focused_ || review_diff_open_ ||
+        editor_->mode() == EditingMode::modal_command) {
         return;
     }
     const auto change = editor_->insert_text(text);
@@ -717,8 +964,31 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     }
     const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
     const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+    const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
     if (primary && shift && key == SDLK_P) {
         command_palette_open_ = true;
+        return;
+    }
+    if (primary && alt && key == SDLK_C) {
+        begin_review_comment();
+        return;
+    }
+    if (primary && alt && key == SDLK_A) {
+        if (review_) {
+            review_->request_approve();
+        }
+        return;
+    }
+    if (alt && key == SDLK_DOWN) {
+        navigate_hunk(true);
+        return;
+    }
+    if (alt && key == SDLK_UP) {
+        navigate_hunk(false);
+        return;
+    }
+    if (alt && key == SDLK_C) {
+        navigate_comment();
         return;
     }
     if (primary && shift && key == SDLK_L) {
@@ -752,6 +1022,10 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         return;
     }
     if (primary && key == SDLK_S) {
+        if (review_diff_open_) {
+            editor_status_ = "review diffs are read-only";
+            return;
+        }
         save_editor();
         return;
     }
@@ -775,6 +1049,12 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         const auto next = editor_->mode() == EditingMode::standard ? EditingMode::modal_command
                                                                    : EditingMode::standard;
         editor_->set_mode(next);
+        return;
+    }
+
+    if (review_diff_open_ && key != SDLK_LEFT && key != SDLK_RIGHT && key != SDLK_UP &&
+        key != SDLK_DOWN && key != SDLK_HOME && key != SDLK_END && key != SDLK_PAGEUP &&
+        key != SDLK_PAGEDOWN) {
         return;
     }
 
@@ -888,6 +1168,102 @@ void App::draw_repository_tree() {
     }
     repository_->poll();
     draw_repository_entries({});
+    ImGui::Separator();
+    draw_review_panel();
+}
+
+void App::draw_review_panel() {
+    ImGui::TextUnformatted("Reviews");
+    if (!options_.lake_url) {
+        ImGui::TextDisabled("Configure with --lake <repository-url>");
+        return;
+    }
+    if (!review_) {
+        ImGui::TextWrapped("%s", editor_status_.c_str());
+        return;
+    }
+    const auto snapshot = review_->snapshot();
+    if (ImGui::SmallButton("Refresh reviews")) {
+        if (snapshot.review.selected) {
+            review_->request_refresh();
+        } else {
+            review_->request_list();
+        }
+    }
+    if (snapshot.busy) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("loading...");
+    }
+    if (!snapshot.error.empty()) {
+        ImGui::TextWrapped("%s", snapshot.error.c_str());
+    }
+    for (const auto& item : snapshot.review.reviews) {
+        const auto label = item.id + " [" + std::string(review_state_name(item.state)) + "]";
+        const auto selected = snapshot.review.selected && snapshot.review.selected->id == item.id;
+        if (ImGui::Selectable(label.c_str(), selected)) {
+            open_review(item.id);
+        }
+    }
+    if (!snapshot.review.selected) {
+        return;
+    }
+    ImGui::Separator();
+    ImGui::TextWrapped("Review %s: %s",
+                       snapshot.review.selected->id.c_str(),
+                       std::string(review_state_name(snapshot.review.selected->state)).c_str());
+    if (ImGui::SmallButton("New comment")) {
+        begin_review_comment();
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Approve")) {
+        review_->request_approve();
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Request changes")) {
+        review_->request_changes();
+    }
+    ImGui::TextDisabled("text diff %.3f ms | anchor map %.3f ms",
+                        snapshot.review.open_to_first_hunk_ms,
+                        snapshot.review.anchor_mapping_ms);
+    ImGui::Text("Comments (%zu)", snapshot.review.comments.size());
+    for (std::size_t index = 0; index < snapshot.review.comments.size(); ++index) {
+        const auto& comment = snapshot.review.comments[index];
+        const auto label = comment.value.anchor.path + ":" +
+                           std::to_string(comment.value.anchor.line) + " [" +
+                           std::string(review_anchor_state_name(comment.state)) + "] " +
+                           comment.value.body + "##review-comment-" + std::to_string(index);
+        if (ImGui::Selectable(label.c_str())) {
+            next_comment_index_ = index;
+            navigate_comment();
+        }
+    }
+}
+
+void App::draw_review_comment_popup() {
+    if (review_comment_popup_open_) {
+        ImGui::OpenPopup("Review comment");
+        review_comment_popup_open_ = false;
+    }
+    if (!ImGui::BeginPopupModal("Review comment", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+    ImGui::TextUnformatted("Comment on the current cursor");
+    ImGui::InputTextMultiline(
+        "##review-comment-body", &review_comment_body_, ImVec2(520.0F, 140.0F));
+    ImGui::BeginDisabled(review_comment_body_.empty());
+    if (ImGui::Button("Post comment")) {
+        submit_review_comment();
+        if (review_comment_body_.empty()) {
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+        review_comment_body_.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 void App::draw_repository_entries(std::string_view directory) {
@@ -1026,6 +1402,15 @@ void App::draw_command_palette() {
     command("Assistant: Toggle (Primary+Shift+L)", [this] { toggle_assistant(); });
     command("Assistant: What will be sent (Primary+Shift+C)",
             [this] { request_assistant_context(std::nullopt); });
+    command("Review: Next hunk (Alt+Down)", [this] { navigate_hunk(true); });
+    command("Review: Previous hunk (Alt+Up)", [this] { navigate_hunk(false); });
+    command("Review: Next comment (Alt+C)", [this] { navigate_comment(); });
+    command("Review: New comment (Primary+Alt+C)", [this] { begin_review_comment(); });
+    command("Review: Approve (Primary+Alt+A)", [this] {
+        if (review_) {
+            review_->request_approve();
+        }
+    });
     ImGui::EndPopup();
 }
 
@@ -1034,16 +1419,20 @@ void App::draw_editor() {
     const auto graph_snapshot = editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
     ImGui::Text("%s%s", path.c_str(), editor_->dirty() ? " *" : "");
     ImGui::SameLine();
-    if (ImGui::Button(editing_mode_name(editor_->mode()).data())) {
+    if (review_diff_open_) {
+        ImGui::TextDisabled("read-only text diff");
+    } else if (ImGui::Button(editing_mode_name(editor_->mode()).data())) {
         const auto next = editor_->mode() == EditingMode::standard ? EditingMode::modal_command
                                                                    : EditingMode::standard;
         editor_->set_mode(next);
         editor_focused_ = true;
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Save")) {
-        save_editor();
-        editor_focused_ = true;
+    if (!review_diff_open_) {
+        ImGui::SameLine();
+        if (ImGui::Button("Save")) {
+            save_editor();
+            editor_focused_ = true;
+        }
     }
     if (assistant_) {
         ImGui::SameLine();
@@ -1205,6 +1594,7 @@ void App::draw_contents() {
     }
     ImGui::EndGroup();
     draw_command_palette();
+    draw_review_comment_popup();
 }
 
 void App::render_editor() {
@@ -1226,6 +1616,32 @@ void App::render_editor() {
                         static_cast<int>(editor_height_)};
     SDL_SetRenderClipRect(renderer_, &clip);
     const auto graph_snapshot = editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
+    auto comment_lines = std::vector<std::size_t>{};
+    if (review_) {
+        const auto review_snapshot = review_->snapshot();
+        for (const auto& comment : review_snapshot.review.comments) {
+            if (comment.state == ReviewAnchorState::deleted) {
+                continue;
+            }
+            if (review_diff_open_) {
+                const auto found =
+                    std::ranges::find_if(review_diff_lines_, [&comment](const auto& line) {
+                        return line.path == comment.value.anchor.path && line.new_line &&
+                               *line.new_line == comment.value.anchor.line;
+                    });
+                if (found != review_diff_lines_.end()) {
+                    comment_lines.push_back(
+                        static_cast<std::size_t>(found - review_diff_lines_.begin()));
+                }
+            } else if (comment.value.anchor.path == editor_->display_path() &&
+                       comment.value.anchor.line > 0) {
+                comment_lines.push_back(static_cast<std::size_t>(comment.value.anchor.line - 1));
+            }
+        }
+    }
+    const auto review_lines = review_diff_open_
+                                  ? std::span<const ReviewDiffLine>{review_diff_lines_}
+                                  : std::span<const ReviewDiffLine>{};
     visible_lines_ = text_layer_->render(renderer_,
                                          *editor_,
                                          *layouts_,
@@ -1237,13 +1653,16 @@ void App::render_editor() {
                                          scroll_line_,
                                          line_height_,
                                          cell_width_,
-                                         horizontal_scroll_);
+                                         horizontal_scroll_,
+                                         review_lines,
+                                         comment_lines);
     SDL_SetRenderClipRect(renderer_, nullptr);
     SDL_SetRenderScale(renderer_, old_scale_x, old_scale_y);
 }
 
 void App::frame() {
     poll_editor_graph();
+    poll_review();
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();

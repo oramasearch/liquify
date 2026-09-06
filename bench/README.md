@@ -13,3 +13,7 @@ run is in [`docs/editor/README.md`](../docs/editor/README.md).
 definition with at least 20 resolved references, and compares its budgeted assistant block with a
 naive whole-file payload. Its recorded run is in
 [`docs/editor/README.md`](../docs/editor/README.md).
+
+`liquify-review-bench` imports 50 files from liquid's tree, builds their inline text-diff rows,
+and maps 200 cursor anchors after a rebase-style insertion. Its recorded run is in
+[`docs/editor/README.md`](../docs/editor/README.md).
