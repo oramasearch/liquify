@@ -15,6 +15,12 @@ registry:
 | `liquify.completion/1` | visible open-buffer declarations, compiler symbols and closed-file stub names ordered by source and scope proximity |
 | `liquify.diagnostics/1` | the build-diagnostic value for the translation unit associated with the buffer |
 
+Native plugin query names are added to this registry before the graph opens. Their argument
+encoder requires deterministic CBOR and their compute function calls the plugin operation with the
+frontend ABI ownership and callback conventions. `InteractiveAnalysis::plugin_query` demands the
+registered key through the same graph as the built-in queries, so persistence, fingerprints,
+cancellation, and error values follow the graph contract rather than a side registry.
+
 Cursor arguments are a normalized path plus UTF-8 byte position. Each cursor query reads the
 buffer's volatile overlay. Cross-file queries also read an encoded low-durability stub/symbol input
 and a volatile open-buffer revision. Diagnostics read the overlay, the buffer-to-translation-unit

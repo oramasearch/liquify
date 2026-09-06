@@ -20,6 +20,7 @@
 #include <tree_sitter/api.h>
 
 #include "liquid/runtime.hpp"
+#include "liquify/plugin.hpp"
 
 extern "C" {
 const TSLanguage *tree_sitter_c();
@@ -1535,7 +1536,8 @@ auto compute_diagnostics_query(const std::shared_ptr<SharedState> &state,
   co_return encode_diagnostics(*diagnostics);
 }
 
-auto interactive_registry(const std::shared_ptr<SharedState> &state)
+auto interactive_registry(const std::shared_ptr<SharedState> &state,
+                          const std::shared_ptr<PluginHost> &plugins)
     -> liquid::result<liquid::query_registry> {
   auto registry = liquid::query_registry{};
   const auto add =
@@ -1612,6 +1614,12 @@ auto interactive_registry(const std::shared_ptr<SharedState> &state)
        }});
   if (!added) {
     return std::unexpected(added.error());
+  }
+  if (plugins) {
+    added = plugins->register_queries(registry);
+    if (!added) {
+      return std::unexpected(added.error());
+    }
   }
   return registry;
 }
@@ -1728,8 +1736,11 @@ auto percentile_95(std::vector<double> values) -> double {
 } // namespace
 
 struct InteractiveAnalysis::Impl {
-  Impl(std::shared_ptr<SharedState> shared_state, liquid::graph opened_graph)
-      : state(std::move(shared_state)), graph(std::move(opened_graph)) {}
+  Impl(std::shared_ptr<SharedState> shared_state, liquid::graph opened_graph,
+       std::shared_ptr<PluginHost> plugin_host)
+      : state(std::move(shared_state)),
+        graph(std::move(opened_graph)),
+        plugins(std::move(plugin_host)) {}
 
   [[nodiscard]] auto set_input(liquid::graph_input_key key,
                                std::vector<std::byte> value,
@@ -1792,6 +1803,30 @@ struct InteractiveAnalysis::Impl {
     return std::move(value->bytes);
   }
 
+  [[nodiscard]] auto demand_plugin(std::string_view name,
+                                   std::span<const std::byte> arguments)
+      -> liquid::result<std::vector<std::byte>> {
+    if (!plugins) {
+      return std::unexpected(
+          failure("plugin query is not registered", std::string(name)));
+    }
+    const auto names = plugins->query_names();
+    if (std::ranges::find(names, name) == names.end()) {
+      return std::unexpected(
+          failure("plugin query is not registered", std::string(name)));
+    }
+    auto canonical = canonical_plugin_cbor(arguments);
+    if (!canonical) {
+      return std::unexpected(canonical.error());
+    }
+    auto value = liquid::runtime::block_on(graph.demand(
+        liquid::query_key{std::string(name), std::move(*canonical)}));
+    if (!value) {
+      return std::unexpected(value.error());
+    }
+    return std::move(value->bytes);
+  }
+
   void cancel_queries(std::string_view path) {
     const auto found = active_queries.find(std::string(path));
     if (found == active_queries.end()) {
@@ -1804,6 +1839,7 @@ struct InteractiveAnalysis::Impl {
 
   std::shared_ptr<SharedState> state;
   liquid::graph graph;
+  std::shared_ptr<PluginHost> plugins;
   AnalysisIndex index;
   std::map<std::string, std::string> translation_units;
   std::map<std::string, std::vector<liquid::query_key>> active_queries;
@@ -1824,8 +1860,14 @@ InteractiveAnalysis::~InteractiveAnalysis() = default;
 
 auto InteractiveAnalysis::open(std::filesystem::path state_directory)
     -> liquid::result<InteractiveAnalysis> {
+  return open(std::move(state_directory), {});
+}
+
+auto InteractiveAnalysis::open(std::filesystem::path state_directory,
+                               std::shared_ptr<PluginHost> plugins)
+    -> liquid::result<InteractiveAnalysis> {
   auto state = std::make_shared<SharedState>();
-  auto registry = interactive_registry(state);
+  auto registry = interactive_registry(state, plugins);
   if (!registry) {
     return std::unexpected(registry.error());
   }
@@ -1835,7 +1877,8 @@ auto InteractiveAnalysis::open(std::filesystem::path state_directory)
     return std::unexpected(graph.error());
   }
   auto implementation =
-      std::make_unique<Impl>(std::move(state), std::move(*graph));
+      std::make_unique<Impl>(std::move(state), std::move(*graph),
+                             std::move(plugins));
   auto indexed = implementation->set_input(
       analysis_index_input(), encode_analysis_index(implementation->index),
       liquid::durability::low);
@@ -2254,6 +2297,12 @@ auto InteractiveAnalysis::definition_context(const std::filesystem::path &path,
                                              std::move(*definition)});
   }
   return output;
+}
+
+auto InteractiveAnalysis::plugin_query(
+    std::string_view name, std::span<const std::byte> arguments_cbor)
+    -> liquid::result<std::vector<std::byte>> {
+  return impl_->demand_plugin(name, arguments_cbor);
 }
 
 auto InteractiveAnalysis::measure_latency(

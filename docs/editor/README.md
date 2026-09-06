@@ -81,6 +81,12 @@ measured edit-to-result duration. Selecting a diagnostic opens its blob and move
 range. The build diagnostic producer is the `EditorGraph::publish_build_diagnostics` boundary;
 launching inline builds remains liquify #6.
 
+Configured plugin commands are appended to the keyboard-first command palette with their declared
+default bindings. Data-only plugin text panels render below completion results. A panel operation
+that returns an error or invalid view model displays that error in its own row without hiding other
+plugin panels. The native boundary and configuration are recorded in
+[`../plugins/README.md`](../plugins/README.md).
+
 The status line is formatted from `liquid::daemon_status`: the last workspace drip's invalidated
 paths, the sum of target cursor distances as the validation backlog, daemon availability and the
 pending repository drip count returned by the last editor save. Recursive repository navigation
