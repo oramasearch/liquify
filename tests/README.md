@@ -27,7 +27,26 @@ all seven registered analysis queries. It covers closed-file stub hover and defi
 compiler-symbol precedence, translation-unit diagnostics, completion order, local references,
 tree-sitter changed-range reuse, cancellation during typing and a successful answer after the edit.
 
+`test_plugin.cpp` registers the sample descriptor statically and loads the same source as a module.
+Both paths demand its query through `InteractiveAnalysis`, invoke its command, and decode its panel.
+Configuration coverage loads global and repository paths, deduplicates the shared module, and
+reports a missing path without losing that module. The suite also refuses a mismatched ABI and
+non-canonical CBOR, then proves one panel error does not hide a healthy panel from the same host.
+
 `test_editor_graph.cpp` proves the application runtime hosts liquid's daemon for the first client,
 attaches when a daemon already owns the checkout, serializes overlay mutations, publishes
 diagnostics and cursor-query results, records edit-to-diagnostic latency and formats the validation
 backlog from daemon status.
+
+`test_structural_edit.cpp` covers the syntax ancestor selection chain, exact reference ranges,
+rename across two files with one drip per file, unresolved string occurrences, stale-fingerprint
+refusal, compiling C and C++ extract-function results, deterministic canonical CBOR and the real
+headless `--apply-edits` executable path. The extract fixtures use the C and C++ compilers selected
+by CMake for syntax-only verification.
+
+`test_ai.cpp` verifies the default-off repository and global setting, zero provider constructions
+and zero connections against a counting network double, graph-derived context with a byte budget
+and explicit omissions, and the Anthropic Messages request over an in-process TLS server. Its SSE
+cases cover a normal streamed answer, a refusal stop reason, and a connection ending mid-stream.
+It also proves a proposed replacement leaves repository content unchanged until acceptance, then
+creates exactly one drip and a local assisted-edit record without recording the prompt.

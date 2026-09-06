@@ -10,7 +10,9 @@ the panel and on the affected retained text line.
 repository. Before starting it requests `daemon::build_plan(build_target{})`, which supplies the
 configured actions, their dependency ordering and their validated hit state. The editor does not
 start the `liquid` executable and does not reconstruct action inputs. The returned `build_handle`
-is consumed as an awaitable event sequence. A save during a build is captured by the daemon; the
+is consumed as an awaitable event sequence. The panel renders each planned dependency edge. A
+critical action includes liquid's scheduling reason and local and remote estimates. A save during a
+build is captured by the daemon; the
 editor immediately requests a new plan; unchanged actions remain visible as hits in that plan.
 
 **Tests.** `repository::tests()` supplies the listed targets. The All tests control uses
@@ -27,49 +29,16 @@ references remain visible when another reference is refused.
 palette, which lists the same three commands. The status line reports the running-action count and
 the latest build summary.
 
-**Concurrency.** UI input only queues a request. Build subscriptions, test execution and deploy
-use liquid's Capy coroutine runtime; snapshots are copied under a mutex before rendering. No editor
-build or deploy work executes on the UI thread.
+**Concurrency.** UI input only queues a request. The graph worker consumes the build event sequence
+and performs test and deploy operations, then copies snapshots under a mutex for rendering. The UI
+thread never waits for a liquid operation.
 
-## Headless measurement
+## Measurement record
 
-`liquify --measure-build PATH [--target TARGET]` exercises the build and test panel controller
-without initializing SDL or opening a window. It opens `PATH` through the in-process daemon, adds a
-comment inside liquid's `src/store/faults.cpp::visit_fault`, saves it through the configured build
-repository, starts `daemon::build(target)`, and consumes that build handle's event sequence. It then
-uses the same controller to list tests and run one target through `repository::run_tests(filter)`.
-The command writes three JSON records: the build record has save-to-first-action and
-save-to-build-result milliseconds, the test record has its end-to-end milliseconds, and the system
-record has `/proc/loadavg`. It exits nonzero when the repository is not wrapped, the known source
-marker is absent, there are no test targets, or an operation reports an error.
-
-Run the own-tree measurement in liquid's Linux CI image. The image provides FUSE, CMake, Ninja, and
-Clang 19. Its disposable container layer installs the X11 development headers required while
-liquify configures its vendored SDL3; it does not change the `liquid-linux-ci` image. The
-`--privileged` and `--device /dev/fuse` flags are required by `liquid wrap`.
-
-```sh
-docker run --rm --privileged --device /dev/fuse \
-  --tmpfs /src/build-linux-liquify --tmpfs /src/modules/liquid/build-linux \
-  -e CC=clang-19 -e CXX=clang++-19 \
-  -v "$PWD":/src -w /src liquid-linux-ci bash -lc '
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev
-    cmake --fresh -S . -B build-linux-liquify -G Ninja -DLIQUIFY_BUILD_TESTS=OFF
-    cmake --build build-linux-liquify
-    cmake -S modules/liquid -B modules/liquid/build-linux -G Ninja \
-      -DLIQUID_BUILD_CLI=ON
-    cmake --build modules/liquid/build-linux --target liquid
-    cd modules/liquid
-    build-linux/liquid wrap cmake --build build-linux
-    cd /src
-    SDL_VIDEODRIVER=dummy build-linux-liquify/liquify --measure-build modules/liquid
-  '
-```
-
-`SDL_VIDEODRIVER=dummy` makes the invocation safe in a headless environment even though this mode
-does not create an SDL window.
+Linux proof deferred (decision 33). The macOS smoke measurement in
+[`README.md`](README.md#smoke-measurement) is the current editor measurement. It records retained
+rendering and edit-to-present latency, including the display refresh constraint. The build, test,
+and deploy panels remain covered by the editor graph test named below.
 
 **Verification.** `EditorGraph.PresentsBuildEventsTestsAndRefusedReferences` covers action state,
 a failed action diagnostic placed on a source line, a test hit followed by a rerun, and a refused

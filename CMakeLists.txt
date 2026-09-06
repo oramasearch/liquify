@@ -112,18 +112,48 @@ target_link_libraries(tree-sitter-cpp-parser PUBLIC tree-sitter-runtime)
 # liquify
 # -----------------------------------------------------------------------------
 add_library(liquify-core STATIC
+  modules/liquid/src/encoding/cbor.cpp
+  src/ai_config.cpp
+  src/ai_provider.cpp
+  src/assistant.cpp
+  src/context_builder.cpp
   src/editor_buffer.cpp
   src/editor_graph.cpp
   src/interactive_analysis.cpp
-  src/measure.cpp
+  src/plugin.cpp
   src/repository_view.cpp
+  src/structural_edit.cpp
   src/text_layout.cpp
   src/stub_tree.cpp
   src/version.cpp)
-target_include_directories(liquify-core PUBLIC include)
+target_include_directories(liquify-core
+  PUBLIC include
+  PRIVATE modules/corosio/include modules/http/include modules/liquid/src)
 target_link_libraries(liquify-core
   PUBLIC liquid::liquid
-  PRIVATE tree-sitter-c-parser tree-sitter-cpp-parser)
+  PRIVATE Boost::corosio Boost::corosio_openssl Boost::http Boost::json
+          tree-sitter-c-parser tree-sitter-cpp-parser)
+if(APPLE)
+  target_link_libraries(liquify-core PRIVATE "-framework Security")
+elseif(WIN32)
+  target_link_libraries(liquify-core PRIVATE Advapi32)
+endif()
+target_link_libraries(liquify-core PRIVATE ${CMAKE_DL_LIBS})
+
+add_library(liquify-sample-plugin-objects OBJECT plugins/sample/sample_plugin.cpp)
+set_target_properties(liquify-sample-plugin-objects PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  POSITION_INDEPENDENT_CODE ON
+  VISIBILITY_INLINES_HIDDEN ON)
+target_include_directories(liquify-sample-plugin-objects PRIVATE
+  modules/liquid/include plugins/sample)
+add_library(liquify-sample-plugin MODULE $<TARGET_OBJECTS:liquify-sample-plugin-objects>)
+set_target_properties(liquify-sample-plugin PROPERTIES
+  PREFIX ""
+  OUTPUT_NAME "liquify-sample-plugin")
+add_library(liquify-sample-plugin-static STATIC
+  $<TARGET_OBJECTS:liquify-sample-plugin-objects>)
+target_include_directories(liquify-sample-plugin-static PUBLIC plugins/sample)
 
 option(LIQUIFY_BUILD_BENCH "Build stub-tree benchmarks" OFF)
 if(LIQUIFY_BUILD_BENCH)
@@ -134,6 +164,10 @@ if(LIQUIFY_BUILD_BENCH)
   target_link_libraries(liquify-interactive-analysis-bench PRIVATE liquify-core)
   add_executable(liquify-editor-graph-bench bench/editor_graph_bench.cpp)
   target_link_libraries(liquify-editor-graph-bench PRIVATE liquify-core)
+  add_executable(liquify-ai-context-bench bench/ai_context_bench.cpp)
+  target_link_libraries(liquify-ai-context-bench PRIVATE liquify-core)
+  add_executable(liquify-structural-edit-bench bench/structural_edit_bench.cpp)
+  target_link_libraries(liquify-structural-edit-bench PRIVATE liquify-core)
 endif()
 
 add_library(liquify-app STATIC src/app.cpp)

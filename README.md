@@ -5,7 +5,7 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: retained GPU editor with graph-backed interactive C/C++ analysis, build, test and deploy.**
+> **Status: retained GPU editor with graph-backed analysis, inline build, test and deploy, structural editing and an optional AI surface.**
 > `liquify <path>` opens a liquid repository through the public coroutine API, renders its root
 > entries, loads nested trees on expansion, and opens blobs into an editable in-memory buffer;
 > save writes through libliquid as a drip. Unreadable repositories show liquid's error and make
@@ -13,30 +13,39 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > `liquify` with no path retains the hello state, and `--smoke` scrolls and edits 50,000 lines.
 > The pin includes liquid's compact-checkpoint repository format, Phase 2 and 3 APIs, and the
 > persisted demand-driven query graph, tree-diff and record-enumeration APIs, per-checkout daemon,
-> registered frontend modules with per-definition C/C++ actions, the scheduler and worker fleet,
-> authorized sync reference updates with per-reference outcomes, repository search, continuous
-> clean-rebuild validation, configured repository build plans, daemon build-event streams, test actions,
-> and the C/C++ stub-tree query. The editor consumes daemon build events for action state, critical
-> paths and diagnostics; it runs graph-backed tests and displays configured sync push outcomes. Stub
+> registered frontend modules with per-definition C/C++ actions, and C/C++ stub-tree query. Stub
 > trees resolve declarations from closed files without retaining their full parse trees. Open
 > overlays retain error-tolerant incremental trees and answer node,
 > enclosing-definition, definition, reference, hover, completion and build-diagnostic queries;
 > an edit cancels their in-flight graph work. The editor renders graph diagnostics inline and in a
 > panel, exposes definition, hover and completion controls, and shows daemon drip triggers plus the
-> validation backlog in its status line.
+> validation backlog in its status line. Syntax-node selection, cross-file rename and C/C++
+> extract-function run on the editor worker and preview fingerprinted node edits before applying
+> one drip per changed file. The same canonical CBOR records are accepted by the headless
+> `--apply-edits` command. The default-off assistant builds inspectable, byte-budgeted
+> context from those graph facts, streams the Anthropic Messages API over pinned Corosio and
+> Boost.HTTP, and applies a proposed edit only after user acceptance. Turning it off constructs no
+> provider and opens no connection.
+> Native plugins share liquid's versioned frontend C boundary, register graph queries, commands,
+> and canonical-CBOR panels, and load through checked static or configured dynamic paths. Plugin
+> commands appear in the palette and data-only panels render below analysis results. The sample
+> proves all three registrations; load and panel failures remain local to their source.
+> F7 plans and starts the configured build through the attached daemon, then renders its action
+> event stream, critical path and scheduler decisions. F8 lists and runs graph test actions; F9
+> pushes saved drips to the configured sync remote and reports every reference outcome, including
+> an authorization refusal while accepted references continue. Failed action diagnostics render on
+> their affected editor lines.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
-> Inline build, test and deploy are available through liquid's graph actions and sync transport.
-> `liquify --measure-build <repository> [--target <target>]` runs the build and test panel
-> controller headlessly and writes JSON timing and load-average records for a wrapped repository.
 
 ## Build and run
 
 Requirements: CMake ≥ 3.28, Ninja, Clang 17+ (Homebrew LLVM on macOS), OpenSSL and zlib. Linux
 also needs pkg-config and FUSE3 development files. liquid is a submodule (libliquid is built
-in-tree and linked); SDL3, Dear ImGui and GoogleTest are fetched by CMake; SDL is linked static
-so the result is one binary.
+in-tree and linked); Corosio and Boost.HTTP are separately pinned assistant transport submodules;
+SDL3, Dear ImGui and GoogleTest are fetched by CMake; SDL is linked static so the result is one
+binary.
 
 Every push and pull request repeats the clean-clone build on Linux, macOS, and Windows, then
 runs the tests, version command, and display-backed smoke self-test. See
@@ -52,8 +61,8 @@ ctest --test-dir build
 ./build/liquify            # open the IDE
 ./build/liquify <path>     # open a liquid repository and render its root tree
 ./build/liquify --print-tree <path>
+./build/liquify --apply-edits request.cbor <path> > result.cbor
 ./build/liquify --smoke    # scroll/edit 50,000 lines for 30 frames, report latency, exit 0
-./build/liquify --measure-build modules/liquid # headless configured-build and one-test timing
 ./build/liquify version
 ```
 
@@ -69,9 +78,18 @@ ctest --test-dir build
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
 | `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |
 | `include/liquify/editor_graph.hpp`, `src/editor_graph.cpp` | background editor-query runtime, daemon host/attach lifetime, asynchronous query snapshots and status data |
-| `src/main.cpp`, `src/measure.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, headless `--measure-build PATH [--target TARGET]`, `--help` |
+| `docs/editor/build.md` | graph build, test and deploy panels, event states, bindings and measurement record |
+| `include/liquify/structural_edit.hpp`, `src/structural_edit.cpp` | canonical node-level edit records, selection, rename, extract-function and repository application |
+| `include/liquify/context_builder.hpp`, `src/context_builder.cpp` | byte-budgeted, inspectable assistant context assembled from graph facts |
+| `include/liquify/ai_provider.hpp`, `src/ai_provider.cpp` | streaming provider interface and Anthropic Messages implementation |
+| `include/liquify/ai_config.hpp`, `src/ai_config.cpp` | default-off repository/global configuration and credential lookup |
+| `include/liquify/assistant.hpp`, `src/assistant.cpp` | assistant state, proposal acceptance, and local assisted-edit record |
+| `include/liquify/plugin.hpp`, `src/plugin.cpp` | checked native plugin host, global/repository configuration, canonical-CBOR validation, graph query registration, commands, and panel view models |
+| `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
+| `src/main.cpp` | CLI: optional repository path, `--print-tree`, `--apply-edits`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
+| `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |
 | `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |
 
 ## What this is

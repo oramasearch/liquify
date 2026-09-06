@@ -1,5 +1,11 @@
 # The editor surface
 
+[`ai.md`](ai.md) records the optional assistant, its offline switch guarantee, graph-derived
+inspectable context, provider contract, keyboard commands, and accept-only edit path.
+
+[`structural-editing.md`](structural-editing.md) records syntax-node selection, canonical edit
+records, rename and extract-function previews, the headless agent surface and their limits.
+
 **Decision.** The editor buffer is a retained GPU text layer inside Dear ImGui (bridge decision
 15). ImGui owns the window, repository panel and controls. `src/app.cpp` uses the SDL renderer
 directly for buffer text, selection and cursor; no other translation unit includes SDL or ImGui.
@@ -55,6 +61,16 @@ smoke: lines=50000 frames=3000 visible_lines=68 avg_frame_ms=16.778 p95_frame_ms
 The average scroll rate is the display refresh rate. Typing latency is one presented frame on
 average while the viewport crosses the full 50,000-line buffer.
 
+The #6 verification was measured on 2026-09-06 on this macOS host. The load average was read
+immediately after the smoke run:
+
+```text
+$ ./build/liquify --smoke 30
+smoke: lines=50000 frames=30 visible_lines=41 avg_frame_ms=0.509 p95_frame_ms=1.846 achieved_hz=1964.0 display_hz=60.0 avg_typing_ms=0.634 p95_typing_ms=2.097
+$ sysctl -n vm.loadavg
+{ 24.88 38.85 52.37 }
+```
+
 ## Interactive analysis
 
 [`interactive-analysis.md`](interactive-analysis.md) records the graph-backed analysis service.
@@ -72,9 +88,8 @@ buffer.
 Diagnostics are demanded after buffer open and every edit. The retained renderer draws a colored
 underline at each source range, while the diagnostics panel lists severity, message and the
 measured edit-to-result duration. Selecting a diagnostic opens its blob and moves the cursor to its
-range. The build diagnostic producer is the `EditorGraph::publish_build_diagnostics` boundary;
-failed actions also publish their diagnostics from the daemon event stream directly to the retained
-line layer.
+range. Failed actions publish their diagnostics from the daemon event stream directly to the
+retained line layer.
 
 ## Build, test and deploy
 
@@ -83,16 +98,23 @@ build through the in-process daemon, F8 runs registered graph tests, F9 pushes s
 configured sync remote, and primary-modifier+P opens the corresponding command-palette entries.
 The status line shows active actions and the most recent result.
 
+Configured plugin commands are appended to the keyboard-first command palette with their declared
+default bindings. Data-only plugin text panels render below completion results. A panel operation
+that returns an error or invalid view model displays that error in its own row without hiding other
+plugin panels. The native boundary and configuration are recorded in
+[`../plugins/README.md`](../plugins/README.md).
+
 The status line is formatted from `liquid::daemon_status`: the last workspace drip's invalidated
 paths, the sum of target cursor distances as the validation backlog, daemon availability and the
 pending repository drip count returned by the last editor save. Recursive repository navigation
 loads directory trees lazily as recorded in [`../app-shell/README.md`](../app-shell/README.md).
 
-## Headless build measurement
+## Build measurement
 
-[`build.md`](build.md#headless-measurement) records the privileged `liquid-linux-ci` command used
-to measure a wrapped liquid checkout without a macFUSE installation. The result below is filled
-from that command's JSON output and includes the container load average beside each latency.
+Linux proof deferred (decision 33). The current macOS measurement is the display-backed smoke run
+recorded above. It measures the editor's retained rendering and edit-to-present path while the
+build, test, and deploy controller is verified by
+`EditorGraph.PresentsBuildEventsTestsAndRefusedReferences`.
 
 ## Phase 4 exit measurement
 
@@ -114,6 +136,44 @@ smoke: lines=50000 frames=3000 visible_lines=68 avg_frame_ms=16.821 p95_frame_ms
 The lazy root open remains independent of repository size. Average typing latency changed from
 16.925 ms in the baseline above to 16.974 ms with the graph integration, a 0.049 ms difference;
 both measurements present an edit in one display frame on average.
+
+## Assistant context measurement
+
+`liquify-ai-context-bench` loads liquid's C and C++ declarations into `InteractiveAnalysis`, opens
+`src/repository/repository_impl.cpp`, selects its `repository` definition, resolves 20 referenced
+definitions through the graph, and assembles the structured context 1,000 times. The comparison
+uses the source file bytes as the naive whole-file context. Build benchmarks with
+`-DLIQUIFY_BUILD_BENCH=ON`.
+
+Measured on 2026-09-05 on the same machine as the editor measurements above:
+
+```text
+$ ./build/liquify-ai-context-bench modules/liquid build/ai-context-state
+ai context: definition=repository references=20 bytes=3215 whole_file_bytes=275451 percent_of_whole_file=1.16718 assembly_us=69.522
+```
+
+The graph context is 1.17% of the naive file payload and names every omission when a configured
+budget excludes a fact.
+
+## Structural editing measurement
+
+`liquify-structural-edit-bench` copies selected files from liquid's own source tree into a fresh
+libliquid repository. It chooses the most frequent identifier with at least 50 references, measures
+rename preview plus node application, finds a statement node spanning at least 30 lines, and
+measures extract preview plus application. Build benchmarks with `-DLIQUIFY_BUILD_BENCH=ON`.
+
+Measured on 2026-09-06 on the same machine as the editor measurements above. The load average was
+read immediately after the benchmark:
+
+```text
+$ ./build/liquify-structural-edit-bench modules/liquid build/structural-measure-repository-5
+structural edit: rename_symbol=unexpected references=667 applied=667 rename_ms=23684.745 extract_lines=36 extract_edits=11 extract_ms=123.852
+$ sysctl -n vm.loadavg
+{ 92.44 87.23 82.73 }
+```
+
+The reported duration is end to end through graph reference discovery, fingerprint validation,
+incremental buffer reparses and one repository drip for each changed file.
 
 ## Verify
 
