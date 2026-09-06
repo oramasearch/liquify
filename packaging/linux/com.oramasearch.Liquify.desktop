@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Liquify
+Comment=The IDE for liquid
+Exec=liquify
+Icon=com.oramasearch.Liquify
+Categories=Development;IDE;
+Terminal=false

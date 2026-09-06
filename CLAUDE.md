@@ -37,7 +37,11 @@ their commands and data-only panels appear in the editor surface. F7 plans and s
 build through the attached daemon and renders its action stream, critical path and scheduling
 choice. F8 lists and runs test actions; F9 pushes saved drips to the configured sync remote and
 renders each reference outcome. Failed action diagnostics are line diagnostics in the retained
-editor.
+editor. Pull-request CI packages the release binary as a hardened-runtime macOS `pkg` and `dmg`, a
+signed and install-tested Windows MSIX, and an AppImage verified on Ubuntu and Fedora. Tag releases
+publish those installers and their signed and unsigned SHA-256 records; macOS notarization runs
+when the App Store Connect credentials are available. Hand-built packaging remains in place until
+liquid's projection and platform-signing targets land.
 
 ## Decisions — recorded
 
