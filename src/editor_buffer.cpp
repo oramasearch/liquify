@@ -5,6 +5,7 @@
 #include <future>
 #include <iterator>
 #include <span>
+#include <tuple>
 #include <utility>
 
 #include "liquid/repository.hpp"
@@ -93,25 +94,31 @@ EditorBuffer EditorBuffer::open(std::filesystem::path repository_path,
           auto opened = liquid::runtime::block_on(
               liquid::repository::open(std::move(path)));
           if (!opened) {
-            return std::pair<std::string, std::string>{
-                "", error_message(opened.error())};
+              return std::tuple<std::string, std::string, std::string>{
+                  "", error_message(opened.error()), ""};
           }
-          auto contents =
-              liquid::runtime::block_on(opened->read(std::move(file)));
+          auto contents = liquid::runtime::block_on(opened->read(file));
           if (!contents) {
-            return std::pair<std::string, std::string>{
-                "", error_message(contents.error())};
+              return std::tuple<std::string, std::string, std::string>{
+                  "", error_message(contents.error()), ""};
           }
           const auto *data = reinterpret_cast<const char *>(contents->data());
-          return std::pair<std::string, std::string>{
-              std::string(data, contents->size()), ""};
+          auto editor_config = std::string{};
+          auto configured = liquid::runtime::block_on(opened->read(".editorconfig"));
+          if (configured) {
+              const auto* config_data = reinterpret_cast<const char*>(configured->data());
+              editor_config.assign(config_data, configured->size());
+          }
+          return std::tuple<std::string, std::string, std::string>{
+              std::string(data, contents->size()), "", std::move(editor_config)};
         },
         repository_path, blob_path);
-    auto [text, error] = worker.get();
+    auto [text, error, editor_config] = worker.get();
     auto buffer = from_text(std::move(blob_id), blob_path, std::move(text));
     buffer.repository_path_ = std::move(repository_path);
     buffer.blob_path_ = std::move(blob_path);
     buffer.error_ = std::move(error);
+    buffer.preferences_ = parse_editor_preferences(editor_config, buffer.blob_path_);
     return buffer;
   } catch (const std::exception &error) {
     auto buffer = from_text(std::move(blob_id), blob_path, "");
@@ -183,6 +190,15 @@ auto EditorBuffer::text() const -> std::string {
 
 auto EditorBuffer::cursor() const -> TextPosition { return cursor_; }
 
+auto EditorBuffer::cursors() const -> std::vector<TextPosition> {
+    auto output = std::vector<TextPosition>{cursor_};
+    output.reserve(secondary_carets_.size() + 1);
+    for (const auto& caret : secondary_carets_) {
+        output.push_back(caret.position);
+    }
+    return output;
+}
+
 auto EditorBuffer::byte_offset(TextPosition position) const -> std::size_t {
   position = clamped(position);
   auto offset = std::size_t{};
@@ -204,6 +220,25 @@ auto EditorBuffer::selection() const -> std::optional<TextSelection> {
                        std::max(*selection_anchor_, cursor_)};
 }
 
+auto EditorBuffer::selections() const -> std::vector<TextSelection> {
+    auto output = std::vector<TextSelection>{};
+    if (const auto primary = selection()) {
+        output.push_back(*primary);
+    }
+    for (const auto& caret : secondary_carets_) {
+        if (!caret.anchor || *caret.anchor == caret.position) {
+            continue;
+        }
+        output.push_back(
+            {std::min(*caret.anchor, caret.position), std::max(*caret.anchor, caret.position)});
+    }
+    return output;
+}
+
+auto EditorBuffer::preferences() const -> const EditorPreferences& {
+    return preferences_;
+}
+
 auto EditorBuffer::mode() const -> EditingMode { return mode_; }
 
 auto EditorBuffer::dirty() const -> bool { return dirty_; }
@@ -215,6 +250,7 @@ auto EditorBuffer::revision() const -> std::uint64_t { return revision_; }
 void EditorBuffer::set_mode(EditingMode mode) {
   mode_ = mode;
   selection_anchor_.reset();
+  secondary_carets_.clear();
 }
 
 auto EditorBuffer::clamped(TextPosition position) const -> TextPosition {
@@ -235,10 +271,52 @@ void EditorBuffer::set_cursor(TextPosition position, bool extend_selection) {
   finish_movement(extend_selection);
 }
 
+void EditorBuffer::add_cursor(TextPosition position) {
+    position = clamped(position);
+    if (position == cursor_ ||
+        std::ranges::any_of(secondary_carets_,
+                            [position](const auto& caret) { return caret.position == position; })) {
+        return;
+    }
+    secondary_carets_.push_back({position, std::nullopt});
+}
+
+void EditorBuffer::clear_secondary_cursors() {
+    secondary_carets_.clear();
+}
+
 void EditorBuffer::select_all() {
-  selection_anchor_ = TextPosition{};
-  cursor_ = TextPosition{lines_.size() - 1, lines_.back().size()};
-  preferred_byte_ = cursor_.byte;
+    secondary_carets_.clear();
+    selection_anchor_ = TextPosition{};
+    cursor_ = TextPosition{lines_.size() - 1, lines_.back().size()};
+    preferred_byte_ = cursor_.byte;
+}
+
+void EditorBuffer::select(SelectionKind kind) {
+    secondary_carets_.clear();
+    const auto range = selection_for(lines_, cursor_, kind);
+    selection_anchor_ = range.begin;
+    cursor_ = range.end;
+    preferred_byte_ = cursor_.byte;
+}
+
+void EditorBuffer::select_column(TextPosition anchor, TextPosition cursor) {
+    const auto ranges = column_selections(lines_, clamped(anchor), clamped(cursor));
+    secondary_carets_.clear();
+    if (ranges.empty()) {
+        selection_anchor_.reset();
+        return;
+    }
+    selection_anchor_ = ranges.front().begin;
+    cursor_ = ranges.front().end;
+    for (std::size_t index = 1; index < ranges.size(); ++index) {
+        secondary_carets_.push_back({ranges[index].end, ranges[index].begin});
+    }
+    preferred_byte_ = cursor_.byte;
+}
+
+void EditorBuffer::set_preferences(EditorPreferences preferences) {
+    preferences_ = preferences;
 }
 
 void EditorBuffer::prepare_movement(bool extend_selection) {
@@ -247,6 +325,7 @@ void EditorBuffer::prepare_movement(bool extend_selection) {
   }
   if (!extend_selection) {
     selection_anchor_.reset();
+    secondary_carets_.clear();
   }
 }
 
@@ -365,6 +444,7 @@ auto EditorBuffer::replace(TextSelection range, std::string_view text)
                 std::make_move_iterator(inserted.end()));
   cursor_ = TextPosition{cursor_line, cursor_byte};
   selection_anchor_.reset();
+  secondary_carets_.clear();
   preferred_byte_ = cursor_.byte;
   dirty_ = true;
   error_.clear();
@@ -372,19 +452,124 @@ auto EditorBuffer::replace(TextSelection range, std::string_view text)
   return BufferChange{range.begin.line, erased_lines, inserted_lines};
 }
 
+auto EditorBuffer::replace_many(std::vector<TextSelection> ranges, std::string_view replacement)
+    -> BufferChange {
+    struct PendingEdit {
+        std::size_t start{};
+        std::size_t end{};
+        std::size_t order{};
+    };
+    auto edits = std::vector<PendingEdit>{};
+    edits.reserve(ranges.size());
+    for (std::size_t index = 0; index < ranges.size(); ++index) {
+        auto range = ranges[index];
+        range.begin = clamped(range.begin);
+        range.end = clamped(range.end);
+        if (range.end < range.begin) {
+            std::swap(range.begin, range.end);
+        }
+        edits.push_back({byte_offset(range.begin), byte_offset(range.end), index});
+    }
+    std::ranges::sort(edits, [](const auto& left, const auto& right) {
+        return std::tie(left.start, left.end) < std::tie(right.start, right.end);
+    });
+    edits.erase(std::unique(edits.begin(),
+                            edits.end(),
+                            [](const auto& left, const auto& right) {
+                                return left.start == right.start && left.end == right.end;
+                            }),
+                edits.end());
+    auto accepted = std::vector<PendingEdit>{};
+    for (const auto& edit : edits) {
+        if (!accepted.empty() && edit.start < accepted.back().end) {
+            continue;
+        }
+        accepted.push_back(edit);
+    }
+    const auto old_line_count = lines_.size();
+    auto source = text();
+    for (auto edit = accepted.rbegin(); edit != accepted.rend(); ++edit) {
+        source.replace(edit->start, edit->end - edit->start, replacement);
+    }
+    auto final_offsets = std::vector<std::size_t>(ranges.size());
+    auto adjustment = std::ptrdiff_t{};
+    for (const auto& edit : accepted) {
+        const auto start = static_cast<std::ptrdiff_t>(edit.start) + adjustment;
+        final_offsets[edit.order] = static_cast<std::size_t>(start) + replacement.size();
+        adjustment += static_cast<std::ptrdiff_t>(replacement.size()) -
+                      static_cast<std::ptrdiff_t>(edit.end - edit.start);
+    }
+    lines_ = split_lines(source);
+    cursor_ = position_for_byte(final_offsets.front()).value_or(TextPosition{});
+    secondary_carets_.clear();
+    for (std::size_t index = 1; index < final_offsets.size(); ++index) {
+        if (const auto position = position_for_byte(final_offsets[index])) {
+            secondary_carets_.push_back({*position, std::nullopt});
+        }
+    }
+    selection_anchor_.reset();
+    preferred_byte_ = cursor_.byte;
+    dirty_ = true;
+    error_.clear();
+    ++revision_;
+    return {0, old_line_count, lines_.size()};
+}
+
 auto EditorBuffer::insert_text(std::string_view text)
     -> std::optional<BufferChange> {
   if (text.empty()) {
     return std::nullopt;
   }
+  if (!secondary_carets_.empty()) {
+      auto ranges = std::vector<TextSelection>{insertion_range()};
+      ranges.reserve(secondary_carets_.size() + 1);
+      for (const auto& caret : secondary_carets_) {
+          if (caret.anchor) {
+              ranges.push_back({std::min(*caret.anchor, caret.position),
+                                std::max(*caret.anchor, caret.position)});
+          } else {
+              ranges.push_back({caret.position, caret.position});
+          }
+      }
+      return replace_many(std::move(ranges), text);
+  }
   return replace(insertion_range(), text);
 }
 
 auto EditorBuffer::insert_newline() -> BufferChange {
-  return replace(insertion_range(), "\n");
+    return *insert_text("\n");
 }
 
 auto EditorBuffer::backspace() -> std::optional<BufferChange> {
+    if (!secondary_carets_.empty()) {
+        auto ranges = std::vector<TextSelection>{};
+        const auto append = [this, &ranges](TextPosition position,
+                                            std::optional<TextPosition> anchor) {
+            if (anchor && *anchor != position) {
+                ranges.push_back({std::min(*anchor, position), std::max(*anchor, position)});
+                return;
+            }
+            if (position == TextPosition{}) {
+                return;
+            }
+            auto begin = position;
+            if (begin.byte > 0) {
+                begin.byte = previous_codepoint(lines_[begin.line], begin.byte);
+            } else {
+                --begin.line;
+                begin.byte = lines_[begin.line].size();
+            }
+            ranges.push_back({begin, position});
+        };
+        append(cursor_, selection_anchor_);
+        for (const auto& caret : secondary_carets_) {
+            append(caret.position, caret.anchor);
+        }
+        if (ranges.empty()) {
+            return std::nullopt;
+        }
+        return replace_many(std::move(ranges), "");
+    }
   if (const auto range = selection()) {
     return replace(*range, "");
   }
@@ -402,6 +587,34 @@ auto EditorBuffer::backspace() -> std::optional<BufferChange> {
 }
 
 auto EditorBuffer::delete_forward() -> std::optional<BufferChange> {
+    if (!secondary_carets_.empty()) {
+        auto ranges = std::vector<TextSelection>{};
+        const auto append = [this, &ranges](TextPosition position,
+                                            std::optional<TextPosition> anchor) {
+            if (anchor && *anchor != position) {
+                ranges.push_back({std::min(*anchor, position), std::max(*anchor, position)});
+                return;
+            }
+            auto end = position;
+            if (end.byte < lines_[end.line].size()) {
+                end.byte = next_codepoint(lines_[end.line], end.byte);
+            } else if (end.line + 1 < lines_.size()) {
+                ++end.line;
+                end.byte = 0;
+            } else {
+                return;
+            }
+            ranges.push_back({position, end});
+        };
+        append(cursor_, selection_anchor_);
+        for (const auto& caret : secondary_carets_) {
+            append(caret.position, caret.anchor);
+        }
+        if (ranges.empty()) {
+            return std::nullopt;
+        }
+        return replace_many(std::move(ranges), "");
+    }
   if (const auto range = selection()) {
     return replace(*range, "");
   }
@@ -450,6 +663,22 @@ auto EditorBuffer::apply_edit(const SourceEdit &edit)
     return std::nullopt;
   }
   return replace(TextSelection{*begin, *end}, edit.text);
+}
+
+auto EditorBuffer::find(std::string_view query, FindOptions options) const
+    -> std::vector<TextMatch> {
+    return find_text(text(), query, options);
+}
+
+auto EditorBuffer::replace_all(std::string_view query,
+                               std::string_view replacement,
+                               FindOptions options) -> std::optional<BufferChange> {
+    const auto source = text();
+    const auto replaced = replace_text(source, query, replacement, options);
+    if (source == replaced) {
+        return std::nullopt;
+    }
+    return replace({TextPosition{}, {lines_.size() - 1, lines_.back().size()}}, replaced);
 }
 
 auto EditorBuffer::save() -> bool {

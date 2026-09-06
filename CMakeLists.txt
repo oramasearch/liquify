@@ -101,6 +101,7 @@ find_package(ZLIB REQUIRED)
 set(LIQUID_BUILD_CLI   OFF CACHE BOOL "" FORCE)
 set(LIQUID_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LIQUID_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+set(LIQUID_GRAMMARS "c;c++" CACHE STRING "" FORCE)
 add_subdirectory(modules/liquid EXCLUDE_FROM_ALL)
 
 # -----------------------------------------------------------------------------
@@ -131,6 +132,7 @@ add_library(liquify-core STATIC
   src/app_state.cpp
   src/context_builder.cpp
   src/editor_buffer.cpp
+  src/editor_model.cpp
   src/editor_graph.cpp
   src/interactive_analysis.cpp
   src/panel.cpp
@@ -155,6 +157,7 @@ elseif(WIN32)
   target_link_libraries(liquify-core PRIVATE Advapi32)
 endif()
 target_link_libraries(liquify-core PRIVATE ${CMAKE_DL_LIBS})
+add_dependencies(liquify-core liquid-frontend-tree-sitter)
 
 add_library(liquify-sample-plugin-objects OBJECT plugins/sample/sample_plugin.cpp)
 set_target_properties(liquify-sample-plugin-objects PROPERTIES
@@ -191,6 +194,8 @@ endif()
 add_library(liquify-app STATIC src/app.cpp)
 target_include_directories(liquify-app PUBLIC include)
 target_link_libraries(liquify-app PUBLIC liquify-core PRIVATE imgui)
+target_compile_definitions(liquify-app PRIVATE
+  LIQUIFY_TREE_SITTER_FRONTEND="$<TARGET_FILE:liquid-frontend-tree-sitter>")
 if(APPLE)
   set_source_files_properties(src/app.cpp PROPERTIES LANGUAGE OBJCXX)
   target_link_libraries(liquify-app PRIVATE "-framework AppKit")
@@ -198,6 +203,11 @@ endif()
 
 add_executable(liquify src/main.cpp)
 target_link_libraries(liquify PRIVATE liquify-app)
+add_custom_command(TARGET liquify POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:liquify>/frontends"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE:liquid-frontend-tree-sitter>"
+          "$<TARGET_FILE_DIR:liquify>/frontends/$<TARGET_FILE_NAME:liquid-frontend-tree-sitter>")
 
 if(LIQUIFY_BUILD_TESTS)
   FetchContent_Declare(googletest

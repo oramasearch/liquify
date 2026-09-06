@@ -11,9 +11,13 @@
 
 #include "liquid/build.hpp"
 #include "liquid/daemon.hpp"
+#include "liquid/drive.hpp"
 #include "liquid/graph.hpp"
+#include "liquid/repository.hpp"
+#include "liquid/session.hpp"
 #include "liquid/sync.hpp"
 #include "liquify/context_builder.hpp"
+#include "liquify/editor_model.hpp"
 #include "liquify/interactive_analysis.hpp"
 #include "liquify/structural_edit.hpp"
 
@@ -56,6 +60,27 @@ struct DeploySnapshot {
   std::vector<liquid::sync_ref_outcome> references;
 };
 
+struct AttributionSnapshot {
+    std::size_t line{};
+    std::string actor;
+    std::string change;
+    bool agent{};
+};
+
+struct PresenceSnapshot {
+    std::string actor;
+    std::string path;
+    std::optional<SourceRange> range;
+    liquid::presence_activity activity{liquid::presence_activity::idle};
+};
+
+struct EditorSearchSnapshot {
+    std::string query;
+    std::vector<liquid::search_hit> hits;
+    std::uint64_t replacements{};
+    std::string error;
+};
+
 struct EditorGraphSnapshot {
   bool ready{};
   bool daemon_running{};
@@ -96,57 +121,73 @@ struct EditorGraphSnapshot {
   std::vector<TestSnapshot> test_results;
   std::vector<Diagnostic> build_diagnostics;
   DeploySnapshot deploy;
+  std::vector<SyntaxSpan> syntax;
+  std::vector<FoldRange> folds;
+  std::vector<AttributionSnapshot> attribution;
+  std::vector<PresenceSnapshot> presence;
+  std::optional<liquid::drive_path_status> drive;
+  EditorSearchSnapshot search;
+  std::string syntax_error;
+  std::string history_error;
+  std::uint64_t syntax_generation{};
+  std::uint64_t collaboration_generation{};
+  std::uint64_t search_generation{};
+  std::uint64_t history_generation{};
 };
 
 class EditorGraph {
 public:
-  explicit EditorGraph(std::filesystem::path repository_path,
-                       std::shared_ptr<PluginHost> plugins = {});
-  ~EditorGraph();
-  EditorGraph(const EditorGraph &) = delete;
-  auto operator=(const EditorGraph &) -> EditorGraph & = delete;
-  EditorGraph(EditorGraph &&) = delete;
-  auto operator=(EditorGraph &&) -> EditorGraph & = delete;
+    explicit EditorGraph(std::filesystem::path repository_path,
+                         std::shared_ptr<PluginHost> plugins = {},
+                         std::filesystem::path syntax_frontend = {});
+    ~EditorGraph();
+    EditorGraph(const EditorGraph&) = delete;
+    auto operator=(const EditorGraph&) -> EditorGraph& = delete;
+    EditorGraph(EditorGraph&&) = delete;
+    auto operator=(EditorGraph&&) -> EditorGraph& = delete;
 
-  void open_buffer(std::filesystem::path path, StubLanguage language,
-                   std::string source);
-  void apply_edit(std::filesystem::path path, SourceEdit edit);
-  void close_buffer(std::filesystem::path path);
-  void publish_build_diagnostics(std::filesystem::path buffer_path,
-                                 std::filesystem::path translation_unit,
-                                 std::vector<Diagnostic> diagnostics);
+    void open_buffer(std::filesystem::path path, StubLanguage language, std::string source);
+    void apply_edit(std::filesystem::path path, SourceEdit edit);
+    void close_buffer(std::filesystem::path path);
+    void publish_build_diagnostics(std::filesystem::path buffer_path,
+                                   std::filesystem::path translation_unit,
+                                   std::vector<Diagnostic> diagnostics);
 
-  void request_diagnostics(std::filesystem::path path);
-  void request_hover(std::filesystem::path path, std::uint32_t byte);
-  void request_completion(std::filesystem::path path, std::uint32_t byte);
-  void request_definition(std::filesystem::path path, std::uint32_t byte);
-  void request_structural_selection(std::filesystem::path path,
-                                    std::uint32_t byte,
-                                    std::optional<SourceRange> current,
-                                    bool enclosing_definition);
-  void request_reference_selection(std::filesystem::path path,
-                                   std::uint32_t byte);
-  void request_rename(std::filesystem::path path, std::uint32_t byte,
-                      std::string new_name);
-  void request_extract_function(std::filesystem::path path,
-                                SourceRange selection, std::string name);
-  void apply_structural_edits(std::vector<StructuralEdit> edits);
-  void request_ai_context(std::filesystem::path path, std::uint32_t byte,
-                          std::optional<SourceRange> selection,
-                          std::string selected_source,
-                          std::size_t whole_file_bytes,
-                          std::size_t byte_budget);
-  void request_build(liquid::build_target target = {});
-  void request_tests(std::string filter = {});
-  void refresh_tests();
-  void request_deploy();
-  void publish_build_event(liquid::build_event event);
-  void publish_deploy_report(liquid::sync_report report);
-  void note_saved_drip(std::uint64_t repository_pending_drips);
-  void refresh_status();
+    void request_diagnostics(std::filesystem::path path);
+    void request_hover(std::filesystem::path path, std::uint32_t byte);
+    void request_completion(std::filesystem::path path, std::uint32_t byte);
+    void request_definition(std::filesystem::path path, std::uint32_t byte);
+    void request_editor_view(std::filesystem::path path, StubLanguage language, std::string source);
+    void request_search(std::string query);
+    void request_replace(std::string query, std::string replacement, bool regular_expression);
+    void request_undo();
+    void request_redo();
+    void request_structural_selection(std::filesystem::path path,
+                                      std::uint32_t byte,
+                                      std::optional<SourceRange> current,
+                                      bool enclosing_definition);
+    void request_reference_selection(std::filesystem::path path, std::uint32_t byte);
+    void request_rename(std::filesystem::path path, std::uint32_t byte, std::string new_name);
+    void
+    request_extract_function(std::filesystem::path path, SourceRange selection, std::string name);
+    void apply_structural_edits(std::vector<StructuralEdit> edits);
+    void request_ai_context(std::filesystem::path path,
+                            std::uint32_t byte,
+                            std::optional<SourceRange> selection,
+                            std::string selected_source,
+                            std::size_t whole_file_bytes,
+                            std::size_t byte_budget);
+    void request_build(liquid::build_target target = {});
+    void request_tests(std::string filter = {});
+    void refresh_tests();
+    void request_deploy();
+    void publish_build_event(liquid::build_event event);
+    void publish_deploy_report(liquid::sync_report report);
+    void note_saved_drip(std::uint64_t repository_pending_drips);
+    void refresh_status();
 
-  [[nodiscard]] auto snapshot() const -> EditorGraphSnapshot;
-  void wait_until_idle();
+    [[nodiscard]] auto snapshot() const -> EditorGraphSnapshot;
+    void wait_until_idle();
 
 private:
   struct Impl;

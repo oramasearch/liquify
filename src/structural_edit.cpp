@@ -12,6 +12,7 @@
 
 #include "editor_buffer.hpp"
 #include "encoding/cbor.hpp"
+#include "liquid/edit.hpp"
 #include "liquid/hash.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
@@ -1034,6 +1035,8 @@ auto StructuralEditor::apply(std::span<const StructuralEdit> edits)
         {edit, std::move(source_edit)});
   }
 
+  auto accepted_by_path = std::map<std::filesystem::path, std::vector<Pending>>{};
+  auto liquid_edits = std::vector<liquid::tree_edit>{};
   for (auto &[path, pending] : by_path) {
     std::ranges::sort(pending, [](const auto &left, const auto &right) {
       if (left.source_edit.start_byte != right.source_edit.start_byte) {
@@ -1058,33 +1061,76 @@ auto StructuralEditor::apply(std::span<const StructuralEdit> edits)
       }
       accepted.push_back(std::move(candidate));
     }
-    if (accepted.empty()) {
-      continue;
-    }
-    auto contents = source(path);
-    if (!contents) {
-      return std::unexpected(contents.error());
-    }
-    auto buffer = EditorBuffer::from_repository_text(
-        repository_path_, path.generic_string(), std::string(*contents));
     for (const auto &item : accepted) {
-      const auto changed = buffer.apply_edit(item.source_edit);
-      if (!changed) {
-        return std::unexpected(
-            failure(std::string(buffer.error()), path.generic_string()));
+        auto digest = liquid::parse_digest(item.edit.target.node.fingerprint);
+        if (!digest) {
+            return std::unexpected(digest.error());
+        }
+        const auto& range = item.edit.target.node.range;
+        auto operation = liquid::tree_edit_operation::replace_node;
+        if (item.edit.operation == StructuralEditOperation::insert_before) {
+            operation = liquid::tree_edit_operation::insert_before;
+        } else if (item.edit.operation == StructuralEditOperation::insert_after) {
+            operation = liquid::tree_edit_operation::insert_after;
+        } else if (item.edit.operation == StructuralEditOperation::delete_node) {
+            operation = liquid::tree_edit_operation::delete_node;
+        }
+        liquid_edits.push_back({{path.generic_string(),
+                                 {item.edit.target.node.kind,
+                                  {{range.start_byte, range.start_line + 1, range.start_column + 1},
+                                   {range.end_byte, range.end_line + 1, range.end_column + 1}},
+                                  *digest}},
+                                operation,
+                                item.edit.text});
+    }
+    if (!accepted.empty()) {
+        accepted_by_path.emplace(path, std::move(accepted));
+    }
+  }
+  if (liquid_edits.empty()) {
+      return result;
+  }
+  auto preview = liquid::runtime::block_on(
+      repository_->value.preview_edit(liquid::tree_edit_request{std::move(liquid_edits)},
+                                      {.tool = "liquify", .operation = "structural_edit"}));
+  if (!preview) {
+      return std::unexpected(preview.error());
+  }
+  for (const auto& refused : preview->refused) {
+      const auto path = std::filesystem::path{refused.target.path}.lexically_normal();
+      const auto candidates = accepted_by_path.find(path);
+      if (candidates == accepted_by_path.end()) {
+          continue;
       }
-    }
-    if (!buffer.save(repository_->value)) {
-      return std::unexpected(
-          failure(std::string(buffer.error()), path.generic_string()));
-    }
-    for (const auto &item : accepted) {
-      auto updated = apply_source_edit(path, item.source_edit);
-      if (!updated) {
-        return std::unexpected(updated.error());
+      const auto found = std::ranges::find_if(candidates->second, [&](const auto& candidate) {
+          return candidate.edit.target.node.range.start_byte ==
+                     refused.target.node.range.start.byte &&
+                 candidate.edit.target.node.range.end_byte == refused.target.node.range.end.byte;
+      });
+      if (found != candidates->second.end()) {
+          result.refused.push_back({found->edit.target, refused.reason});
       }
-      result.applied.push_back({path, item.edit.target.node.range});
-    }
+  }
+  if (!preview->changes.empty()) {
+      auto applied = liquid::runtime::block_on(repository_->value.apply_edit(*preview));
+      if (!applied) {
+          return std::unexpected(applied.error());
+      }
+  }
+  for (auto& [path, accepted] : accepted_by_path) {
+      for (const auto& item : accepted) {
+          const auto refused = std::ranges::any_of(result.refused, [&](const auto& candidate) {
+              return candidate.target == item.edit.target;
+          });
+          if (refused) {
+              continue;
+          }
+          auto updated = apply_source_edit(path, item.source_edit);
+          if (!updated) {
+              return std::unexpected(updated.error());
+          }
+          result.applied.push_back({path, item.edit.target.node.range});
+      }
   }
   return result;
 }

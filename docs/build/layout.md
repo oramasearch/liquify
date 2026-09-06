@@ -10,14 +10,15 @@ libliquid's public API.
 | `include/liquify/app_state.hpp`, `src/app_state.cpp` | bounded repository-local shell layout, active surfaces, and theme persistence |
 | `include/liquify/panel.hpp`, `src/panel.cpp` | plain-C++ panel descriptors, commands, placement, focus, runtime state and shared operation notifications |
 | `include/liquify/screenshot.hpp`, `src/screenshot.cpp` | named screenshot registry plus the in-tree RGBA PNG reader and writer |
-| `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory text buffer, input modes, and libliquid blob read/write path |
+| `include/liquify/editor_model.hpp`, `src/editor_model.cpp` | pure selection, repository preferences, find/replace, syntax-span, bracket, fold and visual-row functions |
+| `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory multi-cursor text buffer, input modes, and libliquid blob read/write path |
 | `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
 | `design/`, `include/liquify/design_tokens.generated.hpp` | stamped Orama DTCG and IBM Plex inputs, reviewed role map, dependency-free compiler, generated native palettes and type scale, and tamper/staleness gate |
 | `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: reads the root on a worker, loads nested trees on expansion, and exposes entries, open latency, or an error |
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
 | `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |
-| `include/liquify/editor_graph.hpp`, `src/editor_graph.cpp` | background editor-query runtime, daemon host/attach lifetime, asynchronous query snapshots and status data; the build, test and deploy panels it feeds are in [`../editor/build.md`](../editor/build.md) |
+| `include/liquify/editor_graph.hpp`, `src/editor_graph.cpp` | background editor-query runtime, daemon host/attach lifetime, syntax/collaboration/search/history snapshots and status data; the editor view is in [`../ui/editor.md`](../ui/editor.md) and the build, test and deploy panels are in [`../editor/build.md`](../editor/build.md) |
 | `include/liquify/structural_edit.hpp`, `src/structural_edit.cpp` | canonical node-level edit records, selection, rename, extract-function and repository application |
 | `include/liquify/review.hpp`, `src/review.cpp` | coroutine-native review model/controller: forge listing and state, sync pull, text diff, cursor comments, and anchor advancement |
 | `include/liquify/context_builder.hpp`, `src/context_builder.cpp` | byte-budgeted, inspectable assistant context assembled from graph facts |
