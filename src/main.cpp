@@ -1,12 +1,18 @@
 #include <charconv>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <print>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #include "liquid/liquid.hpp"
 #include "liquify/app.hpp"
+#include "liquify/interactive_analysis.hpp"
+#include "liquify/structural_edit.hpp"
 #include "liquify/version.hpp"
 #include "repository_view.hpp"
 
@@ -18,6 +24,9 @@ void usage() {
     std::println("  liquify --lake URL PATH     open repository reviews from a "
                  "lake forge");
     std::println("  liquify --print-tree PATH   print a repository root tree and exit");
+    std::println("  liquify --apply-edits FILE REPOSITORY");
+    std::println("                              apply structural-edit CBOR and "
+                 "return result CBOR");
     std::println("  liquify --smoke [N]         scroll 50,000 lines for N frames "
                  "and exit");
     std::println("  liquify version             print the version");
@@ -43,9 +52,51 @@ auto print_tree(const std::filesystem::path& path) -> int {
     }
     return 0;
 }
+
+auto apply_edits(const std::filesystem::path& request_path,
+                 const std::filesystem::path& repository_path) -> int {
+    auto input = std::ifstream(request_path, std::ios::binary);
+    if (!input) {
+        std::println(stderr, "liquify: cannot read {}", request_path.string());
+        return 1;
+    }
+    const auto characters = std::vector<char>(std::istreambuf_iterator<char>(input), {});
+    const auto request = std::as_bytes(std::span(characters.data(), characters.size()));
+    auto edits = liquify::decode_structural_edit_request(request);
+    if (!edits) {
+        std::println(stderr, "liquify: {}", edits.error().message);
+        return 1;
+    }
+    auto analysis = liquify::InteractiveAnalysis::open(repository_path / ".liquid" /
+                                                       "liquify-structural-graph");
+    if (!analysis) {
+        std::println(stderr, "liquify: {}", analysis.error().message);
+        return 1;
+    }
+    auto editor = liquify::StructuralEditor(repository_path, *analysis);
+    auto result = editor.apply(*edits);
+    if (!result) {
+        std::println(stderr, "liquify: {}", result.error().message);
+        return 1;
+    }
+    auto encoded = liquify::encode_structural_edit_result(*result);
+    if (!encoded) {
+        std::println(stderr, "liquify: {}", encoded.error().message);
+        return 1;
+    }
+    const auto written = std::fwrite(encoded->data(), 1, encoded->size(), stdout);
+    return written == encoded->size() ? 0 : 1;
+}
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::string_view(argv[1]) == "--apply-edits") {
+        if (argc != 4) {
+            std::println(stderr, "liquify: --apply-edits requires a CBOR file and repository");
+            return 2;
+        }
+        return apply_edits(argv[2], argv[3]);
+    }
     liquify::AppOptions opts;
     bool should_print_tree = false;
     for (int i = 1; i < argc; ++i) {

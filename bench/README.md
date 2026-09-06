@@ -15,5 +15,8 @@ naive whole-file payload. Its recorded run is in
 [`docs/editor/README.md`](../docs/editor/README.md).
 
 `liquify-review-bench` imports 50 files from liquid's tree, builds their inline text-diff rows,
-and maps 200 cursor anchors after a rebase-style insertion. Its recorded run is in
+and maps 200 cursor anchors after a rebase-style insertion. `liquify-structural-edit-bench` copies
+real liquid implementation files into a fresh repository, then measures an end-to-end rename with
+at least 50 references and extraction of a statement range spanning at least 30 lines. Their
+recorded runs and the structural-edit benchmark host load average are in
 [`docs/editor/README.md`](../docs/editor/README.md).

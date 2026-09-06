@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <limits>
 #include <span>
 #include <string>
@@ -317,9 +316,6 @@ private:
                                         std::size_t first_line,
                                         std::size_t last_line,
                                         float line_height) {
-        if (review_lines.empty()) {
-            return;
-        }
         for (auto line = first_line; line < last_line && line < review_lines.size(); ++line) {
             const auto kind = review_lines[line].kind;
             if (kind == ReviewDiffLineKind::added) {
@@ -424,7 +420,19 @@ App::App(AppOptions options) : options_(std::move(options)) {
         repository_ =
             std::make_unique<RepositoryView>(RepositoryView::open(*options_.repository_path));
         if (repository_->error().empty()) {
-            editor_graph_ = std::make_unique<EditorGraph>(*options_.repository_path);
+            auto plugins = load_configured_plugins(*options_.repository_path);
+            if (!plugins) {
+                plugin_host_ = std::make_shared<PluginHost>();
+                auto message = plugins.error().message;
+                if (!plugins.error().context.empty()) {
+                    message += ": " + plugins.error().context;
+                }
+                plugin_failures_.push_back({{}, std::move(message)});
+            } else {
+                plugin_host_ = std::move(plugins->host);
+                plugin_failures_ = std::move(plugins->failures);
+            }
+            editor_graph_ = std::make_unique<EditorGraph>(*options_.repository_path, plugin_host_);
             auto config = load_ai_config(*options_.repository_path);
             if (!config) {
                 editor_status_ = config.error().message;
@@ -526,6 +534,8 @@ void App::open_editor(std::string path, std::string blob_id) {
     analysis_buffer_open_ = false;
     analysis_text_.clear();
     review_diff_open_ = false;
+    structural_selection_history_.clear();
+    structural_references_.clear();
     editor_ = std::make_unique<EditorBuffer>(
         EditorBuffer::open(*options_.repository_path, std::move(path), std::move(blob_id)));
     layouts_ = std::make_unique<TextLayoutCache>();
@@ -803,6 +813,119 @@ void App::request_completion() {
     }
 }
 
+void App::expand_structural_selection() {
+    if (!editor_graph_ || !analysis_buffer_open_ || !editor_) {
+        return;
+    }
+    const auto cursor = editor_->cursor();
+    const auto byte = editor_->byte_offset(cursor);
+    if (byte > std::numeric_limits<std::uint32_t>::max()) {
+        return;
+    }
+    auto current = std::optional<SourceRange>{};
+    if (const auto selection = editor_->selection()) {
+        current = SourceRange{static_cast<std::uint32_t>(editor_->byte_offset(selection->begin)),
+                              static_cast<std::uint32_t>(editor_->byte_offset(selection->end)),
+                              static_cast<std::uint32_t>(selection->begin.line),
+                              static_cast<std::uint32_t>(selection->begin.byte),
+                              static_cast<std::uint32_t>(selection->end.line),
+                              static_cast<std::uint32_t>(selection->end.byte)};
+        structural_selection_history_.push_back(*current);
+    } else {
+        structural_selection_history_.push_back({static_cast<std::uint32_t>(byte),
+                                                 static_cast<std::uint32_t>(byte),
+                                                 static_cast<std::uint32_t>(cursor.line),
+                                                 static_cast<std::uint32_t>(cursor.byte),
+                                                 static_cast<std::uint32_t>(cursor.line),
+                                                 static_cast<std::uint32_t>(cursor.byte)});
+    }
+    editor_graph_->request_structural_selection(std::filesystem::path(editor_->display_path()),
+                                                static_cast<std::uint32_t>(byte),
+                                                current,
+                                                false);
+    editor_status_ = "expanding structural selection";
+}
+
+void App::shrink_structural_selection() {
+    if (!editor_ || structural_selection_history_.empty()) {
+        return;
+    }
+    const auto range = structural_selection_history_.back();
+    structural_selection_history_.pop_back();
+    editor_->set_cursor({range.start_line, range.start_column});
+    if (range.start_byte != range.end_byte) {
+        editor_->set_cursor({range.end_line, range.end_column}, true);
+    }
+    ensure_cursor_visible();
+    editor_status_.clear();
+}
+
+void App::select_enclosing_definition() {
+    if (!editor_graph_ || !analysis_buffer_open_ || !editor_) {
+        return;
+    }
+    const auto cursor = editor_->cursor();
+    const auto byte = editor_->byte_offset(cursor);
+    if (byte > std::numeric_limits<std::uint32_t>::max()) {
+        return;
+    }
+    editor_graph_->request_structural_selection(std::filesystem::path(editor_->display_path()),
+                                                static_cast<std::uint32_t>(byte),
+                                                std::nullopt,
+                                                true);
+    editor_status_ = "selecting enclosing definition";
+}
+
+void App::select_symbol_references() {
+    if (!editor_graph_ || !analysis_buffer_open_ || !editor_) {
+        return;
+    }
+    const auto byte = editor_->byte_offset(editor_->cursor());
+    if (byte > std::numeric_limits<std::uint32_t>::max()) {
+        return;
+    }
+    editor_graph_->request_reference_selection(std::filesystem::path(editor_->display_path()),
+                                               static_cast<std::uint32_t>(byte));
+    editor_status_ = "selecting symbol references";
+}
+
+void App::open_rename() {
+    if (!analysis_buffer_open_) {
+        return;
+    }
+    structural_name_.clear();
+    rename_open_ = true;
+}
+
+void App::open_extract_function() {
+    if (!analysis_buffer_open_ || !editor_ || !editor_->selection()) {
+        editor_status_ = "extract-function requires a statement selection";
+        return;
+    }
+    structural_name_.clear();
+    extract_function_open_ = true;
+}
+
+void App::apply_structural_preview(bool all_files) {
+    if (!editor_graph_) {
+        return;
+    }
+    auto accepted = std::vector<StructuralEdit>{};
+    for (const auto& edit : structural_preview_) {
+        const auto path = edit.target.path.generic_string();
+        if (all_files || std::ranges::find(structural_accepted_files_, path) !=
+                             structural_accepted_files_.end()) {
+            accepted.push_back(edit);
+        }
+    }
+    if (accepted.empty()) {
+        editor_status_ = "no structural edit files selected";
+        return;
+    }
+    editor_graph_->apply_structural_edits(std::move(accepted));
+    editor_status_ = "applying structural edits";
+}
+
 void App::request_assistant_context(std::optional<AssistantAction> action) {
     if (!assistant_ || !editor_graph_ || !analysis_buffer_open_ || !editor_) {
         return;
@@ -918,6 +1041,73 @@ void App::poll_editor_graph() {
         next_status_refresh_ = now + std::chrono::milliseconds{500};
     }
     const auto snapshot = editor_graph_->snapshot();
+    if (snapshot.structural_selection_generation != structural_selection_generation_) {
+        structural_selection_generation_ = snapshot.structural_selection_generation;
+        if (snapshot.structural_selection && editor_) {
+            const auto& range = *snapshot.structural_selection;
+            editor_->set_cursor({range.start_line, range.start_column});
+            editor_->set_cursor({range.end_line, range.end_column}, true);
+            ensure_cursor_visible();
+            editor_status_.clear();
+        }
+    }
+    if (snapshot.structural_references_generation != structural_references_generation_) {
+        structural_references_generation_ = snapshot.structural_references_generation;
+        structural_references_ = snapshot.structural_references;
+        editor_status_ = structural_references_.empty()
+                             ? "no symbol references found"
+                             : "selected " + std::to_string(structural_references_.size()) +
+                                   " symbol references";
+    }
+    if (snapshot.structural_preview_generation != structural_preview_generation_) {
+        structural_preview_generation_ = snapshot.structural_preview_generation;
+        structural_preview_.clear();
+        structural_diagnostics_.clear();
+        structural_unresolved_.clear();
+        structural_accepted_files_.clear();
+        if (snapshot.rename_preview) {
+            structural_preview_ = snapshot.rename_preview->edits;
+            for (const auto& unresolved : snapshot.rename_preview->unresolved) {
+                structural_unresolved_.push_back(unresolved.path.generic_string() + ":" +
+                                                 std::to_string(unresolved.range.start_line + 1) +
+                                                 ":" +
+                                                 std::to_string(unresolved.range.start_column + 1));
+            }
+        } else if (snapshot.extract_preview) {
+            structural_preview_ = snapshot.extract_preview->edits;
+            structural_diagnostics_ = snapshot.extract_preview->diagnostics;
+        }
+        for (const auto& edit : structural_preview_) {
+            const auto path = edit.target.path.generic_string();
+            if (std::ranges::find(structural_accepted_files_, path) ==
+                structural_accepted_files_.end()) {
+                structural_accepted_files_.push_back(path);
+            }
+        }
+        structural_preview_open_ = true;
+        editor_status_ = structural_preview_.empty() ? "structural preview has diagnostics"
+                                                     : "structural preview ready";
+    }
+    if (snapshot.structural_result_generation != structural_result_generation_) {
+        structural_result_generation_ = snapshot.structural_result_generation;
+        if (snapshot.structural_result) {
+            const auto applied = snapshot.structural_result->applied.size();
+            const auto refused = snapshot.structural_result->refused.size();
+            editor_status_ = "structural edits applied=" + std::to_string(applied) +
+                             " refused=" + std::to_string(refused);
+            const auto current_path =
+                editor_ ? std::string(editor_->display_path()) : std::string{};
+            const auto changed_current = std::ranges::any_of(
+                snapshot.structural_result->applied, [&current_path](const auto& item) {
+                    return item.path.generic_string() == current_path;
+                });
+            structural_preview_open_ = false;
+            structural_preview_.clear();
+            if (changed_current) {
+                open_editor(current_path, "structural:" + current_path);
+            }
+        }
+    }
     if (snapshot.ai_context_generation != ai_context_generation_) {
         ai_context_generation_ = snapshot.ai_context_generation;
         if (snapshot.ai_context) {
@@ -991,6 +1181,38 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         navigate_comment();
         return;
     }
+    if (review_diff_open_) {
+        if (key == SDLK_LEFT || key == SDLK_RIGHT || key == SDLK_UP || key == SDLK_DOWN ||
+            key == SDLK_HOME || key == SDLK_END || key == SDLK_PAGEUP || key == SDLK_PAGEDOWN) {
+            // Navigation continues through the common cursor handling below.
+        } else {
+            return;
+        }
+    }
+    if (primary && shift && key == SDLK_RIGHT) {
+        expand_structural_selection();
+        return;
+    }
+    if (primary && shift && key == SDLK_LEFT) {
+        shrink_structural_selection();
+        return;
+    }
+    if (primary && shift && key == SDLK_D) {
+        select_enclosing_definition();
+        return;
+    }
+    if (primary && shift && key == SDLK_F) {
+        select_symbol_references();
+        return;
+    }
+    if (primary && shift && key == SDLK_R) {
+        open_rename();
+        return;
+    }
+    if (primary && shift && key == SDLK_X) {
+        open_extract_function();
+        return;
+    }
     if (primary && shift && key == SDLK_L) {
         toggle_assistant();
         return;
@@ -1049,12 +1271,6 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         const auto next = editor_->mode() == EditingMode::standard ? EditingMode::modal_command
                                                                    : EditingMode::standard;
         editor_->set_mode(next);
-        return;
-    }
-
-    if (review_diff_open_ && key != SDLK_LEFT && key != SDLK_RIGHT && key != SDLK_UP &&
-        key != SDLK_DOWN && key != SDLK_HOME && key != SDLK_END && key != SDLK_PAGEUP &&
-        key != SDLK_PAGEDOWN) {
         return;
     }
 
@@ -1387,6 +1603,16 @@ void App::draw_command_palette() {
             ImGui::CloseCurrentPopup();
         }
     };
+    command("Selection: Expand syntax node (Primary+Shift+Right)",
+            [this] { expand_structural_selection(); });
+    command("Selection: Shrink syntax node (Primary+Shift+Left)",
+            [this] { shrink_structural_selection(); });
+    command("Selection: Enclosing definition (Primary+Shift+D)",
+            [this] { select_enclosing_definition(); });
+    command("Selection: Symbol references (Primary+Shift+F)",
+            [this] { select_symbol_references(); });
+    command("Refactor: Rename symbol (Primary+Shift+R)", [this] { open_rename(); });
+    command("Refactor: Extract function (Primary+Shift+X)", [this] { open_extract_function(); });
     command("Assistant: Ask (Primary+Shift+A)",
             [this] { request_assistant_context(AssistantAction::ask); });
     command("Assistant: Explain diagnostic (Primary+Shift+E)",
@@ -1411,7 +1637,215 @@ void App::draw_command_palette() {
             review_->request_approve();
         }
     });
+    if (plugin_host_) {
+        for (const auto& plugin_command : plugin_host_->commands()) {
+            auto label = "Plugin: " + plugin_command.name;
+            if (!plugin_command.default_binding.empty()) {
+                label += " (" + plugin_command.default_binding + ")";
+            }
+            command(label.c_str(),
+                    [this, name = plugin_command.name] { invoke_plugin_command(name); });
+        }
+    }
     ImGui::EndPopup();
+}
+
+void App::draw_structural_editing() {
+    if (rename_open_) {
+        ImGui::OpenPopup("Rename symbol");
+        rename_open_ = false;
+    }
+    if (ImGui::BeginPopupModal("Rename symbol", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::InputText("New name", &structural_name_);
+        if (ImGui::Button("Preview") && editor_graph_ && editor_) {
+            const auto byte = editor_->byte_offset(editor_->cursor());
+            if (byte <= std::numeric_limits<std::uint32_t>::max()) {
+                editor_graph_->request_rename(std::filesystem::path(editor_->display_path()),
+                                              static_cast<std::uint32_t>(byte),
+                                              structural_name_);
+                editor_status_ = "building rename preview";
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (extract_function_open_) {
+        ImGui::OpenPopup("Extract function");
+        extract_function_open_ = false;
+    }
+    if (ImGui::BeginPopupModal("Extract function", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::InputText("Function name", &structural_name_);
+        if (ImGui::Button("Preview") && editor_graph_ && editor_) {
+            if (const auto selection = editor_->selection()) {
+                const auto range =
+                    SourceRange{static_cast<std::uint32_t>(editor_->byte_offset(selection->begin)),
+                                static_cast<std::uint32_t>(editor_->byte_offset(selection->end)),
+                                static_cast<std::uint32_t>(selection->begin.line),
+                                static_cast<std::uint32_t>(selection->begin.byte),
+                                static_cast<std::uint32_t>(selection->end.line),
+                                static_cast<std::uint32_t>(selection->end.byte)};
+                editor_graph_->request_extract_function(
+                    std::filesystem::path(editor_->display_path()), range, structural_name_);
+                editor_status_ = "building extract-function preview";
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (!structural_references_.empty()) {
+        auto open = true;
+        if (ImGui::Begin("Structural selections", &open)) {
+            ImGui::Text("References (%zu)", structural_references_.size());
+            for (std::size_t index = 0; index < structural_references_.size(); ++index) {
+                const auto& reference = structural_references_[index];
+                const auto label = reference.path.generic_string() + ":" +
+                                   std::to_string(reference.range.start_line + 1) + "##ref-" +
+                                   std::to_string(index);
+                if (ImGui::Selectable(label.c_str())) {
+                    const auto path = reference.path.generic_string();
+                    if (!editor_ || editor_->display_path() != path) {
+                        open_editor(path, "structural:" + path);
+                    }
+                    editor_->set_cursor({reference.range.start_line, reference.range.start_column});
+                    editor_->set_cursor({reference.range.end_line, reference.range.end_column},
+                                        true);
+                    ensure_cursor_visible();
+                }
+            }
+        }
+        ImGui::End();
+        if (!open) {
+            structural_references_.clear();
+        }
+    }
+
+    if (!structural_preview_open_) {
+        return;
+    }
+    auto open = true;
+    if (ImGui::Begin("Structural edit preview", &open)) {
+        for (const auto& diagnostic : structural_diagnostics_) {
+            ImGui::TextWrapped("Diagnostic: %s", diagnostic.c_str());
+        }
+        for (const auto& unresolved : structural_unresolved_) {
+            ImGui::TextWrapped("Unresolved string/comment occurrence: %s", unresolved.c_str());
+        }
+        auto files = std::vector<std::string>{};
+        for (const auto& edit : structural_preview_) {
+            const auto path = edit.target.path.generic_string();
+            if (std::ranges::find(files, path) == files.end()) {
+                files.push_back(path);
+            }
+        }
+        for (const auto& path : files) {
+            auto accepted = std::ranges::find(structural_accepted_files_, path) !=
+                            structural_accepted_files_.end();
+            const auto label = path + "##structural-file";
+            if (ImGui::Checkbox(label.c_str(), &accepted)) {
+                const auto found = std::ranges::find(structural_accepted_files_, path);
+                if (accepted && found == structural_accepted_files_.end()) {
+                    structural_accepted_files_.push_back(path);
+                } else if (!accepted && found != structural_accepted_files_.end()) {
+                    structural_accepted_files_.erase(found);
+                }
+            }
+            for (const auto& edit : structural_preview_) {
+                if (edit.target.path.generic_string() != path) {
+                    continue;
+                }
+                ImGui::BulletText("%s %s bytes %u..%u",
+                                  structural_edit_operation_name(edit.operation).data(),
+                                  edit.target.node.kind.c_str(),
+                                  edit.target.node.range.start_byte,
+                                  edit.target.node.range.end_byte);
+            }
+        }
+        if (!structural_preview_.empty()) {
+            if (ImGui::Button("Accept selected files")) {
+                apply_structural_preview(false);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Accept all")) {
+                apply_structural_preview(true);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Dismiss")) {
+            open = false;
+        }
+    }
+    ImGui::End();
+    if (!open) {
+        structural_preview_open_ = false;
+    }
+}
+
+void App::invoke_plugin_command(std::string_view name) {
+    if (!plugin_host_) {
+        return;
+    }
+    auto invoked = plugin_host_->invoke_command(name, plugin_empty_map_cbor());
+    if (!invoked) {
+        editor_status_ = invoked.error().message;
+        if (!invoked.error().context.empty()) {
+            editor_status_ += ": " + invoked.error().context;
+        }
+        return;
+    }
+    editor_status_ = "plugin command completed: " + std::string(name);
+}
+
+void App::poll_plugins() {
+    const auto now = std::chrono::steady_clock::now();
+    if (!plugin_host_ || now < next_plugin_refresh_) {
+        return;
+    }
+    plugin_panels_ = plugin_host_->panels(plugin_null_cbor());
+    next_plugin_refresh_ = now + std::chrono::milliseconds(500);
+}
+
+void App::draw_plugin_panels() {
+    if (plugin_failures_.empty() && plugin_panels_.empty()) {
+        return;
+    }
+    ImGui::Separator();
+    ImGui::TextUnformatted("Plugins");
+    for (const auto& failure : plugin_failures_) {
+        const auto path =
+            failure.path.empty() ? std::string("configuration") : failure.path.generic_string();
+        ImGui::TextColored(
+            ImVec4(0.75F, 0.20F, 0.15F, 1.0F), "%s: %s", path.c_str(), failure.error.c_str());
+    }
+    for (const auto& panel : plugin_panels_) {
+        const auto panel_name = panel.plugin + "/" + panel.name;
+        if (!panel.error.empty()) {
+            ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
+                               "%s: %s",
+                               panel_name.c_str(),
+                               panel.error.c_str());
+            continue;
+        }
+        auto model = decode_plugin_text_panel(panel.view_model_cbor);
+        if (!model) {
+            ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
+                               "%s: %s",
+                               panel_name.c_str(),
+                               model.error().message.c_str());
+            continue;
+        }
+        ImGui::Text("%s: %s", panel_name.c_str(), model->title.c_str());
+        ImGui::TextWrapped("%s", model->text.c_str());
+    }
 }
 
 void App::draw_editor() {
@@ -1566,6 +2000,7 @@ void App::draw_editor() {
             }
         }
     }
+    draw_plugin_panels();
     ImGui::EndChild();
 }
 
@@ -1595,6 +2030,7 @@ void App::draw_contents() {
     ImGui::EndGroup();
     draw_command_palette();
     draw_review_comment_popup();
+    draw_structural_editing();
 }
 
 void App::render_editor() {
@@ -1663,6 +2099,7 @@ void App::render_editor() {
 void App::frame() {
     poll_editor_graph();
     poll_review();
+    poll_plugins();
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();

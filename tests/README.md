@@ -27,10 +27,22 @@ all seven registered analysis queries. It covers closed-file stub hover and defi
 compiler-symbol precedence, translation-unit diagnostics, completion order, local references,
 tree-sitter changed-range reuse, cancellation during typing and a successful answer after the edit.
 
+`test_plugin.cpp` registers the sample descriptor statically and loads the same source as a module.
+Both paths demand its query through `InteractiveAnalysis`, invoke its command, and decode its panel.
+Configuration coverage loads global and repository paths, deduplicates the shared module, and
+reports a missing path without losing that module. The suite also refuses a mismatched ABI and
+non-canonical CBOR, then proves one panel error does not hide a healthy panel from the same host.
+
 `test_editor_graph.cpp` proves the application runtime hosts liquid's daemon for the first client,
 attaches when a daemon already owns the checkout, serializes overlay mutations, publishes
 diagnostics and cursor-query results, records edit-to-diagnostic latency and formats the validation
 backlog from daemon status.
+
+`test_structural_edit.cpp` covers the syntax ancestor selection chain, exact reference ranges,
+rename across two files with one drip per file, unresolved string occurrences, stale-fingerprint
+refusal, compiling C and C++ extract-function results, deterministic canonical CBOR and the real
+headless `--apply-edits` executable path. The extract fixtures use the C and C++ compilers selected
+by CMake for syntax-only verification.
 
 `test_review.cpp` runs against libliquid's forge test double. It opens and pulls a review, renders
 text hunks, creates a cursor-anchored comment, advances shifted and deleted anchors through a new

@@ -9,7 +9,9 @@
 #include <string_view>
 #include <vector>
 
+#include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
+#include "liquify/structural_edit.hpp"
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -70,11 +72,22 @@ private:
     void request_definition();
     void request_hover();
     void request_completion();
+    void expand_structural_selection();
+    void shrink_structural_selection();
+    void select_enclosing_definition();
+    void select_symbol_references();
+    void open_rename();
+    void open_extract_function();
+    void apply_structural_preview(bool all_files);
+    void draw_structural_editing();
     void request_assistant_context(std::optional<AssistantAction> action);
     void accept_assistant_edit();
     void toggle_assistant();
     void draw_assistant();
     void draw_command_palette();
+    void draw_plugin_panels();
+    void invoke_plugin_command(std::string_view name);
+    void poll_plugins();
     void poll_editor_graph();
     void apply_change(std::size_t first_line, std::size_t erased_lines, std::size_t inserted_lines);
     void handle_key(std::uint32_t key, std::uint16_t modifiers);
@@ -91,6 +104,7 @@ private:
     std::unique_ptr<EditorGraph> editor_graph_;
     std::unique_ptr<ReviewController> review_;
     std::unique_ptr<Assistant> assistant_;
+    std::shared_ptr<PluginHost> plugin_host_;
     std::unique_ptr<TextLayoutCache> layouts_;
     std::unique_ptr<RetainedTextLayer> text_layer_;
     SDL_Window* window_ = nullptr;
@@ -120,12 +134,26 @@ private:
     std::string displayed_review_head_;
     std::string pending_review_id_;
     std::string review_comment_body_;
+    std::vector<PluginLoadFailure> plugin_failures_;
+    std::vector<PluginPanelSnapshot> plugin_panels_;
     std::optional<std::chrono::steady_clock::time_point> typing_started_;
     std::chrono::steady_clock::time_point next_status_refresh_{};
     std::chrono::steady_clock::time_point next_review_refresh_{};
+    std::chrono::steady_clock::time_point next_plugin_refresh_{};
     std::uint64_t definition_generation_{};
     std::uint64_t ai_context_generation_{};
     std::uint64_t review_generation_{};
+    std::uint64_t structural_selection_generation_{};
+    std::uint64_t structural_references_generation_{};
+    std::uint64_t structural_preview_generation_{};
+    std::uint64_t structural_result_generation_{};
+    std::vector<SourceRange> structural_selection_history_;
+    std::vector<SourceLocation> structural_references_;
+    std::vector<StructuralEdit> structural_preview_;
+    std::vector<std::string> structural_diagnostics_;
+    std::vector<std::string> structural_unresolved_;
+    std::vector<std::string> structural_accepted_files_;
+    std::string structural_name_;
     std::size_t next_comment_index_{};
     std::size_t ai_context_bytes_{64 * 1024};
     float display_refresh_hz_{};
@@ -134,6 +162,9 @@ private:
     bool context_preview_open_{};
     bool review_diff_open_{};
     bool review_comment_popup_open_{};
+    bool rename_open_{};
+    bool extract_function_open_{};
+    bool structural_preview_open_{};
     bool quit_ = false;
 };
 

@@ -5,6 +5,9 @@ inspectable context, provider contract, keyboard commands, and accept-only edit 
 [`review.md`](review.md) records the lake review panel, retained inline text diff, cursor anchors,
 rebase mapping states, review controls, and keyboard commands.
 
+[`structural-editing.md`](structural-editing.md) records syntax-node selection, canonical edit
+records, rename and extract-function previews, the headless agent surface and their limits.
+
 **Decision.** The editor buffer is a retained GPU text layer inside Dear ImGui (bridge decision
 15). ImGui owns the window, repository panel and controls. `src/app.cpp` uses the SDL renderer
 directly for buffer text, selection and cursor; no other translation unit includes SDL or ImGui.
@@ -80,6 +83,12 @@ measured edit-to-result duration. Selecting a diagnostic opens its blob and move
 range. The build diagnostic producer is the `EditorGraph::publish_build_diagnostics` boundary;
 launching inline builds remains liquify #6.
 
+Configured plugin commands are appended to the keyboard-first command palette with their declared
+default bindings. Data-only plugin text panels render below completion results. A panel operation
+that returns an error or invalid view model displays that error in its own row without hiding other
+plugin panels. The native boundary and configuration are recorded in
+[`../plugins/README.md`](../plugins/README.md).
+
 The status line is formatted from `liquid::daemon_status`: the last workspace drip's invalidated
 paths, the sum of target cursor distances as the validation backlog, daemon availability and the
 pending repository drip count returned by the last editor save. Recursive repository navigation
@@ -141,6 +150,26 @@ review: liquid_files=50 diff_lines=9057 open_to_first_hunk_ms=11.377 comments=20
 The first number includes diff computation, blob hydration, and construction of every visible
 text row; the first hunk can be submitted to the retained layer once that call returns. The anchor
 number is the complete batch returned by `repository::map_anchors`.
+
+## Structural editing measurement
+
+`liquify-structural-edit-bench` copies selected files from liquid's own source tree into a fresh
+libliquid repository. It chooses the most frequent identifier with at least 50 references, measures
+rename preview plus node application, finds a statement node spanning at least 30 lines, and
+measures extract preview plus application. Build benchmarks with `-DLIQUIFY_BUILD_BENCH=ON`.
+
+Measured on 2026-09-06 on the same machine as the editor measurements above. The load average was
+read immediately after the benchmark:
+
+```text
+$ ./build/liquify-structural-edit-bench modules/liquid build/structural-measure-repository-5
+structural edit: rename_symbol=unexpected references=667 applied=667 rename_ms=23684.745 extract_lines=36 extract_edits=11 extract_ms=123.852
+$ sysctl -n vm.loadavg
+{ 92.44 87.23 82.73 }
+```
+
+The reported duration is end to end through graph reference discovery, fingerprint validation,
+incremental buffer reparses and one repository drip for each changed file.
 
 ## Verify
 

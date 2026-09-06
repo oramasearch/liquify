@@ -8,7 +8,7 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed C/C++ analysis, review in place, and optional AI.**
+**Retained GPU editor with graph-backed interactive C/C++ analysis, structural editing, review in place, native plugins, and optional AI.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
 libliquid and produces a drip.
@@ -21,13 +21,20 @@ declarations from closed files without retaining full parse trees. Graph-backed 
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor
 surface renders those diagnostics inline and in a panel, exposes definition, hover and completion
-demands, and reports daemon drip triggers and the validation backlog. The `--lake` review panel
-pulls changes through liquid, renders retained inline text hunks and conflict values, creates
-cursor-anchored comments, advances them across revised heads, and updates review state. A
+demands, and reports daemon drip triggers and the validation backlog. Syntax-node selection,
+cross-file rename and C/C++ extract-function are serialized on the editor worker and applied as
+fingerprinted node edits with one drip per changed file. The headless `--apply-edits` command uses
+the same canonical CBOR records as the editor. This is the local adapter for bridge decision 30
+until libliquid owns the permanent structural edit operation. The `--lake` review panel pulls
+changes through liquid, renders retained inline text hunks and conflict values, creates
+cursor-anchored comments, advances them across revised heads, and updates review state. The
 default-off assistant
 assembles inspectable context from the same graph, streams through a pinned provider transport,
 and previews edits until the user accepts one normal drip. When off it constructs no provider and
-opens no connection. Next: inline build, test and deploy (liquify #6).
+opens no connection. Native plugins use liquid's versioned frontend C boundary to register graph
+queries, commands, and canonical-CBOR panels through checked static or configured dynamic loading;
+their commands and data-only panels appear in the editor surface. Next: inline build, test and
+deploy (liquify #6).
 
 ## Decisions — recorded
 
@@ -53,6 +60,9 @@ opens no connection. Next: inline build, test and deploy (liquify #6).
    Its visible repository switch is the network boundary: off constructs no provider and opens no
    socket. Context comes from editor, symbol, build and dependency graph facts, is byte-budgeted,
    and is shown before sending. Proposed edits require user acceptance and produce one user drip.
+8. **The native plugin API extends liquid's frontend C boundary** (2026-09-06). Query kinds enter
+   the in-process graph by name, commands carry a default binding and canonical-CBOR argument
+   schema, and panels return data-only canonical-CBOR view models; plugins never call ImGui.
 
 ## Rules
 
@@ -73,11 +83,6 @@ opens no connection. Next: inline build, test and deploy (liquify #6).
   client or bypass the AI switch.
 - Credentials come from the OS credential store or `ANTHROPIC_API_KEY`. Never persist, log, or
   display their value; UI state is only configured or not configured.
-
-## Open decisions
-
-- **Plugin ABI.** A stable non-C++ boundary, shared with liquid's codecs and language
-  frontends; not before Phase 4.
 
 ## Never
 
