@@ -37,9 +37,13 @@ inline diagnostics layer, diagnostics/completion and configured plugin panels, p
 the command palette, and a daemon status line;
 `liquify --lake <repository-url> <path>` adds the review panel and reads its bearer from
 `LIQUID_TOKEN`;
-`liquify --print-tree <path>` prints name, kind and mode without a display; `liquify --smoke [N]`
+`liquify --print-tree <path>` prints name, kind and mode without a display;
+`liquify --apply-edits <file> <path>` applies canonical-CBOR structural edits without a display
+and writes the result record to standard output
+([`../editor/structural-editing.md`](../editor/structural-editing.md)); `liquify --smoke [N]`
 scrolls and edits a generated 50,000-line buffer for N frames (default 30), prints latency metrics,
-and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`.
+and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`. The complete build, test and
+run sequence is [`../build/local.md`](../build/local.md).
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
