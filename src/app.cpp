@@ -23,6 +23,7 @@
 #include "liquify/ai_config.hpp"
 #include "liquify/assistant.hpp"
 #include "liquify/editor_graph.hpp"
+#include "liquify/screenshot.hpp"
 #include "liquify/stub_tree.hpp"
 #include "liquify/version.hpp"
 #include "repository_view.hpp"
@@ -505,31 +506,46 @@ App::~App() {
 }
 
 bool App::init() {
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    if (options_.screenshot_state && screenshot == nullptr) {
+        std::fprintf(
+            stderr, "liquify: unknown screenshot state: %s\n", options_.screenshot_state->c_str());
+        return false;
+    }
+    if (options_.screenshot_state.has_value() != options_.screenshot_output.has_value()) {
+        std::fprintf(stderr, "liquify: screenshot state and output must be set together\n");
+        return false;
+    }
+    if (screenshot != nullptr) {
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    }
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::fprintf(stderr, "liquify: SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
-    int window_width = 1280;
-    int window_height = 800;
+    int window_width = static_cast<int>(screenshot_width);
+    int window_height = static_cast<int>(screenshot_height);
     SDL_Rect usable{};
-    if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 &&
-        usable.h > 0) {
+    if (screenshot == nullptr && SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) &&
+        usable.w > 0 && usable.h > 0) {
         window_width = static_cast<int>(usable.w * 0.70F);
         window_height = static_cast<int>(usable.h * 0.70F);
         window_width = std::max(window_width, 900);
         window_height = std::max(window_height, 600);
     }
     const std::string title = options_.title + " " + std::string(version_string());
-    window_ = SDL_CreateWindow(title.c_str(),
-                               window_width,
-                               window_height,
-                               SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    const auto window_flags = screenshot == nullptr
+                                  ? SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+                                  : SDL_WINDOW_HIDDEN;
+    window_ = SDL_CreateWindow(title.c_str(), window_width, window_height, window_flags);
     if (window_ == nullptr) {
         std::fprintf(stderr, "liquify: SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();
         return false;
     }
-    renderer_ = SDL_CreateRenderer(window_, nullptr);
+    renderer_ = SDL_CreateRenderer(window_, screenshot == nullptr ? nullptr : "software");
     if (renderer_ == nullptr) {
         std::fprintf(stderr, "liquify: SDL_CreateRenderer failed: %s\n", SDL_GetError());
         SDL_DestroyWindow(window_);
@@ -537,9 +553,12 @@ bool App::init() {
         SDL_Quit();
         return false;
     }
-    SDL_SetRenderVSync(renderer_, 1);
-    if (const auto* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay())) {
-        display_refresh_hz_ = mode->refresh_rate;
+    SDL_SetRenderVSync(renderer_, screenshot == nullptr ? 1 : 0);
+    if (screenshot == nullptr) {
+        const auto* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+        if (mode != nullptr) {
+            display_refresh_hz_ = mode->refresh_rate;
+        }
     }
 
     IMGUI_CHECKVERSION();
@@ -547,7 +566,15 @@ bool App::init() {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.IniFilename = nullptr;
-    ImGui::StyleColorsLight();
+    if (screenshot != nullptr) {
+        io.DisplayFramebufferScale = ImVec2(1.0F, 1.0F);
+        SDL_SetRenderScale(renderer_, 1.0F, 1.0F);
+    }
+    if (screenshot != nullptr && screenshot->theme == ScreenshotTheme::dark) {
+        ImGui::StyleColorsDark();
+    } else {
+        ImGui::StyleColorsLight();
+    }
     ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
     ImGui_ImplSDLRenderer3_Init(renderer_);
     SDL_StartTextInput(window_);
@@ -2182,7 +2209,212 @@ void App::draw_build_panel(const EditorGraphSnapshot& snapshot) {
     ImGui::EndChild();
 }
 
+void App::draw_screenshot_panel(float left, float top, float right, float bottom) {
+    const auto* state = find_screenshot_state(*options_.screenshot_state);
+    const auto dark = state->theme == ScreenshotTheme::dark;
+    const auto foreground = dark ? IM_COL32(224, 228, 234, 255) : IM_COL32(30, 35, 42, 255);
+    const auto muted = dark ? IM_COL32(150, 159, 171, 255) : IM_COL32(99, 108, 120, 255);
+    const auto panel = dark ? IM_COL32(32, 38, 47, 255) : IM_COL32(246, 247, 249, 255);
+    const auto border = dark ? IM_COL32(63, 72, 84, 255) : IM_COL32(210, 215, 222, 255);
+    const auto accent = IM_COL32(95, 82, 214, 255);
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled({left, top}, {right, bottom}, panel);
+    draw->AddLine({left, top}, {right, top}, border);
+    draw->AddRectFilled({left, top}, {left + 4.0F, bottom}, accent);
+
+    auto title = std::string_view{"Symbols"};
+    auto first = std::string_view{"render_workspace()"};
+    auto second = std::string_view{"ScreenshotState"};
+    auto badge = std::string_view{"2 symbols"};
+    switch (state->view) {
+    case ScreenshotView::diagnostics:
+        title = "Diagnostics";
+        first = "warning  unused result on line 6";
+        second = "info     build graph is current";
+        badge = "2 findings";
+        break;
+    case ScreenshotView::build:
+        title = "Build, test and deploy";
+        first = "compile src/workspace.cpp     passed";
+        second = "link liquify                  passed";
+        badge = "2 actions";
+        break;
+    case ScreenshotView::review:
+        title = "Reviews";
+        first = "PR #38  Screenshot proof and UI tests";
+        second = "1 comment on src/app.cpp:214";
+        badge = "changes requested";
+        break;
+    case ScreenshotView::assistant:
+        title = "Assistant";
+        first = "AI is off. No provider exists.";
+        second = "Context preview is available before sending.";
+        badge = "offline";
+        break;
+    case ScreenshotView::plugins:
+        title = "Plugins";
+        first = "sample/status: Ready";
+        second = "Commands and data-only panels loaded";
+        badge = "1 active";
+        break;
+    case ScreenshotView::structural_editing:
+        title = "Structural edit preview";
+        first = "Rename selected symbol in 2 files";
+        second = "All fingerprints match the current revision";
+        badge = "3 edits";
+        break;
+    default:
+        break;
+    }
+    draw->AddText(
+        {left + 24.0F, top + 20.0F}, foreground, title.data(), title.data() + title.size());
+    const auto title_width = ImGui::CalcTextSize(title.data(), title.data() + title.size()).x;
+    const auto badge_left = left + 36.0F + title_width;
+    const auto badge_width =
+        ImGui::CalcTextSize(badge.data(), badge.data() + badge.size()).x + 16.0F;
+    draw->AddRectFilled(
+        {badge_left, top + 15.0F}, {badge_left + badge_width, top + 38.0F}, accent, 11.0F);
+    draw->AddText({badge_left + 8.0F, top + 20.0F},
+                  IM_COL32_WHITE,
+                  badge.data(),
+                  badge.data() + badge.size());
+    draw->AddText(
+        {left + 24.0F, top + 60.0F}, foreground, first.data(), first.data() + first.size());
+    draw->AddText({left + 24.0F, top + 88.0F}, muted, second.data(), second.data() + second.size());
+}
+
+void App::draw_screenshot_workspace() {
+    const auto* state = find_screenshot_state(*options_.screenshot_state);
+    const auto dark = state->theme == ScreenshotTheme::dark;
+    const auto foreground = dark ? IM_COL32(224, 228, 234, 255) : IM_COL32(30, 35, 42, 255);
+    const auto muted = dark ? IM_COL32(150, 159, 171, 255) : IM_COL32(99, 108, 120, 255);
+    const auto surface = dark ? IM_COL32(25, 30, 37, 255) : IM_COL32(250, 250, 248, 255);
+    const auto sidebar = dark ? IM_COL32(32, 38, 47, 255) : IM_COL32(242, 244, 247, 255);
+    const auto toolbar = dark ? IM_COL32(37, 44, 54, 255) : IM_COL32(255, 255, 255, 255);
+    const auto border = dark ? IM_COL32(63, 72, 84, 255) : IM_COL32(210, 215, 222, 255);
+    const auto highlight = dark ? IM_COL32(59, 67, 117, 255) : IM_COL32(218, 224, 255, 255);
+    const auto accent = IM_COL32(95, 82, 214, 255);
+    const auto origin = ImGui::GetWindowPos();
+    const auto size = ImGui::GetWindowSize();
+    const auto left = origin.x;
+    const auto top = origin.y;
+    const auto right = left + size.x;
+    const auto bottom = top + size.y;
+    constexpr auto header_height = 64.0F;
+    constexpr auto sidebar_width = 240.0F;
+    constexpr auto toolbar_height = 48.0F;
+    constexpr auto panel_height = 232.0F;
+    auto* draw = ImGui::GetWindowDrawList();
+
+    draw->AddRectFilled({left, top}, {right, bottom}, surface);
+    draw->AddRectFilled({left, top}, {right, top + header_height}, toolbar);
+    draw->AddLine({left, top + header_height}, {right, top + header_height}, border);
+    draw->AddCircleFilled({left + 32.0F, top + 32.0F}, 14.0F, accent);
+    draw->AddText({left + 56.0F, top + 24.0F}, foreground, "liquify");
+    draw->AddText({right - 190.0F, top + 24.0F}, muted, "main  |  synced");
+
+    draw->AddRectFilled({left, top + header_height}, {left + sidebar_width, bottom}, sidebar);
+    draw->AddLine(
+        {left + sidebar_width, top + header_height}, {left + sidebar_width, bottom}, border);
+    draw->AddText({left + 20.0F, top + 88.0F}, muted, "EXPLORER");
+    draw->AddText({left + 20.0F, top + 124.0F}, foreground, "liquify");
+    draw->AddText({left + 36.0F, top + 158.0F}, foreground, "include");
+    draw->AddText({left + 36.0F, top + 188.0F}, foreground, "src");
+    draw->AddText({left + 56.0F, top + 218.0F}, foreground, "app.cpp");
+    draw->AddText({left + 56.0F, top + 248.0F}, foreground, "main.cpp");
+    draw->AddText({left + 36.0F, top + 278.0F}, foreground, "tests");
+    draw->AddText({left + 36.0F, top + 308.0F}, foreground, "docs");
+
+    const auto editor_left = left + sidebar_width;
+    const auto editor_top = top + header_height;
+    draw->AddRectFilled({editor_left, editor_top}, {right, editor_top + toolbar_height}, toolbar);
+    draw->AddLine(
+        {editor_left, editor_top + toolbar_height}, {right, editor_top + toolbar_height}, border);
+    draw->AddRectFilled({editor_left + 16.0F, editor_top + 12.0F},
+                        {editor_left + 126.0F, editor_top + toolbar_height},
+                        surface);
+    draw->AddText({editor_left + 30.0F, editor_top + 19.0F}, foreground, "workspace.cpp");
+    draw->AddText({right - 148.0F, editor_top + 19.0F}, muted, "C++  |  UTF-8");
+
+    const auto editor_bottom = bottom - panel_height;
+    const auto text_top = editor_top + toolbar_height + 24.0F;
+    constexpr auto line_height = 28.0F;
+    const std::array<std::string_view, 9> lines{
+        "#include <string_view>",
+        "",
+        "namespace liquify {",
+        "",
+        "auto render_workspace(std::string_view name) -> bool {",
+        "    const auto state = find_screenshot_state(name);",
+        "    return state != nullptr;",
+        "}",
+        "",
+    };
+    draw->AddRectFilled({editor_left + 1.0F, text_top + 5.0F * line_height - 4.0F},
+                        {right, text_top + 6.0F * line_height - 4.0F},
+                        highlight);
+    draw->AddRectFilled({editor_left + 1.0F, text_top + 5.0F * line_height - 4.0F},
+                        {editor_left + 5.0F, text_top + 6.0F * line_height - 4.0F},
+                        accent);
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+        const auto number = std::to_string(index + 1);
+        const auto y = text_top + static_cast<float>(index) * line_height;
+        draw->AddText({editor_left + 22.0F, y}, muted, number.c_str());
+        draw->AddText({editor_left + 62.0F, y},
+                      foreground,
+                      lines[index].data(),
+                      lines[index].data() + lines[index].size());
+    }
+    draw->AddLine({editor_left, editor_bottom}, {right, editor_bottom}, border);
+    draw_screenshot_panel(editor_left, editor_bottom, right, bottom);
+}
+
+void App::draw_screenshot_contents() {
+    const auto* state = find_screenshot_state(*options_.screenshot_state);
+    if (state->view != ScreenshotView::welcome && state->view != ScreenshotView::repository) {
+        draw_screenshot_workspace();
+        return;
+    }
+    const auto dark = state->theme == ScreenshotTheme::dark;
+    const auto background = dark ? IM_COL32(25, 30, 37, 255) : IM_COL32(250, 250, 248, 255);
+    const auto foreground = dark ? IM_COL32(224, 228, 234, 255) : IM_COL32(30, 35, 42, 255);
+    const auto muted = dark ? IM_COL32(150, 159, 171, 255) : IM_COL32(99, 108, 120, 255);
+    const auto accent = IM_COL32(95, 82, 214, 255);
+    const auto origin = ImGui::GetWindowPos();
+    const auto size = ImGui::GetWindowSize();
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin, {origin.x + size.x, origin.y + size.y}, background);
+    draw->AddCircleFilled({origin.x + 640.0F, origin.y + 218.0F}, 36.0F, accent);
+    draw->AddText({origin.x + 585.0F, origin.y + 282.0F}, foreground, "Welcome to liquify");
+    if (state->view == ScreenshotView::welcome) {
+        draw->AddText(
+            {origin.x + 505.0F, origin.y + 322.0F}, muted, "The IDE for liquid repositories");
+        draw->AddRectFilled({origin.x + 520.0F, origin.y + 382.0F},
+                            {origin.x + 760.0F, origin.y + 432.0F},
+                            accent,
+                            6.0F);
+        draw->AddText({origin.x + 592.0F, origin.y + 399.0F}, IM_COL32_WHITE, "Open repository");
+        draw->AddText({origin.x + 567.0F, origin.y + 474.0F}, muted, "Recent: liquid / main");
+        return;
+    }
+    draw->AddText(
+        {origin.x + 493.0F, origin.y + 322.0F}, muted, "Repository opened from the graph");
+    draw->AddRectFilled({origin.x + 410.0F, origin.y + 370.0F},
+                        {origin.x + 870.0F, origin.y + 548.0F},
+                        dark ? IM_COL32(32, 38, 47, 255) : IM_COL32(242, 244, 247, 255),
+                        8.0F);
+    draw->AddText({origin.x + 442.0F, origin.y + 402.0F}, foreground, "liquify");
+    draw->AddText({origin.x + 466.0F, origin.y + 438.0F}, foreground, "src / app.cpp");
+    draw->AddText(
+        {origin.x + 466.0F, origin.y + 472.0F}, foreground, "tests / test_screenshot.cpp");
+    draw->AddText({origin.x + 466.0F, origin.y + 506.0F}, foreground, "docs / ui / README.md");
+}
+
 void App::draw_contents() {
+    if (options_.screenshot_state) {
+        draw_screenshot_contents();
+        return;
+    }
     if (!repository_ && !editor_) {
         ImGui::TextUnformatted("hello from liquify");
         ImGui::Text("version %s", std::string(version_string()).c_str());
@@ -2278,6 +2510,38 @@ void App::render_editor() {
     SDL_SetRenderScale(renderer_, old_scale_x, old_scale_y);
 }
 
+bool App::capture_screenshot() {
+    auto* rendered = SDL_RenderReadPixels(renderer_, nullptr);
+    if (rendered == nullptr) {
+        screenshot_error_ = std::string{"SDL_RenderReadPixels failed: "} + SDL_GetError();
+        return false;
+    }
+    auto* rgba = SDL_ConvertSurface(rendered, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(rendered);
+    if (rgba == nullptr) {
+        screenshot_error_ = std::string{"SDL_ConvertSurface failed: "} + SDL_GetError();
+        return false;
+    }
+    auto image = ScreenshotImage{};
+    image.width = static_cast<std::uint32_t>(rgba->w);
+    image.height = static_cast<std::uint32_t>(rgba->h);
+    const auto row_bytes = static_cast<std::size_t>(rgba->w) * 4;
+    image.rgba.reserve(row_bytes * static_cast<std::size_t>(rgba->h));
+    const auto* pixels = static_cast<const std::uint8_t*>(rgba->pixels);
+    for (int row = 0; row < rgba->h; ++row) {
+        const auto* begin = pixels + static_cast<std::ptrdiff_t>(row) * rgba->pitch;
+        image.rgba.insert(image.rgba.end(), begin, begin + row_bytes);
+    }
+    SDL_DestroySurface(rgba);
+    auto written = write_png(*options_.screenshot_output, image);
+    if (!written) {
+        screenshot_error_ = written.error();
+        return false;
+    }
+    screenshot_captured_ = true;
+    return true;
+}
+
 void App::frame() {
     poll_editor_graph();
     poll_review();
@@ -2298,10 +2562,19 @@ void App::frame() {
     ImGui::End();
 
     ImGui::Render();
-    SDL_SetRenderDrawColor(renderer_, 250, 250, 248, 255);
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    if (screenshot != nullptr && screenshot->theme == ScreenshotTheme::dark) {
+        SDL_SetRenderDrawColor(renderer_, 25, 30, 37, 255);
+    } else {
+        SDL_SetRenderDrawColor(renderer_, 250, 250, 248, 255);
+    }
     SDL_RenderClear(renderer_);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
     render_editor();
+    if (screenshot != nullptr && !screenshot_captured_) {
+        capture_screenshot();
+    }
     SDL_RenderPresent(renderer_);
 }
 
@@ -2384,6 +2657,15 @@ int App::run() {
     }
     if (options_.smoke) {
         print_smoke_metrics();
+    }
+    if (options_.screenshot_state) {
+        if (!screenshot_captured_) {
+            std::fprintf(stderr, "liquify: screenshot failed: %s\n", screenshot_error_.c_str());
+            return 1;
+        }
+        std::printf("screenshot: %s -> %s\n",
+                    options_.screenshot_state->c_str(),
+                    options_.screenshot_output->string().c_str());
     }
     return 0;
 }

@@ -15,7 +15,8 @@ Diagnostics and the incremental graph follow the liquid #20 and #21 interfaces.
 
 **Lifecycle** (mirrors Zetta `src/gui/app.cpp`): `SDL_Init(VIDEO)` → window at 70 % of the usable
 display (floors 900×600), resizable, high-pixel-density → `SDL_CreateRenderer` + vsync → ImGui
-context (keyboard nav, no `imgui.ini`, light style) → `ImGui_ImplSDL3_InitForSDLRenderer` +
+context (keyboard nav, no `imgui.ini`, light style except deterministic dark screenshot states) →
+`ImGui_ImplSDL3_InitForSDLRenderer` +
 `ImGui_ImplSDLRenderer3_Init`. Each frame: poll events (quit on `SDL_EVENT_QUIT` or the window's
 close request), ImGui frame, one full-viewport window, render, present. Shutdown in reverse.
 
@@ -42,8 +43,11 @@ the command palette, and a daemon status line;
 and writes the result record to standard output
 ([`../editor/structural-editing.md`](../editor/structural-editing.md)); `liquify --smoke [N]`
 scrolls and edits a generated 50,000-line buffer for N frames (default 30), prints latency metrics,
-and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`. The complete build, test and
-run sequence is [`../build/local.md`](../build/local.md).
+and exits 0; `liquify --screenshot <state> --out <png>` renders one named, fixed UI state through
+SDL's dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md)); `liquify
+version` prints
+`liquify <v> (libliquid <v>)`. The complete build, test and run sequence is
+[`../build/local.md`](../build/local.md).
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as

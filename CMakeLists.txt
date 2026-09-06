@@ -86,6 +86,7 @@ target_compile_options(imgui PRIVATE -w)
 # Library only: no CLI, no liquid tests in this build.
 # -----------------------------------------------------------------------------
 find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 set(LIQUID_BUILD_CLI   OFF CACHE BOOL "" FORCE)
 set(LIQUID_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LIQUID_BUILD_BENCH OFF CACHE BOOL "" FORCE)
@@ -123,6 +124,7 @@ add_library(liquify-core STATIC
   src/plugin.cpp
   src/repository_view.cpp
   src/review.cpp
+  src/screenshot.cpp
   src/structural_edit.cpp
   src/text_layout.cpp
   src/stub_tree.cpp
@@ -133,7 +135,7 @@ target_include_directories(liquify-core
 target_link_libraries(liquify-core
   PUBLIC liquid::liquid
   PRIVATE Boost::corosio Boost::corosio_openssl Boost::http Boost::json
-          tree-sitter-c-parser tree-sitter-cpp-parser)
+          tree-sitter-c-parser tree-sitter-cpp-parser ZLIB::ZLIB)
 if(APPLE)
   target_link_libraries(liquify-core PRIVATE "-framework Security")
 elseif(WIN32)

@@ -19,6 +19,9 @@ liquid's error and make `--print-tree` exit non-zero; `liquify` with no path ret
 state. The standard input mode is non-modal and a modal command/insert mode is available.
 `--smoke` scrolls and edits a 50,000-line buffer, reports frame and typing latency, and exits 0
 ([`../app-shell/README.md`](../app-shell/README.md), [`../editor/README.md`](../editor/README.md)).
+`--screenshot` renders the fixed welcome, repository, C++ editor and panel registry in light and
+dark through a headless software renderer; the committed image set and pixel tests are described
+in [`../ui/README.md`](../ui/README.md).
 
 ## The liquid pin
 

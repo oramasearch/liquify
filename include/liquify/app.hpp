@@ -36,6 +36,8 @@ struct AppOptions {
     bool smoke = false;
     std::optional<std::filesystem::path> repository_path;
     std::optional<std::string> lake_url;
+    std::optional<std::string> screenshot_state;
+    std::optional<std::filesystem::path> screenshot_output;
 };
 
 class App {
@@ -91,6 +93,10 @@ private:
     void draw_assistant();
     void draw_command_palette();
     void draw_plugin_panels();
+    void draw_screenshot_contents();
+    void draw_screenshot_workspace();
+    void draw_screenshot_panel(float left, float top, float right, float bottom);
+    bool capture_screenshot();
     void invoke_plugin_command(std::string_view name);
     void poll_plugins();
     void poll_editor_graph();
@@ -159,6 +165,7 @@ private:
     std::vector<std::string> structural_unresolved_;
     std::vector<std::string> structural_accepted_files_;
     std::string structural_name_;
+    std::string screenshot_error_;
     std::size_t next_comment_index_{};
     std::size_t ai_context_bytes_{64 * 1024};
     float display_refresh_hz_{};
@@ -170,6 +177,7 @@ private:
     bool rename_open_{};
     bool extract_function_open_{};
     bool structural_preview_open_{};
+    bool screenshot_captured_{};
     bool quit_ = false;
 };
 
