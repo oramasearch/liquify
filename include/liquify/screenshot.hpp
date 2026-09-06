@@ -22,6 +22,7 @@ enum class ScreenshotView : std::uint8_t {
     welcome,
     repository,
     editor_cpp,
+    editor_view,
     diagnostics,
     build,
     review,

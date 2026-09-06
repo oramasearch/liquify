@@ -14,6 +14,7 @@ Every screen has light and dark variants:
 | Welcome | First-run entry point and repository action | [`welcome-light.png`](screenshots/welcome-light.png) | [`welcome-dark.png`](screenshots/welcome-dark.png) |
 | Repository | Open repository and deterministic tree | [`repository-light.png`](screenshots/repository-light.png) | [`repository-dark.png`](screenshots/repository-dark.png) |
 | C++ editor | C++ buffer with a highlighted source line | [`editor-cpp-light.png`](screenshots/editor-cpp-light.png) | [`editor-cpp-dark.png`](screenshots/editor-cpp-dark.png) |
+| Editor view | Multi-cursor source, search results, syntax and gutters | [`editor-view-light.png`](screenshots/editor-view-light.png) | [`editor-view-dark.png`](screenshots/editor-view-dark.png) |
 | Diagnostics | Findings panel and count badge | [`diagnostics-light.png`](screenshots/diagnostics-light.png) | [`diagnostics-dark.png`](screenshots/diagnostics-dark.png) |
 | Build | Build, test and deploy panel | [`build-light.png`](screenshots/build-light.png) | [`build-dark.png`](screenshots/build-dark.png) |
 | Review | Review panel and comment status | [`review-light.png`](screenshots/review-light.png) | [`review-dark.png`](screenshots/review-dark.png) |
@@ -48,10 +49,11 @@ of matching pixels. The screenshot tests render through the same headless applic
 decode the written PNG, and prove that the C++ editor has its selected source row and that the
 diagnostics panel has its active tab and visible error. Regions deliberately cover stable layout
 landmarks rather than whole-image hashes so harmless rasterizer differences do not hide the
-intended signal.
+intended signal. The editor-view assertion separately proves its themed gutter and syntax roles;
+[`editor.md`](editor.md) records the interaction and liquid data paths.
 
-`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at ten screens and
-twenty named states. The panel behavior and layout model are documented in
+`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at eleven screens and
+twenty-two named states. The panel behavior and layout model are documented in
 [`panels.md`](panels.md).
 
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced

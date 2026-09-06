@@ -32,6 +32,12 @@ command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.m
 dark through a headless software renderer; the committed image set and pixel tests are described
 in [`../ui/README.md`](../ui/README.md).
 
+The editor supports multi-cursor and rectangular edits, repository-configured indentation,
+soft-wrap and fold row models, liquid tree-sitter syntax, bracket matching, line/diagnostic/
+attribution/presence/Drive gutters, buffer and repository search/replace, and repository operation
+history. Its interaction, worker and screenshot contracts are in
+[`../ui/editor.md`](../ui/editor.md).
+
 ## The liquid pin
 
 liquid is pinned at `modules/liquid`. The pin includes liquid's compact-checkpoint repository
@@ -56,9 +62,9 @@ validation backlog in its status line
 ## Structural editing
 
 Syntax-node selection, cross-file rename and C/C++ extract-function are serialized on the editor
-worker and preview fingerprinted node edits before applying one drip per changed file. The same
-canonical CBOR records are accepted by the headless `--apply-edits` command. This is the local
-adapter for bridge decision 30 until libliquid owns the permanent structural edit operation
+worker and preview fingerprinted node edits before applying one drip per changed file and one
+grouped liquid operation. The same canonical CBOR records are accepted by the headless
+`--apply-edits` command and translated to liquid's public edit API
 ([`../editor/structural-editing.md`](../editor/structural-editing.md)).
 
 ## Review in place

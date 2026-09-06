@@ -14,6 +14,8 @@ states=(
     repository-dark
     editor-cpp-light
     editor-cpp-dark
+    editor-view-light
+    editor-view-dark
     diagnostics-light
     diagnostics-dark
     build-light
@@ -41,4 +43,4 @@ for state in "${states[@]}"; do
     "$binary" --screenshot "$state" --out "$output_dir/$state.png"
 done
 
-printf 'screenshots: ok — 10 states × 2 themes at 1280x800\n'
+printf 'screenshots: ok — 11 states × 2 themes at 1280x800\n'

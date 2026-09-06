@@ -13,7 +13,9 @@ and why it is a native editor rather than an extension, is in
 `liquify <path>` opens a liquid repository, edits blobs in a retained GPU text buffer and saves
 through libliquid as a drip; C and C++ buffers add graph-backed diagnostics, navigation and
 completion, structural editing, and F7, F8 and F9 build, test and deploy through the attached
-daemon. `--lake` adds review in place with cursor-anchored comments, native plugins register
+daemon. The editor adds multi-cursor and column editing, repository-configured indentation,
+liquid syntax and collaboration gutters, search/replace, and operation-log undo/redo.
+`--lake` adds review in place with cursor-anchored comments, native plugins register
 queries, commands and panels, and the assistant is off by default and opens no connection while
 off. `design/` carries the stamped Orama DTCG snapshot, generated native roles and embedded IBM
 Plex assets. The light/dark application shell hosts every surface through one panel registry;
@@ -62,6 +64,8 @@ its page there in the same change; this file is only the front door. The most us
   macOS conventions, and light/dark screenshot matrix.
 - [`docs/ui/panels.md`](docs/ui/panels.md): the panel registry, docking, layout persistence,
   commands, states, and shared progress channel.
+- [`docs/ui/editor.md`](docs/ui/editor.md): the editor interaction model, syntax, gutters, search,
+  history and editor-view screenshots.
 - [`docs/editor/README.md`](docs/editor/README.md): the buffer, the retained text layer and the
   smoke measurements.
 - [`docs/editor/interactive-analysis.md`](docs/editor/interactive-analysis.md),
