@@ -49,6 +49,10 @@ diagnostics and cursor-query results, records edit-to-diagnostic latency and for
 backlog from daemon status. Its editor-view case loads liquid's real tree-sitter frontend and
 checks syntax, attribution, repository search/replace and operation-log undo.
 
+`test_first_run.cpp` covers repository open/switch state, recent-repository persistence, identity
+session persistence without credentials, distinct unreadable/offline failures, and the complete
+status-bar signal model.
+
 `test_structural_edit.cpp` covers the syntax ancestor selection chain, exact reference ranges,
 rename across two files with one drip per file, unresolved string occurrences, stale-fingerprint
 refusal, one grouped liquid operation with a two-file undo, compiling C and C++ extract-function
