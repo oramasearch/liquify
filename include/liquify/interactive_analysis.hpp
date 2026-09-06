@@ -15,6 +15,8 @@
 
 namespace liquify {
 
+class PluginHost;
+
 enum class InteractiveQueryKind : std::uint8_t {
     node_at_position,
     enclosing_definition,
@@ -119,6 +121,9 @@ public:
 
     [[nodiscard]] static auto open(std::filesystem::path state_directory)
         -> liquid::result<InteractiveAnalysis>;
+    [[nodiscard]] static auto open(std::filesystem::path state_directory,
+                                   std::shared_ptr<PluginHost> plugins)
+        -> liquid::result<InteractiveAnalysis>;
 
     [[nodiscard]] auto open_buffer(std::filesystem::path path,
                                    StubLanguage language,
@@ -150,6 +155,9 @@ public:
         -> liquid::result<std::vector<Diagnostic>>;
     [[nodiscard]] auto definition_context(const std::filesystem::path& path, std::uint32_t byte)
         -> liquid::result<DefinitionContext>;
+    [[nodiscard]] auto plugin_query(std::string_view name,
+                                    std::span<const std::byte> arguments_cbor)
+        -> liquid::result<std::vector<std::byte>>;
     [[nodiscard]] auto measure_latency(const std::filesystem::path& path,
                                        std::span<const std::uint32_t> positions)
         -> liquid::result<InteractiveLatency>;

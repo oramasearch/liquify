@@ -27,6 +27,11 @@ all seven registered analysis queries. It covers closed-file stub hover and defi
 compiler-symbol precedence, translation-unit diagnostics, completion order, local references,
 tree-sitter changed-range reuse, cancellation during typing and a successful answer after the edit.
 
+`test_plugin.cpp` registers the sample descriptor statically and loads the same source as a module.
+Both paths demand its query through `InteractiveAnalysis`, invoke its command, and decode its panel.
+It also refuses a mismatched ABI and non-canonical CBOR, then proves one panel error does not
+hide a healthy panel from the same plugin host.
+
 `test_editor_graph.cpp` proves the application runtime hosts liquid's daemon for the first client,
 attaches when a daemon already owns the checkout, serializes overlay mutations, publishes
 diagnostics and cursor-query results, records edit-to-diagnostic latency and formats the validation

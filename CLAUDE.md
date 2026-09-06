@@ -23,7 +23,9 @@ surface renders those diagnostics inline and in a panel, exposes definition, hov
 demands, and reports daemon drip triggers and the validation backlog. A default-off assistant
 assembles inspectable context from the same graph, streams through a pinned provider transport,
 and previews edits until the user accepts one normal drip. When off it constructs no provider and
-opens no connection. Next: inline build, test and deploy (liquify #6).
+opens no connection. Native plugins use liquid's versioned frontend C boundary to register graph
+queries, commands, and canonical-CBOR panels through checked static or dynamic loading. Next:
+inline build, test and deploy (liquify #6).
 
 ## Decisions — recorded
 
@@ -49,6 +51,9 @@ opens no connection. Next: inline build, test and deploy (liquify #6).
    Its visible repository switch is the network boundary: off constructs no provider and opens no
    socket. Context comes from editor, symbol, build and dependency graph facts, is byte-budgeted,
    and is shown before sending. Proposed edits require user acceptance and produce one user drip.
+8. **The native plugin API extends liquid's frontend C boundary** (2026-09-06). Query kinds enter
+   the in-process graph by name, commands carry a default binding and canonical-CBOR argument
+   schema, and panels return data-only canonical-CBOR view models; plugins never call ImGui.
 
 ## Rules
 
@@ -69,11 +74,6 @@ opens no connection. Next: inline build, test and deploy (liquify #6).
   client or bypass the AI switch.
 - Credentials come from the OS credential store or `ANTHROPIC_API_KEY`. Never persist, log, or
   display their value; UI state is only configured or not configured.
-
-## Open decisions
-
-- **Plugin ABI.** A stable non-C++ boundary, shared with liquid's codecs and language
-  frontends; not before Phase 4.
 
 ## Never
 

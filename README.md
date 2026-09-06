@@ -23,6 +23,9 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > context from those graph facts, streams the Anthropic Messages API over pinned Corosio and
 > Boost.HTTP, and applies a proposed edit only after user acceptance. Turning it off constructs no
 > provider and opens no connection.
+> Native plugins share liquid's versioned frontend C boundary, register graph queries, commands,
+> and canonical-CBOR panels, and load through checked static or dynamic paths. The sample plugin
+> proves all three registrations and a panel failure remains local to that panel.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
@@ -70,6 +73,8 @@ ctest --test-dir build
 | `include/liquify/ai_provider.hpp`, `src/ai_provider.cpp` | streaming provider interface and Anthropic Messages implementation |
 | `include/liquify/ai_config.hpp`, `src/ai_config.cpp` | default-off repository/global configuration and credential lookup |
 | `include/liquify/assistant.hpp`, `src/assistant.cpp` | assistant state, proposal acceptance, and local assisted-edit record |
+| `include/liquify/plugin.hpp`, `src/plugin.cpp` | checked native plugin host, canonical-CBOR validation, graph query registration, commands, and panel view models |
+| `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
 | `src/main.cpp` | CLI: optional repository path, `--print-tree`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |

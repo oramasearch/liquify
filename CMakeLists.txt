@@ -119,6 +119,7 @@ add_library(liquify-core STATIC
   src/editor_buffer.cpp
   src/editor_graph.cpp
   src/interactive_analysis.cpp
+  src/plugin.cpp
   src/repository_view.cpp
   src/text_layout.cpp
   src/stub_tree.cpp
@@ -135,6 +136,22 @@ if(APPLE)
 elseif(WIN32)
   target_link_libraries(liquify-core PRIVATE Advapi32)
 endif()
+target_link_libraries(liquify-core PRIVATE ${CMAKE_DL_LIBS})
+
+add_library(liquify-sample-plugin-objects OBJECT plugins/sample/sample_plugin.cpp)
+set_target_properties(liquify-sample-plugin-objects PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  POSITION_INDEPENDENT_CODE ON
+  VISIBILITY_INLINES_HIDDEN ON)
+target_include_directories(liquify-sample-plugin-objects PRIVATE
+  modules/liquid/include plugins/sample)
+add_library(liquify-sample-plugin MODULE $<TARGET_OBJECTS:liquify-sample-plugin-objects>)
+set_target_properties(liquify-sample-plugin PROPERTIES
+  PREFIX ""
+  OUTPUT_NAME "liquify-sample-plugin")
+add_library(liquify-sample-plugin-static STATIC
+  $<TARGET_OBJECTS:liquify-sample-plugin-objects>)
+target_include_directories(liquify-sample-plugin-static PUBLIC plugins/sample)
 
 option(LIQUIFY_BUILD_BENCH "Build stub-tree benchmarks" OFF)
 if(LIQUIFY_BUILD_BENCH)
