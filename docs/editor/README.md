@@ -66,9 +66,9 @@ immediately after the smoke run:
 
 ```text
 $ ./build/liquify --smoke 30
-smoke: lines=50000 frames=30 visible_lines=41 avg_frame_ms=0.509 p95_frame_ms=1.846 achieved_hz=1964.0 display_hz=60.0 avg_typing_ms=0.634 p95_typing_ms=2.097
+smoke: lines=50000 frames=30 visible_lines=41 avg_frame_ms=0.445 p95_frame_ms=1.378 achieved_hz=2247.5 display_hz=60.0 avg_typing_ms=0.578 p95_typing_ms=1.540
 $ sysctl -n vm.loadavg
-{ 24.88 38.85 52.37 }
+{ 70.88 48.31 54.69 }
 ```
 
 ## Interactive analysis
