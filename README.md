@@ -40,9 +40,11 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > pushes saved drips to the configured sync remote and reports every reference outcome, including
 > an authorization refusal while accepted references continue. Failed action diagnostics render on
 > their affected editor lines.
-> Pull-request CI also produces a hardened-runtime macOS `pkg` and `dmg`, a signed and install-tested
-> Windows MSIX, and an AppImage exercised on Ubuntu and Fedora. `v*` tags publish those installers
-> with signed and unsigned SHA-256 records; notarization runs when the release secrets are present.
+> Pull-request CI also produces a self-contained, hardened-runtime macOS `pkg` and `dmg`, a signed
+> and install-tested Windows MSIX, and an AppImage exercised on Ubuntu and Fedora. The macOS build
+> rejects non-system absolute Mach-O dependencies and launches a relocated copy from the mounted
+> dmg. `v*` tags publish those installers with signed and unsigned SHA-256 records; notarization
+> runs when the release secrets are present.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
@@ -60,6 +62,8 @@ Windows, runs the tests, version command, and display-backed smoke self-test, an
 native installers. `v*` tags publish the verified artifacts and their SHA-256 records. See
 [`docs/build/ci.md`](docs/build/ci.md) for the runner toolchains and
 [`docs/packaging/README.md`](docs/packaging/README.md) for signing and verification.
+The macOS installers carry every non-system dynamic library they use; Homebrew is a build
+requirement, not a runtime requirement.
 
 ```sh
 git clone --recurse-submodules git@github.com:oramasearch/liquify.git
