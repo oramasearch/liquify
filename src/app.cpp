@@ -94,6 +94,34 @@ auto source_edit_between(std::string_view before, std::string_view after)
                       std::string(after.substr(first, after_end - first))};
 }
 
+auto build_action_state_name(BuildActionState state) -> std::string_view {
+    switch (state) {
+    case BuildActionState::queued:
+        return "queued";
+    case BuildActionState::running_local:
+        return "running local";
+    case BuildActionState::running_remote:
+        return "running remote";
+    case BuildActionState::hit:
+        return "hit";
+    case BuildActionState::done:
+        return "done";
+    case BuildActionState::failed:
+        return "failed";
+    }
+    return "unknown";
+}
+
+auto deploy_outcome_name(liquid::sync_ref_outcome_kind outcome) -> std::string_view {
+    switch (outcome) {
+    case liquid::sync_ref_outcome_kind::applied:
+        return "applied";
+    case liquid::sync_ref_outcome_kind::refused:
+        return "refused";
+    }
+    return "unknown";
+}
+
 } // namespace
 
 class RetainedTextLayer {
@@ -751,6 +779,7 @@ void App::save_editor() {
     if (!editor_) {
         return;
     }
+    const auto build_running = editor_graph_ && editor_graph_->snapshot().build_running;
     if (!editor_->save()) {
         editor_status_ = std::string(editor_->error());
         return;
@@ -759,6 +788,10 @@ void App::save_editor() {
     if (editor_graph_) {
         editor_graph_->note_saved_drip(editor_->pending_drips());
         editor_graph_->refresh_status();
+        if (build_running) {
+            request_build();
+            editor_status_ = "saved as a drip; build replanned";
+        }
     }
 }
 
@@ -810,6 +843,24 @@ void App::request_completion() {
     if (byte <= std::numeric_limits<std::uint32_t>::max()) {
         editor_graph_->request_completion(std::filesystem::path(editor_->display_path()),
                                           static_cast<std::uint32_t>(byte));
+    }
+}
+
+void App::request_build() {
+    if (editor_graph_) {
+        editor_graph_->request_build();
+    }
+}
+
+void App::request_tests(std::string filter) {
+    if (editor_graph_) {
+        editor_graph_->request_tests(std::move(filter));
+    }
+}
+
+void App::request_deploy() {
+    if (editor_graph_) {
+        editor_graph_->request_deploy();
     }
 }
 
@@ -1149,10 +1200,29 @@ void App::handle_text(std::string_view text) {
 }
 
 void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
-    if (!editor_ || !editor_focused_) {
+    if (!editor_) {
         return;
     }
     const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
+    if (primary && key == SDLK_P) {
+        command_palette_open_ = true;
+        return;
+    }
+    if (key == SDLK_F7) {
+        request_build();
+        return;
+    }
+    if (key == SDLK_F8) {
+        request_tests();
+        return;
+    }
+    if (key == SDLK_F9) {
+        request_deploy();
+        return;
+    }
+    if (!editor_focused_) {
+        return;
+    }
     const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
     const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
     if (primary && shift && key == SDLK_P) {
@@ -1628,6 +1698,9 @@ void App::draw_command_palette() {
     command("Assistant: Toggle (Primary+Shift+L)", [this] { toggle_assistant(); });
     command("Assistant: What will be sent (Primary+Shift+C)",
             [this] { request_assistant_context(std::nullopt); });
+    command("Build (F7)", [this] { request_build(); });
+    command("Run all tests (F8)", [this] { request_tests(); });
+    command("Deploy (F9)", [this] { request_deploy(); });
     command("Review: Next hunk (Alt+Down)", [this] { navigate_hunk(true); });
     command("Review: Previous hunk (Alt+Up)", [this] { navigate_hunk(false); });
     command("Review: Next comment (Alt+C)", [this] { navigate_comment(); });
@@ -1867,6 +1940,18 @@ void App::draw_editor() {
             save_editor();
             editor_focused_ = true;
         }
+        ImGui::SameLine();
+        if (ImGui::Button("Build (F7)")) {
+            request_build();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Tests (F8)")) {
+            request_tests();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Deploy (F9)")) {
+            request_deploy();
+        }
     }
     if (assistant_) {
         ImGui::SameLine();
@@ -1963,13 +2048,17 @@ void App::draw_editor() {
                       ImGuiChildFlags_Border);
     draw_assistant();
     ImGui::Separator();
-    ImGui::Text("Diagnostics (%zu)", graph_snapshot.diagnostics.size());
+    auto visible_diagnostics = graph_snapshot.diagnostics;
+    visible_diagnostics.insert(visible_diagnostics.end(),
+                               graph_snapshot.build_diagnostics.begin(),
+                               graph_snapshot.build_diagnostics.end());
+    ImGui::Text("Diagnostics (%zu)", visible_diagnostics.size());
     if (graph_snapshot.edit_to_diagnostic_ms > 0.0) {
         ImGui::SameLine();
         ImGui::TextDisabled("edit to first result %.3f ms", graph_snapshot.edit_to_diagnostic_ms);
     }
-    for (std::size_t index = 0; index < graph_snapshot.diagnostics.size(); ++index) {
-        const auto& diagnostic = graph_snapshot.diagnostics[index];
+    for (std::size_t index = 0; index < visible_diagnostics.size(); ++index) {
+        const auto& diagnostic = visible_diagnostics[index];
         const auto label = std::string(diagnostic_severity_name(diagnostic.severity)) + ": " +
                            diagnostic.message + "##diagnostic-" + std::to_string(index);
         if (ImGui::Selectable(label.c_str())) {
@@ -2001,6 +2090,95 @@ void App::draw_editor() {
         }
     }
     draw_plugin_panels();
+    ImGui::EndChild();
+    draw_build_panel(graph_snapshot);
+}
+
+void App::draw_build_panel(const EditorGraphSnapshot& snapshot) {
+    const auto available = ImGui::GetContentRegionAvail();
+    ImGui::BeginChild("build-panel",
+                      ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F)),
+                      ImGuiChildFlags_Border);
+    ImGui::TextUnformatted("Build, test and deploy");
+    if (snapshot.build_running) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("running");
+    } else if (!snapshot.build_result.empty()) {
+        ImGui::SameLine();
+        ImGui::TextUnformatted(snapshot.build_result.c_str());
+    }
+    for (const auto& action : snapshot.build_actions) {
+        ImGui::Text(
+            "%s: %s", action.identity.c_str(), build_action_state_name(action.state).data());
+        if (!action.worker.empty()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("worker %s", action.worker.c_str());
+        }
+        if (action.critical) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("critical");
+        }
+        if (!action.scheduling_choice.empty()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", action.scheduling_choice.c_str());
+        }
+        if (!action.dependencies.empty()) {
+            auto dependencies = std::string{};
+            for (const auto& dependency : action.dependencies) {
+                if (!dependencies.empty()) {
+                    dependencies += ", ";
+                }
+                dependencies += dependency;
+            }
+            ImGui::TextDisabled("requires %s", dependencies.c_str());
+        }
+    }
+    if (!snapshot.tests.empty()) {
+        ImGui::Separator();
+        ImGui::Text("Tests (%zu)", snapshot.tests.size());
+        for (const auto& test : snapshot.tests) {
+            ImGui::PushID(test.name.c_str());
+            if (ImGui::SmallButton("Run")) {
+                request_tests(test.name);
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(test.name.c_str());
+            ImGui::PopID();
+        }
+    }
+    for (const auto& result : snapshot.test_results) {
+        ImGui::Text("%s: %s (%s)",
+                    result.name.c_str(),
+                    result.passed ? "passed" : "failed",
+                    result.hit ? "hit" : "ran");
+        if (!result.output.empty()) {
+            ImGui::TextWrapped("%s", result.output.c_str());
+        }
+    }
+    if (snapshot.deploy.running || !snapshot.deploy.error.empty() ||
+        !snapshot.deploy.references.empty()) {
+        ImGui::Separator();
+        if (snapshot.deploy.running) {
+            ImGui::TextUnformatted("Deploying saved drips...");
+        }
+        if (!snapshot.deploy.error.empty()) {
+            ImGui::TextColored(
+                ImVec4(0.75F, 0.12F, 0.12F, 1.0F), "%s", snapshot.deploy.error.c_str());
+        }
+        if (!snapshot.deploy.references.empty()) {
+            ImGui::Text("Transferred %llu objects, %llu bytes",
+                        static_cast<unsigned long long>(snapshot.deploy.objects),
+                        static_cast<unsigned long long>(snapshot.deploy.bytes));
+        }
+        for (const auto& reference : snapshot.deploy.references) {
+            ImGui::Text(
+                "%s: %s", reference.name.c_str(), deploy_outcome_name(reference.outcome).data());
+            if (!reference.reason.empty()) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s", reference.reason.c_str());
+            }
+        }
+    }
     ImGui::EndChild();
 }
 
@@ -2078,10 +2256,14 @@ void App::render_editor() {
     const auto review_lines = review_diff_open_
                                   ? std::span<const ReviewDiffLine>{review_diff_lines_}
                                   : std::span<const ReviewDiffLine>{};
+    auto visible_diagnostics = graph_snapshot.diagnostics;
+    visible_diagnostics.insert(visible_diagnostics.end(),
+                               graph_snapshot.build_diagnostics.begin(),
+                               graph_snapshot.build_diagnostics.end());
     visible_lines_ = text_layer_->render(renderer_,
                                          *editor_,
                                          *layouts_,
-                                         graph_snapshot.diagnostics,
+                                         visible_diagnostics,
                                          editor_x_,
                                          editor_y_,
                                          editor_width_,

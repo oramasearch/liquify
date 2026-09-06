@@ -28,6 +28,7 @@ class EditorBuffer;
 class EditorGraph;
 class TextLayoutCache;
 class RetainedTextLayer;
+struct EditorGraphSnapshot;
 
 struct AppOptions {
     std::string title = "liquify";
@@ -58,6 +59,7 @@ private:
     void draw_review_panel();
     void draw_review_comment_popup();
     void draw_editor();
+    void draw_build_panel(const EditorGraphSnapshot& snapshot);
     void render_editor();
     void open_editor(std::string path, std::string blob_id);
     void open_review(std::string id);
@@ -72,6 +74,9 @@ private:
     void request_definition();
     void request_hover();
     void request_completion();
+    void request_build();
+    void request_tests(std::string filter = {});
+    void request_deploy();
     void expand_structural_selection();
     void shrink_structural_selection();
     void select_enclosing_definition();

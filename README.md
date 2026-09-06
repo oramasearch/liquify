@@ -5,7 +5,7 @@ eventually, like liquid.
 
 liquid is the tool. lake is where it collects. liquify is where you work.
 
-> **Status: retained GPU editor with graph-backed analysis, structural editing, review in place, native plugins, and an optional AI surface.**
+> **Status: retained GPU editor with graph-backed analysis, inline build, test and deploy, structural editing, review in place, native plugins, and an optional AI surface.**
 > `liquify <path>` opens a liquid repository through the public coroutine API, renders its root
 > entries, loads nested trees on expansion, and opens blobs into an editable in-memory buffer;
 > save writes through libliquid as a drip. Unreadable repositories show liquid's error and make
@@ -35,10 +35,14 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > and canonical-CBOR panels, and load through checked static or configured dynamic paths. Plugin
 > commands appear in the palette and data-only panels render below analysis results. The sample
 > proves all three registrations; load and panel failures remain local to their source.
+> F7 plans and starts the configured build through the attached daemon, then renders its action
+> event stream, critical path and scheduler decisions. F8 lists and runs graph test actions; F9
+> pushes saved drips to the configured sync remote and reports every reference outcome, including
+> an authorization refusal while accepted references continue. Failed action diagnostics render on
+> their affected editor lines.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
-> Next, per the bridge's action plan (Phase 4): inline build, test and deploy (liquify #6).
 
 ## Build and run
 
@@ -80,6 +84,7 @@ ctest --test-dir build
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
 | `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |
 | `include/liquify/editor_graph.hpp`, `src/editor_graph.cpp` | background editor-query runtime, daemon host/attach lifetime, asynchronous query snapshots and status data |
+| `docs/editor/build.md` | graph build, test and deploy panels, event states, bindings and measurement record |
 | `include/liquify/structural_edit.hpp`, `src/structural_edit.cpp` | canonical node-level edit records, selection, rename, extract-function and repository application |
 | `include/liquify/review.hpp`, `src/review.cpp` | coroutine-native review model/controller: forge listing and state, sync pull, text diff, cursor comments, and anchor advancement |
 | `include/liquify/context_builder.hpp`, `src/context_builder.cpp` | byte-budgeted, inspectable assistant context assembled from graph facts |
