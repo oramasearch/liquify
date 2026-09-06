@@ -26,6 +26,8 @@ states=(
     plugins-dark
     structural-editing-light
     structural-editing-dark
+    panels-light
+    panels-dark
 )
 
 if [[ ! -x $binary ]]; then
@@ -39,4 +41,4 @@ for state in "${states[@]}"; do
     "$binary" --screenshot "$state" --out "$output_dir/$state.png"
 done
 
-printf 'screenshots: ok — 9 states × 2 themes at 1280x800\n'
+printf 'screenshots: ok — 10 states × 2 themes at 1280x800\n'

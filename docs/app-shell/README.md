@@ -2,7 +2,9 @@
 
 **What.** `liquify::App` (`include/liquify/app.hpp`, `src/app.cpp`): one window, one renderer,
 one Dear ImGui context, one frame loop, an activity bar, contextual sidebar, tabbed and split
-editor, bottom panel and status bar. SDL3 3.2
+editor, bottom panel, floating panels and status bar. All built-in surfaces use the plain-C++ panel
+registry for metadata, commands, placement, focus, state and notifications
+([`../ui/panels.md`](../ui/panels.md)). SDL3 3.2
 (static) and Dear ImGui 1.91 use the SDL_Renderer backend. **`src/app.cpp` is the only translation
 unit that includes SDL3 or ImGui.** `RepositoryView` (`src/repository_view.hpp`,
 `src/repository_view.cpp`) is plain C++ and holds either the root `liquid::tree_entry` values or
@@ -46,8 +48,8 @@ and writes the result record to standard output
 `liquify --screenshot <state> --out <png>` renders one named, fixed shell state through SDL's
 dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md),
 [`../ui/app-shell.md`](../ui/app-shell.md)); `liquify --smoke [N]` scrolls and edits a generated
-50,000-line buffer for N frames (default 30), prints latency metrics, and exits 0; `liquify version` prints
-`liquify <v> (libliquid <v>)`. The complete build, test and run sequence is
+50,000-line buffer for N frames (default 30), prints latency metrics, and exits 0; `liquify
+version` prints `liquify <v> (libliquid <v>)`. The complete build, test and run sequence is
 [`../build/local.md`](../build/local.md).
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
@@ -82,9 +84,10 @@ layout-cache unit tests cover editing, UTF-8 cursor movement, save, reuse and li
 invalidation. No repository fixture bytes are committed.
 Plugin tests cover configured global and repository paths; a bad module remains a visible load
 failure while later valid modules register normally.
-App-shell state tests cover repository-local round trips and invalid state. Screenshot tests read
-the in-tree PNG output and inspect stable pixel regions, and `tools/ui/screenshot.sh` renders the
-full light/dark state matrix.
+Panel-registry and app-shell state tests cover docking, focus, progress, cancellation, reset,
+repository-local round trips, version 1 migration and invalid state. Screenshot tests read the
+in-tree PNG output and inspect stable pixel regions, and `tools/ui/screenshot.sh` renders the full
+light/dark state matrix.
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.

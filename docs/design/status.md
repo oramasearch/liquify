@@ -22,9 +22,12 @@ state. The standard input mode is non-modal and a modal command/insert mode is a
 The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
 its gate verifies source hashes and rejects stale generated output. Those roles drive the system,
 light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom
-panel and status bar. Divider sizes, visibility and selected surfaces persist per repository;
-macOS installs native command menus and Cmd bindings
-([`../ui/design-system.md`](../ui/design-system.md), [`../ui/app-shell.md`](../ui/app-shell.md)).
+panel, floating panels and status bar. One registry supplies panel metadata, commands, placement,
+focus, state and notifications; each surface moves among dock areas, floats and re-docks. Divider
+sizes and complete panel layouts persist per repository and can be reset; one status channel
+reports build, saved-drip sync, repository hydration and assistant progress. macOS installs native
+command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.md),
+[`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
 `--screenshot` renders the fixed welcome, repository, C++ editor and panel registry in light and
 dark through a headless software renderer; the committed image set and pixel tests are described
 in [`../ui/README.md`](../ui/README.md).

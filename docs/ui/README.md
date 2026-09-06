@@ -20,6 +20,7 @@ Every screen has light and dark variants:
 | Assistant | Offline assistant panel | [`assistant-light.png`](screenshots/assistant-light.png) | [`assistant-dark.png`](screenshots/assistant-dark.png) |
 | Plugins | Data-only plugin panel | [`plugins-light.png`](screenshots/plugins-light.png) | [`plugins-dark.png`](screenshots/plugins-dark.png) |
 | Structural editing | Multi-file edit preview | [`structural-editing-light.png`](screenshots/structural-editing-light.png) | [`structural-editing-dark.png`](screenshots/structural-editing-dark.png) |
+| Panel system | Docked, editor-tab and floating panels with shared progress | [`panels-light.png`](screenshots/panels-light.png) | [`panels-dark.png`](screenshots/panels-dark.png) |
 
 The names in the table are the command-line registry. An unknown name exits 2 and prints every
 valid name. `--screenshot` and `--out` are required together and cannot be combined with a
@@ -48,6 +49,10 @@ decode the written PNG, and prove that the C++ editor has its selected source ro
 diagnostics panel has its active tab and visible error. Regions deliberately cover stable layout
 landmarks rather than whole-image hashes so harmless rasterizer differences do not hide the
 intended signal.
+
+`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at ten screens and
+twenty named states. The panel behavior and layout model are documented in
+[`panels.md`](panels.md).
 
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced
 format. PNG chunks, CRC checks and scanline validation are implemented in-tree; the existing zlib

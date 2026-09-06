@@ -133,6 +133,7 @@ add_library(liquify-core STATIC
   src/editor_buffer.cpp
   src/editor_graph.cpp
   src/interactive_analysis.cpp
+  src/panel.cpp
   src/plugin.cpp
   src/repository_view.cpp
   src/review.cpp
