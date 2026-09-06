@@ -190,6 +190,22 @@ TEST(StructuralEdit, RenamesAcrossFilesAsOneDripEachAndListsStringOccurrence) {
   EXPECT_EQ(text(*second_after),
             "int renamed(int value);\nint use() { return renamed(1); }\n");
   EXPECT_EQ(editor.pending_drips(), 2U);
+  auto operations = liquid::runtime::block_on(reopened->operations());
+  ASSERT_TRUE(operations) << operations.error().message;
+  ASSERT_FALSE(operations->empty());
+  EXPECT_EQ(operations->front().kind, "structural_edit");
+  EXPECT_EQ(std::ranges::count(*operations, "structural_edit", &liquid::operation_record::kind),
+            1U);
+  auto undone = liquid::runtime::block_on(reopened->undo(operations->front().id));
+  ASSERT_TRUE(undone) << undone.error().message;
+  auto restored = liquid::runtime::block_on(liquid::repository::open(repository_path.path()));
+  ASSERT_TRUE(restored) << restored.error().message;
+  auto first_restored = liquid::runtime::block_on(restored->read("first.cpp"));
+  auto second_restored = liquid::runtime::block_on(restored->read("second.cpp"));
+  ASSERT_TRUE(first_restored);
+  ASSERT_TRUE(second_restored);
+  EXPECT_EQ(text(*first_restored), first);
+  EXPECT_EQ(text(*second_restored), second);
 }
 
 TEST(StructuralEdit, RefusesAStaleNodeFingerprint) {

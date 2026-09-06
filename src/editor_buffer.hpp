@@ -1,6 +1,5 @@
 #pragma once
 
-#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -10,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "liquify/editor_model.hpp"
 #include "liquify/interactive_analysis.hpp"
 
 namespace liquid {
@@ -17,18 +17,6 @@ class repository;
 }
 
 namespace liquify {
-
-struct TextPosition {
-  std::size_t line{};
-  std::size_t byte{};
-
-  auto operator<=>(const TextPosition &) const = default;
-};
-
-struct TextSelection {
-  TextPosition begin;
-  TextPosition end;
-};
 
 struct BufferChange {
   std::size_t first_line{};
@@ -60,7 +48,10 @@ public:
   [[nodiscard]] auto lines() const -> std::span<const std::string>;
   [[nodiscard]] auto text() const -> std::string;
   [[nodiscard]] auto cursor() const -> TextPosition;
+  [[nodiscard]] auto cursors() const -> std::vector<TextPosition>;
   [[nodiscard]] auto selection() const -> std::optional<TextSelection>;
+  [[nodiscard]] auto selections() const -> std::vector<TextSelection>;
+  [[nodiscard]] auto preferences() const -> const EditorPreferences&;
   [[nodiscard]] auto mode() const -> EditingMode;
   [[nodiscard]] auto dirty() const -> bool;
   [[nodiscard]] auto error() const -> std::string_view;
@@ -70,7 +61,12 @@ public:
 
   void set_mode(EditingMode mode);
   void set_cursor(TextPosition position, bool extend_selection = false);
+  void add_cursor(TextPosition position);
+  void clear_secondary_cursors();
   void select_all();
+  void select(SelectionKind kind);
+  void select_column(TextPosition anchor, TextPosition cursor);
+  void set_preferences(EditorPreferences preferences);
   void move_left(bool extend_selection = false);
   void move_right(bool extend_selection = false);
   void move_up(bool extend_selection = false);
@@ -85,11 +81,18 @@ public:
   [[nodiscard]] auto delete_forward() -> std::optional<BufferChange>;
   [[nodiscard]] auto apply_edit(const SourceEdit &edit)
       -> std::optional<BufferChange>;
+  [[nodiscard]] auto find(std::string_view query, FindOptions options = {}) const
+      -> std::vector<TextMatch>;
+  [[nodiscard]] auto replace_all(std::string_view query,
+                                 std::string_view replacement,
+                                 FindOptions options = {}) -> std::optional<BufferChange>;
   [[nodiscard]] auto save() -> bool;
   [[nodiscard]] auto save(liquid::repository &repository) -> bool;
 
 private:
   [[nodiscard]] auto replace(TextSelection range, std::string_view text)
+      -> BufferChange;
+  [[nodiscard]] auto replace_many(std::vector<TextSelection> ranges, std::string_view text)
       -> BufferChange;
   [[nodiscard]] auto insertion_range() const -> TextSelection;
   [[nodiscard]] auto clamped(TextPosition position) const -> TextPosition;
@@ -105,7 +108,13 @@ private:
   std::vector<std::string> lines_{1};
   TextPosition cursor_{};
   std::optional<TextPosition> selection_anchor_;
+  struct SecondaryCaret {
+      TextPosition position;
+      std::optional<TextPosition> anchor;
+  };
+  std::vector<SecondaryCaret> secondary_carets_;
   std::size_t preferred_byte_{};
+  EditorPreferences preferences_{};
   EditingMode mode_{EditingMode::standard};
   bool dirty_{};
   std::string error_;

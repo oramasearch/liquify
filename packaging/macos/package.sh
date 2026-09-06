@@ -206,14 +206,22 @@ sign_frameworks() {
             "$timestamp_option" \
             --sign "$identity" \
             "$library"
-    done < <(find "$frameworks_path" -type f -print0)
+    done < <(find "$frameworks_path" "$app_path/Contents/MacOS/frontends" -type f -print0)
 }
 
-mkdir -p "$app_path/Contents/MacOS" "$frameworks_path"
+mkdir -p "$app_path/Contents/MacOS/frontends" "$frameworks_path"
 install -m 755 "$binary_path" "$app_path/Contents/MacOS/liquify"
+frontend_path="$(find "$(dirname "$binary_path")/frontends" -type f | head -n 1)"
+install -m 755 "$frontend_path" "$app_path/Contents/MacOS/frontends/$(basename "$frontend_path")"
 install -m 644 "$script_directory/Info.plist" "$app_path/Contents/Info.plist"
 bundle_dependencies "$app_path/Contents/MacOS/liquify" "$binary_path"
+bundle_dependencies \
+    "$app_path/Contents/MacOS/frontends/$(basename "$frontend_path")" \
+    "$frontend_path"
 install_name_tool -add_rpath @executable_path/../Frameworks "$app_path/Contents/MacOS/liquify"
+install_name_tool \
+    -add_rpath @loader_path/../../Frameworks \
+    "$app_path/Contents/MacOS/frontends/$(basename "$frontend_path")"
 "$script_directory/verify_bundle.sh" "$app_path"
 
 pkgbuild \

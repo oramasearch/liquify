@@ -1,5 +1,9 @@
 # The editor surface
 
+[`../ui/editor.md`](../ui/editor.md) records the editor view's multi-cursor and selection model,
+syntax colors and folds, line and collaboration gutters, search/replace, operation-log history and
+light/dark screenshot states.
+
 [`ai.md`](ai.md) records the optional assistant, its offline switch guarantee, graph-derived
 inspectable context, provider contract, keyboard commands, and accept-only edit path.
 [`review.md`](review.md) records the lake review panel, retained inline text diff, cursor anchors,

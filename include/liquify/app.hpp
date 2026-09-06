@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "liquify/app_state.hpp"
+#include "liquify/editor_model.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
 #include "liquify/structural_edit.hpp"
@@ -159,6 +160,12 @@ private:
     std::string editor_status_;
     std::string assistant_prompt_;
     std::string sidebar_search_;
+    std::string find_query_;
+    std::string replace_query_;
+    FindOptions find_options_;
+    std::vector<TextMatch> buffer_matches_;
+    std::size_t find_match_index_{};
+    std::optional<TextPosition> column_selection_anchor_;
     std::string window_title_;
     std::optional<AssistantAction> pending_assistant_action_;
     std::string pending_assistant_prompt_;
@@ -177,6 +184,7 @@ private:
     std::chrono::steady_clock::time_point next_review_refresh_{};
     std::chrono::steady_clock::time_point next_plugin_refresh_{};
     std::uint64_t definition_generation_{};
+    std::uint64_t history_generation_{};
     std::uint64_t ai_context_generation_{};
     std::uint64_t review_generation_{};
     std::uint64_t structural_selection_generation_{};
@@ -202,6 +210,7 @@ private:
     int screenshot_frames_rendered_{};
     bool initialized_ = false;
     bool command_palette_open_{};
+    bool find_open_{};
     bool context_preview_open_{};
     bool review_diff_open_{};
     bool review_comment_popup_open_{};

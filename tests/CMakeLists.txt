@@ -2,6 +2,7 @@ add_executable(liquify-tests
   test_ai.cpp
   test_app_state.cpp
   test_editor_buffer.cpp
+  test_editor_model.cpp
   test_editor_graph.cpp
   test_interactive_analysis.cpp
   test_panel.cpp
@@ -24,6 +25,7 @@ target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_SAMPLE_PLUGIN="$<TARGET_FILE:liquify-sample-plugin>"
+  LIQUIFY_TREE_SITTER_FRONTEND="$<TARGET_FILE:liquid-frontend-tree-sitter>"
   LIQUIFY_C_COMPILER="${CMAKE_C_COMPILER}"
   LIQUIFY_EXECUTABLE="$<TARGET_FILE:liquify>"
   LIQUIFY_CXX_COMPILER="${CMAKE_CXX_COMPILER}")

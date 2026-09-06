@@ -153,11 +153,67 @@ TEST(EditorGraph, PresentsBuildEventsTestsAndRefusedReferences) {
     EXPECT_EQ(snapshot.build_diagnostics.front().location.range.start_line, 0U);
     EXPECT_FALSE(snapshot.test_results.front().hit);
     ASSERT_EQ(snapshot.deploy.references.size(), 2U);
-    EXPECT_EQ(snapshot.deploy.references.front().outcome,
-              liquid::sync_ref_outcome_kind::refused);
+    EXPECT_EQ(snapshot.deploy.references.front().outcome, liquid::sync_ref_outcome_kind::refused);
     EXPECT_EQ(snapshot.deploy.references.front().reason, "protected reference");
     EXPECT_EQ(snapshot.deploy.objects, 3U);
     EXPECT_EQ(snapshot.deploy.bytes, 96U);
+}
+
+TEST(EditorGraph, PublishesSyntaxGuttersSearchAndRepositoryHistory) {
+    TemporaryDirectory location;
+    constexpr auto source = "int answer() {\n  return 42;\n}\n";
+    auto repository = create_repository(location.path(), source);
+    auto initial = liquid::runtime::block_on(repository.cut("initial editor source"));
+    ASSERT_TRUE(initial) << initial.error().message;
+    liquify::EditorGraph graph(location.path(), {}, LIQUIFY_TREE_SITTER_FRONTEND);
+    graph.wait_until_idle();
+
+    graph.request_editor_view("main.cpp", liquify::StubLanguage::cpp, source);
+    graph.request_search("answer");
+    graph.wait_until_idle();
+    auto snapshot = graph.snapshot();
+    EXPECT_TRUE(snapshot.syntax_error.empty()) << snapshot.syntax_error;
+    EXPECT_FALSE(snapshot.syntax.empty());
+    EXPECT_FALSE(snapshot.folds.empty());
+    EXPECT_FALSE(snapshot.attribution.empty());
+    ASSERT_EQ(snapshot.search.hits.size(), 1U) << snapshot.search.error;
+    EXPECT_EQ(snapshot.search.hits.front().path, "main.cpp");
+
+    graph.request_replace("answer", "result", false);
+    graph.wait_until_idle();
+    snapshot = graph.snapshot();
+    EXPECT_EQ(snapshot.search.replacements, 1U) << snapshot.search.error;
+    auto reopened = liquid::runtime::block_on(liquid::repository::open(location.path()));
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    auto changed = liquid::runtime::block_on(reopened->read("main.cpp"));
+    ASSERT_TRUE(changed) << changed.error().message;
+    EXPECT_NE(
+        std::string(reinterpret_cast<const char*>(changed->data()), changed->size()).find("result"),
+        std::string::npos);
+
+    graph.request_undo();
+    graph.wait_until_idle();
+    snapshot = graph.snapshot();
+    EXPECT_TRUE(snapshot.history_error.empty()) << snapshot.history_error;
+    auto restored_repository = liquid::runtime::block_on(liquid::repository::open(location.path()));
+    ASSERT_TRUE(restored_repository) << restored_repository.error().message;
+    auto restored = liquid::runtime::block_on(restored_repository->read("main.cpp"));
+    ASSERT_TRUE(restored) << restored.error().message;
+    EXPECT_NE(std::string(reinterpret_cast<const char*>(restored->data()), restored->size())
+                  .find("answer"),
+              std::string::npos);
+
+    graph.request_redo();
+    graph.wait_until_idle();
+    snapshot = graph.snapshot();
+    EXPECT_TRUE(snapshot.history_error.empty()) << snapshot.history_error;
+    auto redone_repository = liquid::runtime::block_on(liquid::repository::open(location.path()));
+    ASSERT_TRUE(redone_repository) << redone_repository.error().message;
+    auto redone = liquid::runtime::block_on(redone_repository->read("main.cpp"));
+    ASSERT_TRUE(redone) << redone.error().message;
+    EXPECT_NE(
+        std::string(reinterpret_cast<const char*>(redone->data()), redone->size()).find("result"),
+        std::string::npos);
 }
 
 #ifndef _WIN32

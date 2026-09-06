@@ -150,6 +150,7 @@ namespace liquify {
 namespace {
 
 constexpr float editor_padding = design::space2;
+constexpr float editor_gutter_width = 72.0F;
 constexpr float activity_bar_width = design::control_lg;
 constexpr float divider_size = design::space1;
 constexpr float status_bar_height = design::space6;
@@ -194,6 +195,68 @@ int main() {
     return 0;
 }
 )cpp";
+}
+
+auto syntax_color(SyntaxTokenKind kind, const design::Palette& palette) -> design::Rgba {
+    switch (kind) {
+    case SyntaxTokenKind::keyword:
+        return palette.action;
+    case SyntaxTokenKind::type:
+        return palette.ai;
+    case SyntaxTokenKind::function:
+        return palette.info;
+    case SyntaxTokenKind::string:
+        return palette.success;
+    case SyntaxTokenKind::number:
+        return palette.warning;
+    case SyntaxTokenKind::comment:
+        return palette.text_tertiary;
+    case SyntaxTokenKind::preprocessor:
+        return palette.danger;
+    case SyntaxTokenKind::punctuation:
+        return palette.text_secondary;
+    case SyntaxTokenKind::plain:
+    case SyntaxTokenKind::variable:
+        return palette.text_primary;
+    }
+    return palette.text_primary;
+}
+
+auto screenshot_syntax(std::string_view source) -> std::vector<SyntaxSpan> {
+    auto output = std::vector<SyntaxSpan>{};
+    const auto append = [&](std::string_view token, SyntaxTokenKind kind) {
+        auto offset = std::size_t{};
+        while ((offset = source.find(token, offset)) != std::string_view::npos) {
+            output.push_back({offset, offset + token.size(), kind});
+            offset += token.size();
+        }
+    };
+    append("#include", SyntaxTokenKind::preprocessor);
+    append("namespace", SyntaxTokenKind::keyword);
+    append("auto", SyntaxTokenKind::keyword);
+    append("return", SyntaxTokenKind::keyword);
+    append("int", SyntaxTokenKind::type);
+    append("std::string", SyntaxTokenKind::type);
+    append("std::string_view", SyntaxTokenKind::type);
+    append("greeting", SyntaxTokenKind::function);
+    append("main", SyntaxTokenKind::function);
+    append("\"Open \"", SyntaxTokenKind::string);
+    append("\"orama/liquify\"", SyntaxTokenKind::string);
+    append("// namespace liquify", SyntaxTokenKind::comment);
+    std::ranges::sort(output, {}, &SyntaxSpan::start_byte);
+    return output;
+}
+
+auto syntax_frontend_path() -> std::filesystem::path {
+    const auto configured = std::filesystem::path{LIQUIFY_TREE_SITTER_FRONTEND};
+    const auto* base = SDL_GetBasePath();
+    if (base != nullptr) {
+        const auto adjacent = std::filesystem::path{base} / "frontends" / configured.filename();
+        if (std::filesystem::exists(adjacent)) {
+            return adjacent;
+        }
+    }
+    return configured;
 }
 
 auto percentile(std::vector<double> values, double fraction) -> double {
@@ -290,8 +353,14 @@ public:
                 EditorBuffer& buffer,
                 TextLayoutCache& layouts,
                 ImFont& font,
-                design::Rgba text_color,
+                const design::Palette& palette,
                 std::span<const Diagnostic> diagnostics,
+                std::span<const SyntaxSpan> syntax,
+                std::span<const FoldRange> folds,
+                std::span<const AttributionSnapshot> attribution,
+                std::span<const PresenceSnapshot> presence,
+                const std::optional<liquid::drive_path_status>& drive,
+                std::uint64_t syntax_generation,
                 float x,
                 float y,
                 float width,
@@ -302,13 +371,16 @@ public:
                 float horizontal_scroll,
                 std::span<const ReviewDiffLine> review_lines,
                 std::span<const std::size_t> comment_lines) -> std::size_t {
-        const auto color_changed =
-            text_color_.red != text_color.red || text_color_.green != text_color.green ||
-            text_color_.blue != text_color.blue || text_color_.alpha != text_color.alpha;
-        if (cell_width_ != cell_width || font_size_ != font.FontSize || color_changed) {
+        const auto color_changed = text_color_.red != palette.text_primary.red ||
+                                   text_color_.green != palette.text_primary.green ||
+                                   text_color_.blue != palette.text_primary.blue ||
+                                   text_color_.alpha != palette.text_primary.alpha;
+        if (cell_width_ != cell_width || font_size_ != font.FontSize || color_changed ||
+            syntax_generation_ != syntax_generation) {
             cell_width_ = cell_width;
             font_size_ = font.FontSize;
-            text_color_ = text_color;
+            text_color_ = palette.text_primary;
+            syntax_generation_ = syntax_generation;
             for (auto& line : lines_) {
                 line.reset();
             }
@@ -316,6 +388,19 @@ public:
 
         const auto available_lines = static_cast<std::size_t>(std::ceil(height / line_height)) + 1;
         const auto last_line = std::min(buffer.line_count(), first_line + available_lines);
+        draw_gutter(renderer,
+                    buffer,
+                    diagnostics,
+                    folds,
+                    attribution,
+                    presence,
+                    drive,
+                    palette,
+                    x,
+                    y,
+                    first_line,
+                    last_line,
+                    line_height);
         draw_review_backgrounds(
             renderer, review_lines, x, y, width, first_line, last_line, line_height);
         draw_selection(renderer,
@@ -329,6 +414,17 @@ public:
                        line_height,
                        cell_width,
                        horizontal_scroll);
+        draw_bracket_match(renderer,
+                           buffer,
+                           layouts,
+                           palette,
+                           x,
+                           y,
+                           first_line,
+                           last_line,
+                           line_height,
+                           cell_width,
+                           horizontal_scroll);
 
         auto* texture = reinterpret_cast<SDL_Texture*>(ImGui::GetIO().Fonts->TexID);
         frame_vertices_.clear();
@@ -337,10 +433,11 @@ public:
             const auto& layout = layouts.line(line, buffer.line(line));
             auto& retained = lines_.at(line);
             if (!retained || retained->generation != layout.generation) {
-                retained = build_geometry(layout, font, cell_width, text_color);
+                retained = build_geometry(
+                    layout, font, cell_width, buffer.byte_offset({line, 0}), syntax, palette);
             }
             append_line(*retained,
-                        x + editor_padding - horizontal_scroll,
+                        x + editor_gutter_width + editor_padding - horizontal_scroll,
                         y + static_cast<float>(line - first_line) * line_height);
         }
         if (!frame_vertices_.empty()) {
@@ -363,6 +460,15 @@ public:
                          cell_width,
                          horizontal_scroll);
         draw_review_comments(renderer, comment_lines, x, y, first_line, last_line, line_height);
+        draw_scroll_markers(renderer,
+                            buffer,
+                            diagnostics,
+                            attribution,
+                            presence,
+                            palette,
+                            x + width - 5.0F,
+                            y,
+                            height);
         draw_cursor(renderer,
                     buffer,
                     layouts,
@@ -386,12 +492,13 @@ private:
     static auto build_geometry(const LineLayout& layout,
                                ImFont& font,
                                float cell_width,
-                               design::Rgba text_color) -> LineGeometry {
+                               std::size_t line_offset,
+                               std::span<const SyntaxSpan> syntax,
+                               const design::Palette& palette) -> LineGeometry {
         LineGeometry geometry;
         geometry.generation = layout.generation;
         geometry.vertices.reserve(layout.glyphs.size() * 4);
         geometry.indices.reserve(layout.glyphs.size() * 6);
-        const SDL_FColor color{text_color.red, text_color.green, text_color.blue, text_color.alpha};
         for (const auto& placed : layout.glyphs) {
             if (placed.codepoint == '\t') {
                 continue;
@@ -402,6 +509,13 @@ private:
             }
             const auto first = static_cast<int>(geometry.vertices.size());
             const auto origin = placed.column * cell_width;
+            const auto absolute_byte = line_offset + placed.byte;
+            const auto found = std::ranges::find_if(syntax, [absolute_byte](const auto& span) {
+                return absolute_byte >= span.start_byte && absolute_byte < span.end_byte;
+            });
+            const auto token = found == syntax.end() ? SyntaxTokenKind::plain : found->kind;
+            const auto role = syntax_color(token, palette);
+            const SDL_FColor color{role.red, role.green, role.blue, role.alpha};
             geometry.vertices.push_back(
                 {{origin + glyph->X0, glyph->Y0}, color, {glyph->U0, glyph->V0}});
             geometry.vertices.push_back(
@@ -414,6 +528,149 @@ private:
                                     {first, first + 1, first + 2, first, first + 2, first + 3});
         }
         return geometry;
+    }
+
+    static void draw_gutter(SDL_Renderer* renderer,
+                            EditorBuffer& buffer,
+                            std::span<const Diagnostic> diagnostics,
+                            std::span<const FoldRange> folds,
+                            std::span<const AttributionSnapshot> attribution,
+                            std::span<const PresenceSnapshot> presence,
+                            const std::optional<liquid::drive_path_status>& drive,
+                            const design::Palette& palette,
+                            float x,
+                            float y,
+                            std::size_t first_line,
+                            std::size_t last_line,
+                            float line_height) {
+        SDL_SetRenderDrawColorFloat(renderer,
+                                    palette.layer.red,
+                                    palette.layer.green,
+                                    palette.layer.blue,
+                                    palette.layer.alpha);
+        const SDL_FRect background{
+            x, y, editor_gutter_width, static_cast<float>(last_line - first_line) * line_height};
+        SDL_RenderFillRect(renderer, &background);
+        SDL_SetRenderDrawColorFloat(renderer,
+                                    palette.border_subtle.red,
+                                    palette.border_subtle.green,
+                                    palette.border_subtle.blue,
+                                    palette.border_subtle.alpha);
+        SDL_RenderLine(renderer,
+                       x + editor_gutter_width - 1.0F,
+                       y,
+                       x + editor_gutter_width - 1.0F,
+                       y + background.h);
+        SDL_SetRenderDrawColorFloat(renderer,
+                                    palette.text_tertiary.red,
+                                    palette.text_tertiary.green,
+                                    palette.text_tertiary.blue,
+                                    palette.text_tertiary.alpha);
+        for (auto line = first_line; line < last_line; ++line) {
+            SDL_RenderDebugText(renderer,
+                                x + 30.0F,
+                                y + static_cast<float>(line - first_line) * line_height + 3.0F,
+                                std::to_string(line + 1).c_str());
+        }
+        for (const auto& item : attribution) {
+            if (item.line < first_line || item.line >= last_line) {
+                continue;
+            }
+            const auto color = item.agent ? palette.ai : palette.info;
+            SDL_SetRenderDrawColorFloat(renderer, color.red, color.green, color.blue, color.alpha);
+            const SDL_FRect marker{x + 2.0F,
+                                   y + static_cast<float>(item.line - first_line) * line_height +
+                                       2.0F,
+                                   3.0F,
+                                   line_height - 4.0F};
+            SDL_RenderFillRect(renderer, &marker);
+        }
+        for (const auto& item : presence) {
+            if (item.path != buffer.display_path() || !item.range ||
+                item.range->start_line < first_line || item.range->start_line >= last_line) {
+                continue;
+            }
+            SDL_SetRenderDrawColorFloat(
+                renderer, palette.ai.red, palette.ai.green, palette.ai.blue, palette.ai.alpha);
+            const auto row = static_cast<float>(item.range->start_line - first_line) * line_height;
+            const SDL_FRect marker{x + 8.0F, y + row + 5.0F, 6.0F, 6.0F};
+            SDL_RenderFillRect(renderer, &marker);
+        }
+        for (const auto& diagnostic : diagnostics) {
+            if (diagnostic.location.path.generic_string() != buffer.display_path()) {
+                continue;
+            }
+            const auto line = static_cast<std::size_t>(diagnostic.location.range.start_line);
+            if (line < first_line || line >= last_line) {
+                continue;
+            }
+            const auto color = diagnostic.severity == DiagnosticSeverity::error ? palette.danger
+                               : diagnostic.severity == DiagnosticSeverity::warning
+                                   ? palette.warning
+                                   : palette.info;
+            SDL_SetRenderDrawColorFloat(renderer, color.red, color.green, color.blue, color.alpha);
+            const SDL_FRect marker{x + 18.0F,
+                                   y + static_cast<float>(line - first_line) * line_height + 6.0F,
+                                   6.0F,
+                                   6.0F};
+            SDL_RenderFillRect(renderer, &marker);
+        }
+        for (const auto& fold : folds) {
+            if (fold.first_line < first_line || fold.first_line >= last_line) {
+                continue;
+            }
+            SDL_SetRenderDrawColorFloat(renderer,
+                                        palette.text_secondary.red,
+                                        palette.text_secondary.green,
+                                        palette.text_secondary.blue,
+                                        palette.text_secondary.alpha);
+            const auto row = y + static_cast<float>(fold.first_line - first_line) * line_height;
+            const SDL_FPoint points[]{
+                {x + 58.0F, row + 6.0F}, {x + 64.0F, row + 9.0F}, {x + 58.0F, row + 12.0F}};
+            SDL_RenderLines(renderer, points, 3);
+        }
+        if (drive) {
+            SDL_SetRenderDrawColorFloat(renderer,
+                                        palette.success.red,
+                                        palette.success.green,
+                                        palette.success.blue,
+                                        palette.success.alpha);
+            const SDL_FRect badge{x + 7.0F, y + 2.0F, 5.0F, 5.0F};
+            SDL_RenderFillRect(renderer, &badge);
+        }
+    }
+
+    static void draw_scroll_markers(SDL_Renderer* renderer,
+                                    EditorBuffer& buffer,
+                                    std::span<const Diagnostic> diagnostics,
+                                    std::span<const AttributionSnapshot> attribution,
+                                    std::span<const PresenceSnapshot> presence,
+                                    const design::Palette& palette,
+                                    float x,
+                                    float y,
+                                    float height) {
+        const auto marker = [&](std::size_t line, design::Rgba color) {
+            const auto fraction = static_cast<float>(line) /
+                                  static_cast<float>(std::max<std::size_t>(buffer.line_count(), 1));
+            SDL_SetRenderDrawColorFloat(renderer, color.red, color.green, color.blue, color.alpha);
+            const SDL_FRect rectangle{x, y + fraction * height, 4.0F, 3.0F};
+            SDL_RenderFillRect(renderer, &rectangle);
+        };
+        for (const auto& diagnostic : diagnostics) {
+            if (diagnostic.location.path.generic_string() == buffer.display_path()) {
+                marker(diagnostic.location.range.start_line,
+                       diagnostic.severity == DiagnosticSeverity::error ? palette.danger
+                                                                        : palette.warning);
+            }
+        }
+        for (const auto& item : attribution) {
+            marker(item.line, item.agent ? palette.ai : palette.info);
+        }
+        for (const auto& item : presence) {
+            if (item.path == buffer.display_path() && item.range) {
+                marker(item.range->start_line, palette.ai);
+            }
+        }
     }
 
     void append_line(const LineGeometry& geometry, float x, float y) {
@@ -440,29 +697,28 @@ private:
                                float line_height,
                                float cell_width,
                                float horizontal_scroll) {
-        const auto selection = buffer.selection();
-        if (!selection) {
-            return;
-        }
         SDL_SetRenderDrawColor(renderer, 176, 207, 255, 255);
-        const auto begin_line = std::max(first_line, selection->begin.line);
-        const auto end_line = std::min(last_line, selection->end.line + 1);
-        for (std::size_t line = begin_line; line < end_line; ++line) {
-            const auto& layout = layouts.line(line, buffer.line(line));
-            const auto first_byte = line == selection->begin.line ? selection->begin.byte : 0;
-            const auto last_byte =
-                line == selection->end.line ? selection->end.byte : buffer.line(line).size();
-            const auto first_column = layout.column_for_byte(first_byte);
-            auto last_column = layout.column_for_byte(last_byte);
-            if (line < selection->end.line) {
-                last_column += 1.0F;
+        for (const auto& selection : buffer.selections()) {
+            const auto begin_line = std::max(first_line, selection.begin.line);
+            const auto end_line = std::min(last_line, selection.end.line + 1);
+            for (std::size_t line = begin_line; line < end_line; ++line) {
+                const auto& layout = layouts.line(line, buffer.line(line));
+                const auto first_byte = line == selection.begin.line ? selection.begin.byte : 0;
+                const auto last_byte =
+                    line == selection.end.line ? selection.end.byte : buffer.line(line).size();
+                const auto first_column = layout.column_for_byte(first_byte);
+                auto last_column = layout.column_for_byte(last_byte);
+                if (line < selection.end.line) {
+                    last_column += 1.0F;
+                }
+                const SDL_FRect rectangle{
+                    x + editor_gutter_width + editor_padding + first_column * cell_width -
+                        horizontal_scroll,
+                    y + static_cast<float>(line - first_line) * line_height,
+                    std::min((last_column - first_column) * cell_width, width),
+                    line_height};
+                SDL_RenderFillRect(renderer, &rectangle);
             }
-            const SDL_FRect rectangle{x + editor_padding + first_column * cell_width -
-                                          horizontal_scroll,
-                                      y + static_cast<float>(line - first_line) * line_height,
-                                      std::min((last_column - first_column) * cell_width, width),
-                                      line_height};
-            SDL_RenderFillRect(renderer, &rectangle);
         }
     }
 
@@ -476,19 +732,67 @@ private:
                             float line_height,
                             float cell_width,
                             float horizontal_scroll) {
-        const auto cursor = buffer.cursor();
-        if (cursor.line < first_line || cursor.line >= last_line) {
+        SDL_SetRenderDrawColor(renderer, 28, 35, 43, 255);
+        for (const auto& cursor : buffer.cursors()) {
+            if (cursor.line < first_line || cursor.line >= last_line) {
+                continue;
+            }
+            const auto& layout = layouts.line(cursor.line, buffer.line(cursor.line));
+            const auto column = layout.column_for_byte(cursor.byte);
+            const auto width = buffer.mode() == EditingMode::modal_command ? cell_width : 1.5F;
+            const SDL_FRect rectangle{
+                x + editor_gutter_width + editor_padding + column * cell_width - horizontal_scroll,
+                y + static_cast<float>(cursor.line - first_line) * line_height,
+                width,
+                line_height};
+            SDL_RenderFillRect(renderer, &rectangle);
+        }
+    }
+
+    static void draw_bracket_match(SDL_Renderer* renderer,
+                                   EditorBuffer& buffer,
+                                   TextLayoutCache& layouts,
+                                   const design::Palette& palette,
+                                   float x,
+                                   float y,
+                                   std::size_t first_line,
+                                   std::size_t last_line,
+                                   float line_height,
+                                   float cell_width,
+                                   float horizontal_scroll) {
+        const auto source = buffer.text();
+        const auto cursor_offset = buffer.byte_offset(buffer.cursor());
+        const auto matched = matching_bracket(source, cursor_offset);
+        if (!matched) {
             return;
         }
-        const auto& layout = layouts.line(cursor.line, buffer.line(cursor.line));
-        const auto column = layout.column_for_byte(cursor.byte);
-        const auto width = buffer.mode() == EditingMode::modal_command ? cell_width : 1.5F;
-        SDL_SetRenderDrawColor(renderer, 28, 35, 43, 255);
-        const SDL_FRect rectangle{x + editor_padding + column * cell_width - horizontal_scroll,
-                                  y + static_cast<float>(cursor.line - first_line) * line_height,
-                                  width,
-                                  line_height};
-        SDL_RenderFillRect(renderer, &rectangle);
+        auto bracket = cursor_offset;
+        if (bracket >= source.size() ||
+            std::string_view{"()[]{}"}.find(source[bracket]) == std::string_view::npos) {
+            bracket = bracket == 0 ? 0 : bracket - 1;
+        }
+        SDL_SetRenderDrawColorFloat(renderer,
+                                    palette.focus.red,
+                                    palette.focus.green,
+                                    palette.focus.blue,
+                                    palette.focus.alpha);
+        for (const auto offset : {bracket, *matched}) {
+            auto line = std::size_t{};
+            while (line + 1 < buffer.line_count() && buffer.byte_offset({line + 1, 0}) <= offset) {
+                ++line;
+            }
+            if (line < first_line || line >= last_line) {
+                continue;
+            }
+            const auto byte = offset - buffer.byte_offset({line, 0});
+            const auto column = layouts.line(line, buffer.line(line)).column_for_byte(byte);
+            const SDL_FRect rectangle{x + editor_gutter_width + editor_padding +
+                                          column * cell_width - horizontal_scroll,
+                                      y + static_cast<float>(line - first_line) * line_height,
+                                      cell_width,
+                                      line_height};
+            SDL_RenderRect(renderer, &rectangle);
+        }
     }
 
     static void draw_review_backgrounds(SDL_Renderer* renderer,
@@ -569,10 +873,10 @@ private:
                                        ? range.end_column
                                        : static_cast<std::uint32_t>(buffer.line(line).size());
                 last_column = std::max(last_column, first_column + 1);
-                const auto start_x = x + editor_padding +
+                const auto start_x = x + editor_gutter_width + editor_padding +
                                      static_cast<float>(first_column) * cell_width -
                                      horizontal_scroll;
-                const auto finish_x = x + editor_padding +
+                const auto finish_x = x + editor_gutter_width + editor_padding +
                                       static_cast<float>(last_column) * cell_width -
                                       horizontal_scroll;
                 const auto baseline =
@@ -597,6 +901,7 @@ private:
     float cell_width_{};
     float font_size_{};
     design::Rgba text_color_{};
+    std::uint64_t syntax_generation_{};
 };
 
 App::App(AppOptions options) : options_(std::move(options)) {
@@ -621,7 +926,8 @@ App::App(AppOptions options) : options_(std::move(options)) {
                 plugin_host_ = std::move(plugins->host);
                 plugin_failures_ = std::move(plugins->failures);
             }
-            editor_graph_ = std::make_unique<EditorGraph>(*options_.repository_path, plugin_host_);
+            editor_graph_ = std::make_unique<EditorGraph>(
+                *options_.repository_path, plugin_host_, syntax_frontend_path());
             auto config = load_ai_config(*options_.repository_path);
             if (!config) {
                 editor_status_ = config.error().message;
@@ -676,6 +982,8 @@ App::App(AppOptions options) : options_(std::move(options)) {
         editor_focused_ = true;
         if (screenshot->view == ScreenshotView::review) {
             panels_.focus(PanelId::review);
+        } else if (screenshot->view == ScreenshotView::editor_view) {
+            panels_.focus(PanelId::search);
         } else {
             panels_.focus(PanelId::repository);
         }
@@ -683,6 +991,7 @@ App::App(AppOptions options) : options_(std::move(options)) {
                                             screenshot->view == ScreenshotView::build ||
                                             screenshot->view == ScreenshotView::assistant ||
                                             screenshot->view == ScreenshotView::plugins ||
+                                            screenshot->view == ScreenshotView::editor_view ||
                                             screenshot->view == ScreenshotView::panels;
         shell_state_.editor_split = screenshot->view == ScreenshotView::editor_cpp;
         if (screenshot->view == ScreenshotView::build) {
@@ -691,6 +1000,15 @@ App::App(AppOptions options) : options_(std::move(options)) {
             panels_.focus(PanelId::assistant);
         } else if (screenshot->view == ScreenshotView::plugins) {
             panels_.focus(PanelId::plugins);
+        } else if (screenshot->view == ScreenshotView::editor_view) {
+            sidebar_search_ = "greeting";
+            find_query_ = "repository";
+            find_open_ = true;
+            editor_->set_preferences(
+                {.indent_style = IndentStyle::spaces, .indent_size = 4, .soft_wrap = true});
+            editor_->set_cursor({5, 5});
+            editor_->add_cursor({9, 4});
+            buffer_matches_ = editor_->find(find_query_);
         } else {
             panels_.focus(PanelId::diagnostics);
         }
@@ -1040,6 +1358,8 @@ void App::open_editor(std::string path, std::string blob_id) {
     editor_graph_->open_buffer(
         std::filesystem::path(editor_->display_path()), *language, analysis_text_);
     editor_graph_->request_diagnostics(std::filesystem::path(editor_->display_path()));
+    editor_graph_->request_editor_view(
+        std::filesystem::path(editor_->display_path()), *language, analysis_text_);
 }
 
 void App::show_review_diff(const ReviewSnapshot& review) {
@@ -1265,6 +1585,10 @@ void App::sync_editor_graph() {
     editor_graph_->apply_edit(path, std::move(*edit));
     analysis_text_ = std::move(current);
     editor_graph_->request_diagnostics(path);
+    const auto language = stub_language_for_path(path);
+    if (language) {
+        editor_graph_->request_editor_view(path, *language, analysis_text_);
+    }
 }
 
 void App::request_definition() {
@@ -1460,6 +1784,16 @@ void App::request_assistant_context(std::optional<AssistantAction> action) {
         selected_source = editor_->text().substr(start, end - start);
     }
     const auto snapshot = editor_graph_->snapshot();
+    if (snapshot.history_generation != history_generation_) {
+        history_generation_ = snapshot.history_generation;
+        if (!snapshot.history_error.empty()) {
+            editor_status_ = snapshot.history_error;
+        } else if (editor_) {
+            const auto path = std::string(editor_->display_path());
+            open_editor(path, "history:" + path);
+            editor_status_ = "repository edit history applied";
+        }
+    }
     ai_context_generation_ = snapshot.ai_context_generation;
     pending_assistant_action_ = action;
     pending_assistant_prompt_ = assistant_prompt_;
@@ -1704,6 +2038,41 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         return;
     }
     const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
+    if (primary && shift && key == SDLK_F) {
+        panels_.focus(PanelId::search);
+        panels_.clear_focus_request();
+        shell_state_.sidebar_visible = true;
+        persist_shell_state();
+        return;
+    }
+    if (primary && key == SDLK_F) {
+        find_open_ = true;
+        buffer_matches_ = editor_->find(find_query_, find_options_);
+        return;
+    }
+    if (primary && key == SDLK_Z) {
+        if (editor_graph_) {
+            if (shift) {
+                editor_graph_->request_redo();
+            } else {
+                editor_graph_->request_undo();
+            }
+        }
+        return;
+    }
+    if (primary && key == SDLK_L) {
+        editor_->select(SelectionKind::line);
+        return;
+    }
+    if (primary && alt && (key == SDLK_UP || key == SDLK_DOWN)) {
+        const auto cursor = editor_->cursor();
+        if (key == SDLK_UP && cursor.line > 0) {
+            editor_->add_cursor({cursor.line - 1, cursor.byte});
+        } else if (key == SDLK_DOWN && cursor.line + 1 < editor_->line_count()) {
+            editor_->add_cursor({cursor.line + 1, cursor.byte});
+        }
+        return;
+    }
     if (primary && shift && key == SDLK_P) {
         command_palette_open_ = true;
         return;
@@ -1748,10 +2117,6 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     }
     if (primary && shift && key == SDLK_D) {
         select_enclosing_definition();
-        return;
-    }
-    if (primary && shift && key == SDLK_F) {
-        select_symbol_references();
         return;
     }
     if (primary && shift && key == SDLK_R) {
@@ -1877,7 +2242,7 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         const auto change = editor_->insert_newline();
         apply_change(change.first_line, change.erased_lines, change.inserted_lines);
     } else if (key == SDLK_TAB) {
-        const auto change = editor_->insert_text("\t");
+        const auto change = editor_->insert_text(indentation_text(editor_->preferences()));
         if (change) {
             apply_change(change->first_line, change->erased_lines, change->inserted_lines);
         }
@@ -1914,8 +2279,9 @@ void App::position_cursor(float x, float y, bool extend_selection) {
     const auto visible_line =
         static_cast<std::size_t>(std::max(0.0F, std::floor((y - editor_y_) / line_height_)));
     const auto line = std::min(scroll_line_ + visible_line, editor_->line_count() - 1);
-    const auto column =
-        std::max(0.0F, (x - editor_x_ - editor_padding + horizontal_scroll_) / cell_width_);
+    const auto column = std::max(
+        0.0F,
+        (x - editor_x_ - editor_gutter_width - editor_padding + horizontal_scroll_) / cell_width_);
     const auto& layout = layouts_->line(line, editor_->line(line));
     const auto byte = layout.byte_for_column(column, editor_->line(line).size());
     editor_->set_cursor({line, byte}, extend_selection);
@@ -2668,6 +3034,45 @@ void App::draw_editor() {
             }
         }
     }
+    if (find_open_) {
+        ImGui::Separator();
+        ImGui::SetNextItemWidth(220.0F);
+        if (ImGui::InputTextWithHint("##find-buffer", "Find in buffer", &find_query_)) {
+            buffer_matches_ = editor_->find(find_query_, find_options_);
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(180.0F);
+        ImGui::InputTextWithHint("##replace-buffer", "Replace", &replace_query_);
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Regex", &find_options_.regular_expression)) {
+            buffer_matches_ = editor_->find(find_query_, find_options_);
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Case", &find_options_.case_sensitive)) {
+            buffer_matches_ = editor_->find(find_query_, find_options_);
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("%zu matches", buffer_matches_.size());
+        ImGui::SameLine();
+        if (ImGui::Button("Next") && !buffer_matches_.empty()) {
+            const auto& match = buffer_matches_[find_match_index_++ % buffer_matches_.size()];
+            editor_->set_cursor(match.range.begin);
+            editor_->set_cursor(match.range.end, true);
+            ensure_cursor_visible();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Replace all") && !review_diff_open_) {
+            const auto change = editor_->replace_all(find_query_, replace_query_, find_options_);
+            if (change) {
+                apply_change(change->first_line, change->erased_lines, change->inserted_lines);
+                buffer_matches_ = editor_->find(find_query_, find_options_);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close")) {
+            find_open_ = false;
+        }
+    }
 
     const auto available = ImGui::GetContentRegionAvail();
     const auto size = ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F));
@@ -2706,10 +3111,57 @@ void App::draw_editor() {
         }
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             editor_focused_ = true;
-            position_cursor(
-                ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y, ImGui::GetIO().KeyShift);
+            auto handled_gutter = false;
+            const auto clicked_gutter = ImGui::GetIO().MousePos.x < editor_x_ + editor_gutter_width;
+            if (clicked_gutter) {
+                const auto row = static_cast<std::size_t>(std::max(
+                    0.0F, std::floor((ImGui::GetIO().MousePos.y - editor_y_) / line_height_)));
+                const auto line = std::min(scroll_line_ + row, editor_->line_count() - 1);
+                const auto diagnostic =
+                    std::ranges::find_if(graph_snapshot.diagnostics, [&](const auto& item) {
+                        return item.location.path.generic_string() == editor_->display_path() &&
+                               item.location.range.start_line == line;
+                    });
+                if (diagnostic != graph_snapshot.diagnostics.end()) {
+                    editor_->set_cursor({line, diagnostic->location.range.start_column});
+                    panels_.focus(PanelId::diagnostics);
+                    panels_.clear_focus_request();
+                    shell_state_.bottom_panel_visible = true;
+                    handled_gutter = true;
+                }
+            }
+            if (!handled_gutter) {
+                const auto prior = editor_->cursor();
+                position_cursor(
+                    ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y, ImGui::GetIO().KeyShift);
+                if (ImGui::GetIO().KeyAlt && ImGui::GetIO().KeyShift) {
+                    column_selection_anchor_ = editor_->cursor();
+                } else if (ImGui::GetIO().KeyAlt) {
+                    const auto added = editor_->cursor();
+                    editor_->set_cursor(prior);
+                    editor_->add_cursor(added);
+                } else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    editor_->select(SelectionKind::word);
+                }
+            }
         } else if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
             position_cursor(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y, true);
+            if (column_selection_anchor_) {
+                editor_->select_column(*column_selection_anchor_, editor_->cursor());
+            }
+        } else if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            column_selection_anchor_.reset();
+        }
+        if (ImGui::GetIO().MousePos.x < editor_x_ + editor_gutter_width) {
+            const auto row = static_cast<std::size_t>(
+                std::max(0.0F, std::floor((ImGui::GetIO().MousePos.y - editor_y_) / line_height_)));
+            const auto line = std::min(scroll_line_ + row, editor_->line_count() - 1);
+            const auto attribution =
+                std::ranges::find(graph_snapshot.attribution, line, &AttributionSnapshot::line);
+            if (attribution != graph_snapshot.attribution.end()) {
+                ImGui::SetTooltip(
+                    "%s · %s", attribution->actor.c_str(), attribution->agent ? "agent" : "human");
+            }
         }
     }
     ImGui::PopFont();
@@ -3020,10 +3472,49 @@ void App::draw_panel(PanelId id) {
         break;
     case PanelId::search:
         ImGui::InputTextWithHint("##repository-search", "Search this repository", &sidebar_search_);
-        if (!repository_) {
+        ImGui::InputTextWithHint("##repository-replace", "Replace with", &replace_query_);
+        ImGui::Checkbox("Regular expression", &find_options_.regular_expression);
+        if (ImGui::Button("Find", ImVec2(-1.0F, 0.0F))) {
+            if (editor_graph_) {
+                const auto query = find_options_.regular_expression ? "/" + sidebar_search_ + "/"
+                                                                    : "\"" + sidebar_search_ + "\"";
+                editor_graph_->request_search(query);
+            }
+        }
+        if (ImGui::Button("Replace all in repository", ImVec2(-1.0F, 0.0F)) && editor_graph_) {
+            editor_graph_->request_replace(
+                sidebar_search_, replace_query_, find_options_.regular_expression);
+        }
+        ImGui::Separator();
+        if (screenshot_mode()) {
+            ImGui::TextUnformatted("3 repository results");
+            ImGui::Selectable("src/app.cpp:6  repository");
+            ImGui::Selectable("src/app.cpp:7  repository");
+            ImGui::Selectable("docs/ui/editor.md:18  repository configuration");
+        } else if (!repository_) {
             ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
         } else {
-            ImGui::TextDisabled("Repository search is provided by the liquid graph.");
+            const auto snapshot = editor_graph_->snapshot();
+            if (!snapshot.search.error.empty()) {
+                ImGui::TextWrapped("%s", snapshot.search.error.c_str());
+            } else {
+                ImGui::Text("%zu results · %llu replacements",
+                            snapshot.search.hits.size(),
+                            static_cast<unsigned long long>(snapshot.search.replacements));
+                for (std::size_t index = 0; index < snapshot.search.hits.size(); ++index) {
+                    const auto& hit = snapshot.search.hits[index];
+                    const auto label = hit.path + ":" + std::to_string(hit.line) + ":" +
+                                       std::to_string(hit.column) + "  " + hit.snippet +
+                                       "##search-hit-" + std::to_string(index);
+                    if (ImGui::Selectable(label.c_str())) {
+                        open_editor(hit.path, "search:" + hit.path);
+                        editor_->set_cursor(
+                            {hit.line == 0 ? 0 : static_cast<std::size_t>(hit.line - 1),
+                             hit.column == 0 ? 0 : static_cast<std::size_t>(hit.column - 1)});
+                        ensure_cursor_visible();
+                    }
+                }
+            }
         }
         break;
     case PanelId::review:
@@ -3125,8 +3616,8 @@ void App::draw_editor_area() {
         ImGui::PopFont();
         ImGui::TextDisabled("The IDE for liquid");
         ImGui::Spacing();
-        ImGui::TextUnformatted(
-            "Open a repository, then select a file from the repository sidebar.");
+        ImGui::TextUnformatted("Open a repository, then select a file from the "
+                               "repository sidebar.");
         return;
     }
 
@@ -3271,11 +3762,23 @@ void App::draw_status_bar() {
                                                      : std::string{"No repository"});
     ImGui::TextUnformatted(repository.c_str());
     ImGui::SameLine();
-    ImGui::TextDisabled(screenshot_mode() ? "Change #31" : "Working change");
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    ImGui::TextDisabled(screenshot != nullptr && screenshot->view == ScreenshotView::editor_view
+                            ? "Editor view #32"
+                        : screenshot_mode() ? "Change #31"
+                                            : "Working change");
     if (editor_) {
         const auto cursor = editor_->cursor();
         ImGui::SameLine();
         ImGui::TextDisabled("Ln %zu, Col %zu", cursor.line + 1, cursor.byte + 1);
+        ImGui::SameLine();
+        ImGui::TextDisabled("%zu cursors · %s: %zu · %s",
+                            editor_->cursors().size(),
+                            editor_->preferences().indent_style == IndentStyle::tabs ? "Tabs"
+                                                                                     : "Spaces",
+                            editor_->preferences().indent_size,
+                            editor_->preferences().soft_wrap ? "Wrap" : "No wrap");
     }
     if (const auto* notification = panels_.latest_notification()) {
         ImGui::PushID(notification->id.c_str());
@@ -3444,12 +3947,39 @@ void App::render_editor() {
                                graph_snapshot.build_diagnostics.end());
     auto* editor_font = ImGui::GetIO().Fonts->Fonts[editor_font_index_];
     const auto& palette = applied_dark_theme_ ? design::dark_palette : design::light_palette;
+    const auto demo_syntax =
+        screenshot_mode() ? screenshot_syntax(editor_->text()) : std::vector<SyntaxSpan>{};
+    auto visible_folds = graph_snapshot.folds;
+    auto visible_attribution = graph_snapshot.attribution;
+    auto visible_presence = graph_snapshot.presence;
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    if (screenshot != nullptr && screenshot->view == ScreenshotView::editor_view) {
+        visible_diagnostics.push_back({{"src/app.cpp", {134, 144, 6, 11, 6, 21}},
+                                       DiagnosticSeverity::warning,
+                                       "repository argument is displayed"});
+        visible_folds.push_back({3, 9, "namespace_definition"});
+        visible_attribution.push_back({5, "human", "change-32", false});
+        visible_attribution.push_back({6, "agent", "change-32", true});
+        visible_presence.push_back({"reviewer",
+                                    "src/app.cpp",
+                                    SourceRange{144, 154, 6, 21, 6, 31},
+                                    liquid::presence_activity::editing});
+    }
+    const auto syntax = screenshot_mode() ? std::span<const SyntaxSpan>{demo_syntax}
+                                          : std::span<const SyntaxSpan>{graph_snapshot.syntax};
     visible_lines_ = text_layer_->render(renderer_,
                                          *editor_,
                                          *layouts_,
                                          *editor_font,
-                                         palette.text_primary,
+                                         palette,
                                          visible_diagnostics,
+                                         syntax,
+                                         visible_folds,
+                                         visible_attribution,
+                                         visible_presence,
+                                         graph_snapshot.drive,
+                                         screenshot_mode() ? 1 : graph_snapshot.syntax_generation,
                                          editor_x_,
                                          editor_y_,
                                          editor_width_,

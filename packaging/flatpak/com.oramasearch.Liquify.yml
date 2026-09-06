@@ -14,6 +14,9 @@ modules:
     buildsystem: simple
     build-commands:
       - install -Dm755 liquify /app/bin/liquify
+      - install -Dm755 liquid-frontend-tree-sitter.so /app/bin/frontends/liquid-frontend-tree-sitter.so
     sources:
       - type: file
         path: liquify
+      - type: file
+        path: liquid-frontend-tree-sitter.so

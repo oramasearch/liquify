@@ -9,12 +9,13 @@ divider is interactive.
 
 The activity bar switches among Repository, Search, Review, Build, and Multiplayer. Repository
 continues to render `RepositoryView`; Review continues to render `ReviewController`; Build invokes
-the existing editor-graph build, test, and deploy requests. Search and Multiplayer hold their
-places for their graph-backed leaves without inventing local data paths.
+the existing editor-graph build, test, and deploy requests. Search runs liquid repository queries
+and opens results at their source locations. Multiplayer displays the presence records used by the
+editor gutter.
 
-The bottom panel selects Diagnostics, Build output, Assistant, or Plugins. It hosts the existing
-diagnostic/completion list, build/test/deploy event stream, default-off assistant, and data-only
-plugin panels. Structural selections and edit previews open in their registered editor tab.
+The bottom area hosts Diagnostics, Build output, Assistant, or Plugins. Search inputs and results
+share the registered Search panel, which defaults to the sidebar and can move into the bottom area.
+Structural selections and edit previews open in their registered editor tab.
 Moving a panel changes only where its existing controller is drawn. Every surface now enters the
 plain-C++ registry described in [`panels.md`](panels.md). Its panel menu moves surfaces among all
 three dock areas, floats and re-docks them, while one status channel presents build, saved-drip
@@ -54,7 +55,7 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects ten seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects eleven seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -73,6 +74,7 @@ The committed evidence is:
 | Welcome | [light](screenshots/welcome-light.png) | [dark](screenshots/welcome-dark.png) |
 | Repository | [light](screenshots/repository-light.png) | [dark](screenshots/repository-dark.png) |
 | Editor tabs and split | [light](screenshots/editor-cpp-light.png) | [dark](screenshots/editor-cpp-dark.png) |
+| Editor view | [light](screenshots/editor-view-light.png) | [dark](screenshots/editor-view-dark.png) |
 | Diagnostics | [light](screenshots/diagnostics-light.png) | [dark](screenshots/diagnostics-dark.png) |
 | Build/test/deploy | [light](screenshots/build-light.png) | [dark](screenshots/build-dark.png) |
 | Assistant | [light](screenshots/assistant-light.png) | [dark](screenshots/assistant-dark.png) |
@@ -81,7 +83,8 @@ The committed evidence is:
 | Structural editing | [light](screenshots/structural-editing-light.png) | [dark](screenshots/structural-editing-dark.png) |
 | Panel system | [light](screenshots/panels-light.png) | [dark](screenshots/panels-dark.png) |
 
-`Screenshot.EditorRendersSelectedSource` and `Screenshot.PanelRendersDiagnostics` read the
+`Screenshot.EditorRendersSelectedSource`, `Screenshot.EditorViewShowsSearchGutterAndBothThemes`
+and `Screenshot.PanelRendersDiagnostics` read the
 generated PNG files and check stable shell pixels; `PanelRegistry` and `AppShellState` tests cover
 registry behavior, repository-local round trips, version 1 migration, reset, and invalid state. The
 screenshot script checks the complete matrix and each capture command reports its dimensions.
