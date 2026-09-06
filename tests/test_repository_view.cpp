@@ -110,4 +110,45 @@ TEST(RepositoryView, ReportsLiquidErrorForUnreadableRepository) {
     EXPECT_EQ(view.error(), "not-a-liquid-digest: unknown digest algorithm");
 }
 
+TEST(RepositoryView, RefusesACloneIntoANonEmptyDirectoryWithoutChangingIt) {
+    TemporaryDirectory location;
+    ASSERT_TRUE(std::filesystem::create_directories(location.path()));
+    auto marker = std::ofstream{location.path() / "keep.txt"};
+    marker << "keep me";
+    marker.close();
+
+    const auto view = liquify::RepositoryView::clone(location.path(),
+                                                     "https://lake.invalid/repositories/example");
+
+    EXPECT_FALSE(view.error().empty());
+    EXPECT_TRUE(std::filesystem::exists(location.path() / "keep.txt"));
+    auto input = std::ifstream{location.path() / "keep.txt"};
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(input), {}), "keep me");
+}
+
+TEST(RepositoryView, ReportsRepositorySummaryMetadata) {
+    TemporaryDirectory location;
+    auto created = liquid::runtime::block_on(liquid::repository::create(location.path()));
+    ASSERT_TRUE(created) << created.error().message;
+
+    auto repository = std::move(*created);
+    auto written = liquid::runtime::block_on(repository.write("README.md", bytes("root")));
+    ASSERT_TRUE(written) << written.error().message;
+    const auto change = liquid::runtime::block_on(repository.cut("First named change"));
+    ASSERT_TRUE(change) << change.error().message;
+    auto set = liquid::runtime::block_on(repository.set_ref("refs/heads/main", *change));
+    ASSERT_TRUE(set) << set.error().message;
+
+    const auto view = liquify::RepositoryView::open(location.path());
+
+    ASSERT_TRUE(view.error().empty()) << view.error();
+    EXPECT_EQ(view.path(), location.path());
+    EXPECT_EQ(view.name(), location.path().filename());
+    EXPECT_EQ(view.branch(), "main");
+    EXPECT_EQ(view.current_change(), liquid::to_string(change->value));
+    EXPECT_EQ(view.last_change(), "First named change");
+    EXPECT_FALSE(view.last_changed_at().empty());
+    EXPECT_EQ(view.presence_count(), 0U);
+}
+
 } // namespace
