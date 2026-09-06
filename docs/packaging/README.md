@@ -5,12 +5,14 @@ Liquify packages the existing release executable directly until liquid issues
 [#77](https://github.com/oramasearch/liquid/issues/77) provide platform projection and signing.
 The scripts under [`packaging/`](../../packaging/) are shared by pull-request CI and the tag release
 workflow, so a published installer has already followed the same build and verification path.
+The macOS dependency policy, bundle audit, and relocation test are documented in
+[`macos.md`](macos.md).
 
 ## Produced artifacts
 
 | Platform | Release artifacts | CI verification |
 |---|---|---|
-| macOS | `liquify-0.0.1-macos.pkg`, `liquify-0.0.1-macos.dmg` | bundled non-system libraries, hardened-runtime `codesign`, mounted `liquify version`, notarization and stapling when credentials are present, then `spctl` assessment |
+| macOS | `liquify-0.0.1-macos.pkg`, `liquify-0.0.1-macos.dmg` | transitive Mach-O dependency audit, relocated launch before packaging and from the mounted dmg, hardened-runtime `codesign`, notarization and stapling when credentials are present, then `spctl` assessment |
 | Windows | `liquify-0.0.1-windows-x64.msix` | bundled non-system DLLs, SHA-256 Authenticode signature with RFC 3161 timestamp, `signtool verify`, `Add-AppxPackage`, installed `liquify version` with a system-only `PATH` |
 | Linux | `liquify-0.0.1-x86_64.AppImage` | `liquify version` on Ubuntu 24.04 and Fedora 42 |
 
@@ -48,8 +50,9 @@ The workflow imports the PKCS#12 into a temporary keychain and decodes the API k
 `xcrun notarytool submit --wait`, stapled, and required to pass Gatekeeper. Without it, the app and
 disk image receive an ad hoc hardened-runtime signature, notarization is explicitly reported as
 skipped, and the expected Gatekeeper rejection is recorded without failing pull-request CI.
-Homebrew-provided dynamic libraries are copied into `Liquify.app/Contents/Frameworks`, rewritten to
-`@rpath`, and signed before the app, so an installed build never loads a Homebrew path.
+Every non-system dynamic library is copied transitively into `Liquify.app/Contents/Frameworks`,
+rewritten to `@rpath`, audited, and signed before the app, so an installed build never loads a
+package-manager or build-tree path.
 The ad hoc test app alone disables library validation because ad hoc signatures have no shared
 Developer Team identifier. Developer ID releases use the empty production entitlement file and
 retain hardened library validation.
