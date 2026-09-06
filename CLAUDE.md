@@ -8,7 +8,7 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed interactive C/C++ analysis, structural editing and optional AI.**
+**Retained GPU editor with graph-backed interactive C/C++ analysis, inline build, test and deploy, structural editing and optional AI.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
 libliquid and produces a drip.
@@ -29,8 +29,11 @@ assembles inspectable context from the same graph, streams through a pinned prov
 and previews edits until the user accepts one normal drip. When off it constructs no provider and
 opens no connection. Native plugins use liquid's versioned frontend C boundary to register graph
 queries, commands, and canonical-CBOR panels through checked static or configured dynamic loading;
-their commands and data-only panels appear in the editor surface. Next: inline build, test and
-deploy (liquify #6).
+their commands and data-only panels appear in the editor surface. F7 plans and starts a configured
+build through the attached daemon and renders its action stream, critical path and scheduling
+choice. F8 lists and runs test actions; F9 pushes saved drips to the configured sync remote and
+renders each reference outcome. Failed action diagnostics are line diagnostics in the retained
+editor.
 
 ## Decisions — recorded
 

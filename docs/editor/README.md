@@ -61,6 +61,16 @@ smoke: lines=50000 frames=3000 visible_lines=68 avg_frame_ms=16.778 p95_frame_ms
 The average scroll rate is the display refresh rate. Typing latency is one presented frame on
 average while the viewport crosses the full 50,000-line buffer.
 
+The #6 verification was measured on 2026-09-06 on this macOS host. The load average was read
+immediately after the smoke run:
+
+```text
+$ ./build/liquify --smoke 30
+smoke: lines=50000 frames=30 visible_lines=41 avg_frame_ms=0.445 p95_frame_ms=1.378 achieved_hz=2247.5 display_hz=60.0 avg_typing_ms=0.578 p95_typing_ms=1.540
+$ sysctl -n vm.loadavg
+{ 70.88 48.31 54.69 }
+```
+
 ## Interactive analysis
 
 [`interactive-analysis.md`](interactive-analysis.md) records the graph-backed analysis service.
@@ -78,8 +88,15 @@ buffer.
 Diagnostics are demanded after buffer open and every edit. The retained renderer draws a colored
 underline at each source range, while the diagnostics panel lists severity, message and the
 measured edit-to-result duration. Selecting a diagnostic opens its blob and moves the cursor to its
-range. The build diagnostic producer is the `EditorGraph::publish_build_diagnostics` boundary;
-launching inline builds remains liquify #6.
+range. Failed actions publish their diagnostics from the daemon event stream directly to the
+retained line layer.
+
+## Build, test and deploy
+
+[`build.md`](build.md) describes the graph-backed panels. F7 requests the configured repository
+build through the in-process daemon, F8 runs registered graph tests, F9 pushes saved drips to the
+configured sync remote, and primary-modifier+P opens the corresponding command-palette entries.
+The status line shows active actions and the most recent result.
 
 Configured plugin commands are appended to the keyboard-first command palette with their declared
 default bindings. Data-only plugin text panels render below completion results. A panel operation
@@ -91,6 +108,13 @@ The status line is formatted from `liquid::daemon_status`: the last workspace dr
 paths, the sum of target cursor distances as the validation backlog, daemon availability and the
 pending repository drip count returned by the last editor save. Recursive repository navigation
 loads directory trees lazily as recorded in [`../app-shell/README.md`](../app-shell/README.md).
+
+## Build measurement
+
+Linux proof deferred (decision 33). The current macOS measurement is the display-backed smoke run
+recorded above. It measures the editor's retained rendering and edit-to-present path while the
+build, test, and deploy controller is verified by
+`EditorGraph.PresentsBuildEventsTestsAndRefusedReferences`.
 
 ## Phase 4 exit measurement
 
