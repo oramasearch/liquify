@@ -105,6 +105,41 @@ const liquify_plugin_v1 fault_descriptor = {LIQUIFY_PLUGIN_ABI_VERSION,
                                             nullptr,
                                             nullptr};
 
+struct EventState {
+    std::size_t presence_count{};
+    std::size_t lease_count{};
+    std::size_t attribution_count{};
+    std::vector<std::byte> last;
+};
+
+void copy_event(std::size_t& count, EventState& state, liquid_frontend_bytes_v1 value) {
+    ++count;
+    const auto bytes = std::span(reinterpret_cast<const std::byte*>(value.data), value.size);
+    state.last.assign(bytes.begin(), bytes.end());
+}
+
+void event_presence(void* context, liquid_frontend_bytes_v1 value) {
+    auto& state = *static_cast<EventState*>(context);
+    copy_event(state.presence_count, state, value);
+}
+
+void event_lease(void* context, liquid_frontend_bytes_v1 value) {
+    auto& state = *static_cast<EventState*>(context);
+    copy_event(state.lease_count, state, value);
+}
+
+void event_attribution(void* context, liquid_frontend_bytes_v1 value) {
+    auto& state = *static_cast<EventState*>(context);
+    copy_event(state.attribution_count, state, value);
+}
+
+const liquify_plugin_event_callbacks_v1 event_callbacks = {
+    LIQUIFY_PLUGIN_EVENTS_ABI_VERSION,
+    sizeof(liquify_plugin_event_callbacks_v1),
+    event_presence,
+    event_lease,
+    event_attribution};
+
 void exercise_sample(const std::shared_ptr<liquify::PluginHost>& host,
                      const std::filesystem::path& state) {
     const auto query_names = host->query_names();
@@ -201,6 +236,49 @@ TEST(PluginHost, IsolatesAPanelFault) {
     ASSERT_TRUE(healthy) << healthy.error().message;
     EXPECT_EQ(healthy->title, "Healthy");
     EXPECT_EQ(healthy->text, "ok");
+}
+
+TEST(PluginHost, DeliversMultiplayerEventsThroughTheAbi) {
+    auto state = EventState{};
+    const auto descriptor = liquify_plugin_v1{LIQUIFY_PLUGIN_ABI_VERSION,
+                                              sizeof(liquify_plugin_v1),
+                                              "events",
+                                              nullptr,
+                                              0,
+                                              nullptr,
+                                              0,
+                                              nullptr,
+                                              0,
+                                              &state,
+                                              nullptr,
+                                              &event_callbacks};
+    auto host = liquify::PluginHost{};
+    ASSERT_TRUE(host.add(&descriptor));
+
+    auto presence = liquid::presence{};
+    presence.actor.taap_id = "person";
+    presence.path = "main.cpp";
+    presence.activity = liquid::presence_activity::editing;
+    host.publish_presence(presence);
+
+    auto lease = liquid::semantic_lease{};
+    lease.by.taap_id = "person";
+    lease.claim.path = "main.cpp";
+    lease.claim.kind = liquid::lease_kind::file;
+    host.publish_lease(lease);
+
+    auto attribution = liquid::line_attribution{};
+    attribution.line = 1;
+    attribution.by.taap_id = "agent";
+    attribution.agent = true;
+    const auto change = liquid::change_id{};
+    host.publish_attribution("main.cpp", change, std::span{&attribution, std::size_t{1}});
+
+    EXPECT_EQ(state.presence_count, 1);
+    EXPECT_EQ(state.lease_count, 1);
+    EXPECT_EQ(state.attribution_count, 1);
+    EXPECT_FALSE(state.last.empty());
+    EXPECT_TRUE(liquify::canonical_plugin_cbor(state.last));
 }
 
 TEST(PluginHost, RejectsNonCanonicalCbor) {

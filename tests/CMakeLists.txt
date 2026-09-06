@@ -6,6 +6,7 @@ add_executable(liquify-tests
   test_editor_graph.cpp
   test_interactive_analysis.cpp
   test_panel.cpp
+  test_multiplayer.cpp
   test_plugin.cpp
   test_repository_view.cpp
   test_review.cpp

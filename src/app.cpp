@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
+#include <future>
 #include <limits>
 #include <span>
 #include <string>
@@ -30,6 +31,7 @@
 #include "liquify/design_tokens.generated.hpp"
 #include "liquify/editor_graph.hpp"
 #include "liquify/screenshot.hpp"
+#include "liquify/multiplayer.hpp"
 #include "liquify/stub_tree.hpp"
 #include "liquify/version.hpp"
 #include "repository_view.hpp"
@@ -905,6 +907,7 @@ private:
 };
 
 App::App(AppOptions options) : options_(std::move(options)) {
+    multiplayer_session_ = make_multiplayer_session();
     if (options_.repository_path) {
         auto loaded_state = load_app_shell_state(*options_.repository_path);
         shell_state_ = loaded_state.state;
@@ -1554,7 +1557,21 @@ void App::save_editor() {
         return;
     }
     const auto build_running = editor_graph_ && editor_graph_->snapshot().build_running;
-    if (!editor_->save()) {
+    auto saved = false;
+    if (options_.repository_path) {
+        auto repository_options = liquid::repository_options{};
+        repository_options.session = multiplayer_session_;
+        auto repository = liquid::runtime::block_on(
+            liquid::repository::open(*options_.repository_path, repository_options));
+        if (!repository) {
+            editor_status_ = repository.error().message;
+            return;
+        }
+        saved = editor_->save(*repository);
+    } else {
+        saved = editor_->save();
+    }
+    if (!saved) {
         editor_status_ = std::string(editor_->error());
         return;
     }
@@ -1816,6 +1833,10 @@ void App::accept_assistant_edit() {
     if (!assistant_ || !editor_ || !options_.repository_path) {
         return;
     }
+    if (!editor_mutation_allowed()) {
+        editor_status_ = "edit refused: another session holds a lease";
+        return;
+    }
     assistant_->accept();
     const auto accepted = assistant_->take_accepted();
     if (!accepted) {
@@ -1985,6 +2006,9 @@ void App::poll_editor_graph() {
 void App::handle_text(std::string_view text) {
     if (!editor_ || !editor_focused_ || review_diff_open_ ||
         editor_->mode() == EditingMode::modal_command) {
+        return;
+    }
+    if (!editor_mutation_allowed()) {
         return;
     }
     const auto change = editor_->insert_text(text);
@@ -2207,6 +2231,9 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         } else if (key == SDLK_4 && shift) {
             editor_->move_end();
         } else if (key == SDLK_X) {
+            if (!editor_mutation_allowed()) {
+                return;
+            }
             const auto change = editor_->delete_forward();
             if (change) {
                 apply_change(change->first_line, change->erased_lines, change->inserted_lines);
@@ -2239,19 +2266,31 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         const auto amount = std::max<std::size_t>(visible_lines_, 1);
         editor_->set_cursor({cursor.line + amount, cursor.byte}, shift);
     } else if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
+        if (!editor_mutation_allowed()) {
+            return;
+        }
         const auto change = editor_->insert_newline();
         apply_change(change.first_line, change.erased_lines, change.inserted_lines);
     } else if (key == SDLK_TAB) {
+        if (!editor_mutation_allowed()) {
+            return;
+        }
         const auto change = editor_->insert_text(indentation_text(editor_->preferences()));
         if (change) {
             apply_change(change->first_line, change->erased_lines, change->inserted_lines);
         }
     } else if (key == SDLK_BACKSPACE) {
+        if (!editor_mutation_allowed()) {
+            return;
+        }
         const auto change = editor_->backspace();
         if (change) {
             apply_change(change->first_line, change->erased_lines, change->inserted_lines);
         }
     } else if (key == SDLK_DELETE) {
+        if (!editor_mutation_allowed()) {
+            return;
+        }
         const auto change = editor_->delete_forward();
         if (change) {
             apply_change(change->first_line, change->erased_lines, change->inserted_lines);
@@ -2915,6 +2954,105 @@ void App::sync_panel_system() {
     }
 }
 
+void App::refresh_multiplayer() {
+    if (!editor_ || !options_.repository_path || multiplayer_refresh_.valid()) {
+        return;
+    }
+    const auto cursor = editor_->cursor();
+    const auto byte = editor_->byte_offset(cursor);
+    const auto range = liquid::frontend_source_range{
+        .start = {.byte = byte, .line = cursor.line + 1, .column = cursor.byte + 1},
+        .end = {.byte = byte, .line = cursor.line + 1, .column = cursor.byte + 1}};
+    multiplayer_refresh_ = std::async(
+        std::launch::async,
+        [repository_path = *options_.repository_path,
+         path = std::string(editor_->display_path()),
+         session = multiplayer_session_,
+         range] { return liquify::refresh_multiplayer(repository_path, path, session, range); });
+}
+
+void App::poll_multiplayer() {
+    if (!options_.repository_path || !editor_) {
+        return;
+    }
+    if (multiplayer_refresh_.valid() &&
+        multiplayer_refresh_.wait_for(std::chrono::seconds{0}) == std::future_status::ready) {
+        auto refreshed = multiplayer_refresh_.get();
+        if (!refreshed) {
+            editor_status_ = refreshed.error().message;
+        } else {
+            multiplayer_ = std::move(*refreshed);
+            if (plugin_host_) {
+                for (const auto& value : multiplayer_->presence) {
+                    plugin_host_->publish_presence(value);
+                }
+                for (const auto& value : multiplayer_->leases) {
+                    plugin_host_->publish_lease(value);
+                }
+                plugin_host_->publish_attribution(
+                    editor_->display_path(), multiplayer_->change, multiplayer_->attribution);
+            }
+        }
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= next_multiplayer_refresh_) {
+        refresh_multiplayer();
+        next_multiplayer_refresh_ = now + std::chrono::seconds{1};
+    }
+}
+
+void App::take_editor_lease() {
+    if (!editor_ || !options_.repository_path) {
+        return;
+    }
+    auto claim = liquid::lease_claim{};
+    claim.path = std::string(editor_->display_path());
+    claim.kind = liquid::lease_kind::file;
+    auto acquired =
+        acquire_multiplayer_lease(*options_.repository_path, multiplayer_session_, claim);
+    if (!acquired) {
+        editor_status_ = acquired.error().message;
+        return;
+    }
+    editor_status_ = "lease acquired";
+    next_multiplayer_refresh_ = std::chrono::steady_clock::time_point{};
+}
+
+void App::release_editor_lease() {
+    if (!editor_ || !options_.repository_path) {
+        return;
+    }
+    auto claim = liquid::lease_claim{};
+    claim.path = std::string(editor_->display_path());
+    claim.kind = liquid::lease_kind::file;
+    auto released =
+        release_multiplayer_lease(*options_.repository_path, multiplayer_session_, claim);
+    if (!released) {
+        editor_status_ = released.error().message;
+        return;
+    }
+    editor_status_ = "lease released";
+    next_multiplayer_refresh_ = std::chrono::steady_clock::time_point{};
+}
+
+bool App::editor_mutation_allowed() const {
+    if (!editor_ || !multiplayer_) {
+        return true;
+    }
+    const auto path = editor_->display_path();
+    const auto line = static_cast<std::uint64_t>(editor_->cursor().line + 1);
+    for (const auto& lease : multiplayer_->leases) {
+        if (lease.session == multiplayer_session_ || lease.claim.path != path) {
+            continue;
+        }
+        if (lease.claim.kind == liquid::lease_kind::file || !lease.claim.range ||
+            (lease.claim.range->start.line <= line && line <= lease.claim.range->end.line)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void App::draw_plugin_panels() {
     if (plugin_failures_.empty() && plugin_panels_.empty()) {
         return;
@@ -3019,6 +3157,48 @@ void App::draw_editor() {
         ImGui::SameLine();
         const auto error = std::string(editor_->error());
         ImGui::TextUnformatted(error.c_str());
+    }
+    if (!editor_mutation_allowed()) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
+                           "edit refused: another session holds a lease");
+    }
+    if (!review_diff_open_ && options_.repository_path) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Take lease")) {
+            take_editor_lease();
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Release lease")) {
+            release_editor_lease();
+        }
+    }
+    if (multiplayer_) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Presence");
+        auto presence_count = std::size_t{};
+        for (const auto& value : multiplayer_->presence) {
+            if (value.session == multiplayer_session_) {
+                continue;
+            }
+            ImGui::TextUnformatted(multiplayer_presence_text(value).c_str());
+            ++presence_count;
+        }
+        if (presence_count == 0) {
+            ImGui::TextDisabled("No other active sessions");
+        }
+        ImGui::TextUnformatted("Attribution gutter");
+        const auto cursor_line = editor_->cursor().line + 1;
+        const auto first = cursor_line > 2 ? cursor_line - 2 : 1;
+        const auto last = cursor_line + 2;
+        for (const auto& value : multiplayer_->attribution) {
+            if (value.line >= first && value.line <= last) {
+                ImGui::TextUnformatted(multiplayer_attribution_text(value).c_str());
+            }
+        }
+        for (const auto& value : multiplayer_->leases) {
+            ImGui::TextUnformatted(multiplayer_lease_text(value).c_str());
+        }
     }
     if (editor_graph_) {
         const auto status = editor_graph_status(graph_snapshot);
@@ -3217,6 +3397,10 @@ void App::draw_diagnostics_panel(const EditorGraphSnapshot& graph_snapshot) {
                 completion.signature.empty() ? completion.name : completion.signature;
             const auto label = display + "##completion-" + std::to_string(index);
             if (ImGui::Selectable(label.c_str())) {
+                if (!editor_mutation_allowed()) {
+                    editor_status_ = "edit refused: another session holds a lease";
+                    continue;
+                }
                 const auto change = editor_->insert_text(completion.name);
                 if (change) {
                     apply_change(change->first_line, change->erased_lines, change->inserted_lines);
@@ -4003,6 +4187,7 @@ void App::frame() {
         apply_theme();
     }
     update_window_title();
+    poll_multiplayer();
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
