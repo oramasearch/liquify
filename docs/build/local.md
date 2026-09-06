@@ -41,8 +41,9 @@ ctest --test-dir build --output-on-failure
 CTest holds the GoogleTest cases discovered from `liquify-tests` (buffer, text layout, repository
 view, stub trees, interactive analysis, editor graph, structural edits, review, assistant, plugins
 and version) plus `liquify-print-tree-unreadable`, which proves that an unreadable repository
-makes `--print-tree` exit non-zero with liquid's error. `version` and the unit tests run without a
-display; `--smoke` needs one.
+makes `--print-tree` exit non-zero with liquid's error. Screenshot cases render the editor and a
+panel through SDL's dummy video driver and software renderer and inspect stable pixel regions.
+`version`, the unit tests and `--screenshot` run without a display; `--smoke` needs one.
 
 ## Run
 
@@ -54,13 +55,15 @@ display; `--smoke` needs one.
 ./build/liquify --apply-edits request.cbor <path> > result.cbor
 ./build/liquify --smoke    # scroll/edit 50,000 lines for 30 frames, report latency, exit 0
 ./build/liquify --smoke 300
+./build/liquify --screenshot editor-cpp-light --out editor.png
 ./build/liquify version
 ```
 
 The commands are described in [`../app-shell/README.md`](../app-shell/README.md); `--apply-edits`
 in [`../editor/structural-editing.md`](../editor/structural-editing.md), `--lake` in
 [`../editor/review.md`](../editor/review.md), and the `--smoke` measurements in
-[`../editor/README.md`](../editor/README.md).
+[`../editor/README.md`](../editor/README.md). The screenshot registry and full refresh command are
+in [`../ui/README.md`](../ui/README.md).
 
 ## The full local proof
 

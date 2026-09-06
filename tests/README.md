@@ -54,3 +54,7 @@ and explicit omissions, and the Anthropic Messages request over an in-process TL
 cases cover a normal streamed answer, a refusal stop reason, and a connection ending mid-stream.
 It also proves a proposed replacement leaves repository content unchanged until acceptance, then
 creates exactly one drip and a local assisted-edit record without recording the prompt.
+
+`test_screenshot.cpp` renders the deterministic C++ editor and diagnostics states through SDL's
+dummy video driver and software renderer, decodes their PNG output and uses `ui_pixel_assert.hpp`
+to prove that a highlighted line, panel title and count badge occupy their expected regions.

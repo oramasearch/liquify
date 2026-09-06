@@ -60,6 +60,7 @@ its page there in the same change; this file is only the front door. The most us
   [`docs/editor/build.md`](docs/editor/build.md): analysis, structural edits, review in place,
   the assistant, and build, test and deploy.
 - [`docs/plugins/README.md`](docs/plugins/README.md): the native plugin ABI.
+- [`docs/ui/README.md`](docs/ui/README.md): deterministic light and dark screenshot proof.
 - [`docs/build/layout.md`](docs/build/layout.md): the source tree.
 - [`docs/packaging/README.md`](docs/packaging/README.md): installers, signing and verification.
 
