@@ -53,6 +53,13 @@ enum NativeMenuCommand : std::int32_t {
     menu_next_comment,
     menu_expand_selection,
     menu_shrink_selection,
+    menu_quick_open,
+    menu_symbol_search,
+    menu_references,
+    menu_call_hierarchy,
+    menu_open_recent,
+    menu_back,
+    menu_forward,
 };
 
 @interface LiquifyMenuTarget : NSObject
@@ -127,10 +134,17 @@ static void install_native_menu() {
                      {@"Toggle Bottom Panel", @"j", command, menu_panel},
                      {@"Toggle Editor Split", @"\\", command, menu_split},
                      {@"Cycle Color Theme", @"t", command_shift, menu_theme}});
-    add_native_menu(
-        main_menu,
-        @"Go",
-        {{@"Go to Definition", @"", 0, menu_definition}, {@"Show Hover", @"", 0, menu_hover}});
+    add_native_menu(main_menu,
+                    @"Go",
+                    {{@"Quick Open", @"p", command, menu_quick_open},
+                     {@"Symbol Search", @"t", command, menu_symbol_search},
+                     {@"Go to Definition", @"", 0, menu_definition},
+                     {@"Find References", @"", 0, menu_references},
+                     {@"Call Hierarchy", @"", 0, menu_call_hierarchy},
+                     {@"Open Recent", @"r", command, menu_open_recent},
+                     {@"Back", @"", 0, menu_back},
+                     {@"Forward", @"", 0, menu_forward},
+                     {@"Show Hover", @"", 0, menu_hover}});
     add_native_menu(main_menu,
                     @"Run",
                     {{@"Build", @"", 0, menu_build},
@@ -1022,6 +1036,10 @@ App::App(AppOptions options) : options_(std::move(options)) {
         } else {
             panels_.clear_focus_request();
         }
+        if (screenshot->view == ScreenshotView::navigation) {
+            quick_open_query_ = "app";
+            quick_open_open_ = true;
+        }
     }
 }
 
@@ -1033,8 +1051,9 @@ bool App::init() {
     const auto* screenshot =
         options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
     if (options_.screenshot_state && screenshot == nullptr) {
-        std::fprintf(
-            stderr, "liquify: unknown screenshot state: %s\n", options_.screenshot_state->c_str());
+        std::fprintf(stderr,
+                     "liquify: unknown screenshot state: %s\n",
+                     options_.screenshot_state->c_str());
         return false;
     }
     if (options_.screenshot_state.has_value() != options_.screenshot_output.has_value()) {
@@ -1327,7 +1346,16 @@ void App::capture_screenshot() {
                 options_.screenshot_output->string().c_str());
 }
 
-void App::open_editor(std::string path, std::string blob_id) {
+void App::open_editor(std::string path, std::string blob_id, bool record_history) {
+    repository_focused_ = false;
+    if (record_history) {
+        if (const auto current = current_navigation_location()) {
+            navigation_history_.replace_current(*current);
+        }
+        navigation_history_.visit({path, 0, 0});
+    } else {
+        navigation_history_.replace_current({path, 0, 0});
+    }
     if (analysis_buffer_open_ && editor_graph_ && editor_) {
         editor_graph_->close_buffer(std::filesystem::path(editor_->display_path()));
     }
@@ -1360,6 +1388,170 @@ void App::open_editor(std::string path, std::string blob_id) {
     editor_graph_->request_diagnostics(std::filesystem::path(editor_->display_path()));
     editor_graph_->request_editor_view(
         std::filesystem::path(editor_->display_path()), *language, analysis_text_);
+}
+
+auto App::current_navigation_location() const -> std::optional<NavigationLocation> {
+    if (!editor_) {
+        return std::nullopt;
+    }
+    const auto cursor = editor_->cursor();
+    return NavigationLocation{std::filesystem::path(editor_->display_path()),
+                              cursor.line,
+                              cursor.byte};
+}
+
+void App::open_navigation_location(const NavigationLocation& location, bool record_history) {
+    auto blob = std::string{"navigation:"} + location.path.generic_string();
+    if (repository_) {
+        if (const auto* path = repository_->metadata(location.path.generic_string());
+            path != nullptr && !path->blob_id.empty()) {
+            blob = path->blob_id;
+        }
+    }
+    open_editor(location.path.generic_string(), std::move(blob), record_history);
+    if (!editor_ || !editor_->error().empty()) {
+        return;
+    }
+    editor_->set_cursor(
+        {static_cast<std::size_t>(location.line), static_cast<std::size_t>(location.column)});
+    navigation_history_.replace_current(location);
+    ensure_cursor_visible();
+}
+
+void App::navigate_history(bool forward) {
+    if (const auto current = current_navigation_location()) {
+        navigation_history_.replace_current(*current);
+    }
+    auto location = forward ? navigation_history_.forward() : navigation_history_.back();
+    if (location) {
+        open_navigation_location(*location, false);
+    }
+}
+
+auto App::navigation_symbol_at_cursor() const -> const NavigationSymbol* {
+    if (!repository_ || !editor_) {
+        return nullptr;
+    }
+    const auto byte = editor_->byte_offset(editor_->cursor());
+    const auto path = std::filesystem::path(editor_->display_path());
+    const auto symbols = repository_->navigation_symbols();
+    const auto occurrence = std::ranges::find_if(symbols, [&](const auto& symbol) {
+        return symbol.path == path && symbol.range.start_byte <= byte &&
+               byte <= symbol.range.end_byte;
+    });
+    if (occurrence != symbols.end()) {
+        return &*occurrence;
+    }
+    if (const auto* enclosing = enclosing_symbol(symbols, path, byte)) {
+        return enclosing;
+    }
+    const auto name = identifier_at(editor_->text(), byte);
+    const auto named = std::ranges::find_if(symbols, [&](const auto& symbol) {
+        return symbol.name == name && symbol.definition;
+    });
+    return named == symbols.end() ? nullptr : &*named;
+}
+
+void App::show_symbol_references() {
+    const auto* symbol = navigation_symbol_at_cursor();
+    if (symbol == nullptr || !repository_) {
+        editor_status_ = "no indexed symbol at cursor";
+        return;
+    }
+    navigation_results_ =
+        symbol_references(repository_->navigation_symbols(), symbol->id, symbol->name);
+    navigation_results_title_ = "References — " + symbol->name;
+    navigation_results_open_ = true;
+}
+
+void App::show_call_hierarchy() {
+    const auto* symbol = navigation_symbol_at_cursor();
+    if (symbol == nullptr || !repository_) {
+        editor_status_ = "no indexed symbol at cursor";
+        return;
+    }
+    navigation_hierarchy_ =
+        call_hierarchy(repository_->navigation_symbols(), symbol->id, symbol->name);
+    navigation_results_title_ = "Call hierarchy — " + symbol->name;
+    navigation_results_.clear();
+    navigation_results_open_ = true;
+}
+
+void App::reveal_repository_path() {
+    if (!options_.repository_path || repository_action_source_.empty()) {
+        return;
+    }
+    auto target_path =
+        std::filesystem::absolute(*options_.repository_path / repository_action_source_)
+            .lexically_normal();
+    if (!std::filesystem::exists(target_path)) {
+        target_path = std::filesystem::absolute(*options_.repository_path).lexically_normal();
+    }
+    const auto target = target_path.generic_string();
+    const auto url = "file://" + target;
+    if (!SDL_OpenURL(url.c_str())) {
+        editor_status_ = std::string{"unable to reveal path: "} + SDL_GetError();
+    }
+}
+
+void App::invoke_navigation_action(NavigationAction action) {
+    switch (action) {
+    case NavigationAction::quick_open:
+        quick_open_open_ = true;
+        return;
+    case NavigationAction::symbol_search:
+        symbol_search_open_ = true;
+        return;
+    case NavigationAction::go_to_definition:
+        request_definition();
+        return;
+    case NavigationAction::find_references:
+        show_symbol_references();
+        return;
+    case NavigationAction::call_hierarchy:
+        show_call_hierarchy();
+        return;
+    case NavigationAction::focus_breadcrumbs:
+        breadcrumb_focus_requested_ = true;
+        editor_focused_ = false;
+        return;
+    case NavigationAction::open_recent:
+        open_recent_open_ = true;
+        return;
+    case NavigationAction::back:
+        navigate_history(false);
+        return;
+    case NavigationAction::forward:
+        navigate_history(true);
+        return;
+    case NavigationAction::open:
+        if (!repository_selection_.empty() && !repository_selection_blob_.empty()) {
+            open_editor(repository_selection_, repository_selection_blob_);
+        }
+        return;
+    case NavigationAction::rename:
+    case NavigationAction::move:
+        if (!repository_selection_.empty()) {
+            repository_action_source_ = repository_selection_;
+            repository_action_target_ = repository_selection_;
+            repository_move_open_ = true;
+        }
+        return;
+    case NavigationAction::new_file:
+        if (!repository_selection_.empty()) {
+            auto base = std::filesystem::path(repository_selection_);
+            if (!repository_selection_blob_.empty()) {
+                base = base.parent_path();
+            }
+            repository_action_target_ = (base / "new-file.txt").generic_string();
+            repository_new_file_open_ = true;
+        }
+        return;
+    case NavigationAction::reveal:
+        repository_action_source_ = repository_selection_;
+        reveal_repository_path();
+        return;
+    }
 }
 
 void App::show_review_diff(const ReviewSnapshot& review) {
@@ -1597,6 +1789,7 @@ void App::request_definition() {
     }
     const auto byte = editor_->byte_offset(editor_->cursor());
     if (byte <= std::numeric_limits<std::uint32_t>::max()) {
+        pending_definition_origin_ = current_navigation_location();
         editor_graph_->request_definition(std::filesystem::path(editor_->display_path()),
                                           static_cast<std::uint32_t>(byte));
     }
@@ -1972,13 +2165,21 @@ void App::poll_editor_graph() {
         definition_generation_ = snapshot.definition_generation;
         if (snapshot.definition) {
             const auto target = snapshot.definition->path.generic_string();
-            if (!editor_ || editor_->display_path() != target) {
-                open_editor(target, "graph:" + target);
+            if (pending_definition_origin_) {
+                navigation_history_.replace_current(*pending_definition_origin_);
             }
             const auto& range = snapshot.definition->declaration.range;
+            const auto location =
+                NavigationLocation{snapshot.definition->path, range.start_line, range.start_column};
+            navigation_history_.visit(location);
+            if (!editor_ || editor_->display_path() != target) {
+                open_editor(target, "graph:" + target, false);
+            }
             editor_->set_cursor({range.start_line, range.start_column});
+            navigation_history_.replace_current(location);
             ensure_cursor_visible();
         }
+        pending_definition_origin_.reset();
     }
 }
 
@@ -1996,6 +2197,7 @@ void App::handle_text(std::string_view text) {
 void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
     const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+    const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
     if (primary && key == SDLK_B) {
         shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
         persist_shell_state();
@@ -2015,8 +2217,60 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         cycle_theme();
         return;
     }
-    if (primary && key == SDLK_P) {
+    if (primary && shift && key == SDLK_P) {
         command_palette_open_ = true;
+        return;
+    }
+    if (primary && key == SDLK_P) {
+        invoke_navigation_action(NavigationAction::quick_open);
+        return;
+    }
+    if (primary && key == SDLK_T) {
+        invoke_navigation_action(NavigationAction::symbol_search);
+        return;
+    }
+    if (primary && !alt && key == SDLK_R) {
+        invoke_navigation_action(NavigationAction::open_recent);
+        return;
+    }
+    if (alt && key == SDLK_LEFT) {
+        invoke_navigation_action(NavigationAction::back);
+        return;
+    }
+    if (alt && key == SDLK_RIGHT) {
+        invoke_navigation_action(NavigationAction::forward);
+        return;
+    }
+    if (primary && shift && key == SDLK_PERIOD) {
+        invoke_navigation_action(NavigationAction::focus_breadcrumbs);
+        return;
+    }
+    if (shift && key == SDLK_F12) {
+        invoke_navigation_action(NavigationAction::find_references);
+        return;
+    }
+    if (alt && key == SDLK_F12) {
+        invoke_navigation_action(NavigationAction::call_hierarchy);
+        return;
+    }
+    if (key == SDLK_F2) {
+        invoke_navigation_action(NavigationAction::rename);
+        return;
+    }
+    if (primary && shift && key == SDLK_M) {
+        invoke_navigation_action(NavigationAction::move);
+        return;
+    }
+    if (primary && key == SDLK_N) {
+        invoke_navigation_action(NavigationAction::new_file);
+        return;
+    }
+    if (primary && alt && key == SDLK_R) {
+        invoke_navigation_action(NavigationAction::reveal);
+        return;
+    }
+    if (repository_focused_ && (key == SDLK_RETURN || key == SDLK_KP_ENTER)) {
+        invoke_navigation_action(NavigationAction::open);
         return;
     }
     if (key == SDLK_F7) {
@@ -2037,7 +2291,6 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     if (!editor_focused_) {
         return;
     }
-    const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
     if (primary && shift && key == SDLK_F) {
         panels_.focus(PanelId::search);
         panels_.clear_focus_request();
@@ -2071,10 +2324,6 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         } else if (key == SDLK_DOWN && cursor.line + 1 < editor_->line_count()) {
             editor_->add_cursor({cursor.line + 1, cursor.byte});
         }
-        return;
-    }
-    if (primary && shift && key == SDLK_P) {
-        command_palette_open_ = true;
         return;
     }
     if (primary && alt && key == SDLK_C) {
@@ -2298,6 +2547,15 @@ void App::draw_repository_tree() {
         return;
     }
     repository_->poll();
+    if (repository_->navigation_loading()) {
+        ImGui::TextDisabled("Indexing paths and symbols...");
+    } else if (!repository_->navigation_error().empty()) {
+        ImGui::TextWrapped("Navigation index: %s",
+                           std::string(repository_->navigation_error()).c_str());
+    }
+    if (!repository_->mutation_status().empty()) {
+        ImGui::TextWrapped("%s", std::string(repository_->mutation_status()).c_str());
+    }
     if (repository_->entries().empty()) {
         ImGui::TextWrapped("This repository has no files.");
         return;
@@ -2408,13 +2666,34 @@ void App::draw_repository_entries(std::string_view directory) {
     for (const auto& entry : entries) {
         const auto path =
             directory.empty() ? entry.name : std::string(directory) + "/" + entry.name;
+        const auto* metadata = repository_->metadata(path);
+        const auto kind = metadata == nullptr
+                              ? navigation_file_kind(path, entry.kind == liquid::node_kind::tree)
+                              : metadata->kind;
+        auto label = "[" + std::string(navigation_file_kind_name(kind)) + "] " + entry.name;
+        if (metadata != nullptr && metadata->change != NavigationChangeState::clean) {
+            label += "  [" + std::string(navigation_change_state_name(metadata->change)) + "]";
+        }
+        if (metadata != nullptr && metadata->drive != NavigationDriveState::unavailable) {
+            label += "  [" + std::string(navigation_drive_state_name(metadata->drive)) + "]";
+        }
+        label += "##" + path;
         ImGui::PushID(path.c_str());
         if (entry.kind == liquid::node_kind::blob) {
-            if (ImGui::Selectable(entry.name.c_str(), editor_ && editor_->display_path() == path)) {
+            if (ImGui::Selectable(label.c_str(), editor_ && editor_->display_path() == path)) {
+                repository_selection_ = path;
+                repository_selection_blob_ = liquid::to_string(entry.id);
+                repository_focused_ = true;
                 open_editor(path, liquid::to_string(entry.id));
             }
         } else if (entry.kind == liquid::node_kind::tree) {
-            const auto open = ImGui::TreeNodeEx(entry.name.c_str(), ImGuiTreeNodeFlags_OpenOnArrow);
+            const auto open = ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_OpenOnArrow);
+            if (ImGui::IsItemClicked()) {
+                repository_selection_ = path;
+                repository_selection_blob_.clear();
+                repository_focused_ = true;
+                editor_focused_ = false;
+            }
             if (open) {
                 if (!repository_->directory_loaded(path) && !repository_->directory_loading(path)) {
                     repository_->request_directory(path, entry.ref);
@@ -2433,7 +2712,234 @@ void App::draw_repository_entries(std::string_view directory) {
             ImGui::Text(
                 "%s (%s)", entry.name.c_str(), std::string(node_kind_name(entry.kind)).c_str());
         }
+        if (ImGui::BeginPopupContextItem("repository-actions")) {
+            repository_selection_ = path;
+            repository_selection_blob_ =
+                entry.kind == liquid::node_kind::blob ? liquid::to_string(entry.id) : std::string{};
+            repository_action_source_ = path;
+            if (entry.kind == liquid::node_kind::blob && ImGui::MenuItem("Open")) {
+                invoke_navigation_action(NavigationAction::open);
+            }
+            if (ImGui::MenuItem("Rename")) {
+                repository_action_target_ = path;
+                repository_move_open_ = true;
+            }
+            if (ImGui::MenuItem("Move")) {
+                repository_action_target_ = path;
+                repository_move_open_ = true;
+            }
+            if (ImGui::MenuItem("New file")) {
+                auto base = std::filesystem::path(path);
+                if (entry.kind == liquid::node_kind::blob) {
+                    base = base.parent_path();
+                }
+                repository_action_target_ = (base / "new-file.txt").generic_string();
+                repository_new_file_open_ = true;
+            }
+            if (ImGui::MenuItem("Reveal")) {
+                reveal_repository_path();
+            }
+            ImGui::EndPopup();
+        }
         ImGui::PopID();
+    }
+}
+
+void App::draw_navigation_popups() {
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    const auto navigation_screenshot =
+        screenshot != nullptr && screenshot->view == ScreenshotView::navigation;
+    if (quick_open_open_) {
+        ImGui::OpenPopup("Quick open");
+        quick_open_open_ = false;
+    }
+    if (ImGui::BeginPopupModal("Quick open", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        editor_visible_ = false;
+        ImGui::SetNextItemWidth(620.0F);
+        const auto quick_open_flags =
+            navigation_screenshot ? ImGuiInputTextFlags_ReadOnly : ImGuiInputTextFlags_None;
+        ImGui::InputTextWithHint("##quick-open",
+                                 "Type a path",
+                                 &quick_open_query_,
+                                 quick_open_flags);
+        if (navigation_screenshot) {
+            ImGui::Selectable("[C++] src/app.cpp", true);
+            ImGui::Selectable("[C++] src/app_state.cpp");
+            ImGui::Selectable("[md] docs/ui/app-shell.md");
+            ImGui::TextDisabled("3 path matches · Primary+P");
+        } else if (!repository_) {
+            ImGui::TextDisabled("Open a repository to search paths.");
+        } else if (repository_->navigation_loading()) {
+            ImGui::TextDisabled("Indexing repository paths...");
+        } else {
+            for (const auto& match :
+                 rank_paths(repository_->navigation_paths(), quick_open_query_)) {
+                const auto& path = repository_->navigation_paths()[match.index];
+                const auto label = "[" + std::string(navigation_file_kind_name(path.kind)) + "] " +
+                                   path.path.generic_string() + "##quick-" +
+                                   std::to_string(match.index);
+                if (ImGui::Selectable(label.c_str())) {
+                    open_editor(path.path.generic_string(), path.blob_id);
+                    quick_open_query_.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+        }
+        if (ImGui::Button("Close")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (symbol_search_open_) {
+        ImGui::OpenPopup("Symbol search");
+        symbol_search_open_ = false;
+    }
+    if (ImGui::BeginPopupModal("Symbol search", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        editor_visible_ = false;
+        ImGui::SetNextItemWidth(620.0F);
+        ImGui::InputTextWithHint("##symbol-search", "Type a symbol", &symbol_search_query_);
+        if (!repository_) {
+            ImGui::TextDisabled("Open a repository to search libliquid symbol records.");
+        } else if (repository_->navigation_loading()) {
+            ImGui::TextDisabled("Indexing symbol records...");
+        } else {
+            for (const auto& match :
+                 rank_symbols(repository_->navigation_symbols(), symbol_search_query_)) {
+                const auto& symbol = repository_->navigation_symbols()[match.index];
+                const auto label = symbol.name + " — " + symbol.path.generic_string() + ":" +
+                                   std::to_string(symbol.range.start_line + 1) + "##symbol-" +
+                                   std::to_string(match.index);
+                if (ImGui::Selectable(label.c_str())) {
+                    open_navigation_location(
+                        {symbol.path, symbol.range.start_line, symbol.range.start_column});
+                    symbol_search_query_.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+        }
+        if (ImGui::Button("Close")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (open_recent_open_) {
+        ImGui::OpenPopup("Open recent");
+        open_recent_open_ = false;
+    }
+    if (ImGui::BeginPopupModal("Open recent", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        editor_visible_ = false;
+        if (navigation_history_.recent().empty()) {
+            ImGui::TextDisabled("No recently opened paths.");
+        }
+        for (std::size_t index = 0; index < navigation_history_.recent().size(); ++index) {
+            const auto& location = navigation_history_.recent()[index];
+            const auto label = location.path.generic_string() + ":" +
+                               std::to_string(location.line + 1) + "##recent-" +
+                               std::to_string(index);
+            if (ImGui::Selectable(label.c_str())) {
+                open_navigation_location(location);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        if (ImGui::Button("Close")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void App::draw_repository_action_popup() {
+    if (repository_move_open_) {
+        ImGui::OpenPopup("Move or rename path");
+        repository_move_open_ = false;
+    }
+    if (ImGui::BeginPopupModal("Move or rename path", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        editor_visible_ = false;
+        ImGui::Text("Source: %s", repository_action_source_.c_str());
+        ImGui::SetNextItemWidth(520.0F);
+        ImGui::InputText("Destination", &repository_action_target_);
+        ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
+                             repository_->mutation_running());
+        if (ImGui::Button("Apply")) {
+            repository_->request_move(repository_action_source_, repository_action_target_);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (repository_new_file_open_) {
+        ImGui::OpenPopup("New file");
+        repository_new_file_open_ = false;
+    }
+    if (ImGui::BeginPopupModal("New file", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        editor_visible_ = false;
+        ImGui::SetNextItemWidth(520.0F);
+        ImGui::InputText("Path", &repository_action_target_);
+        ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
+                             repository_->mutation_running());
+        if (ImGui::Button("Create")) {
+            repository_->request_new_file(repository_action_target_);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void App::draw_navigation_results() {
+    if (!navigation_results_open_) {
+        return;
+    }
+    editor_visible_ = false;
+    auto open = true;
+    if (ImGui::Begin(navigation_results_title_.c_str(), &open)) {
+        const auto draw_symbol = [this](const NavigationSymbol& symbol, std::string_view prefix) {
+            const auto label =
+                std::string(prefix) + symbol.name + " — " + symbol.path.generic_string() + ":" +
+                std::to_string(symbol.range.start_line + 1) + "##nav-result-" + symbol.id +
+                symbol.path.generic_string() + std::to_string(symbol.range.start_byte);
+            if (ImGui::Selectable(label.c_str())) {
+                open_navigation_location(
+                    {symbol.path, symbol.range.start_line, symbol.range.start_column});
+            }
+        };
+        if (!navigation_results_.empty()) {
+            for (const auto& symbol : navigation_results_) {
+                draw_symbol(symbol, symbol.definition ? "Definition  " : "Reference   ");
+            }
+        } else {
+            ImGui::TextUnformatted("Callers");
+            for (const auto& symbol : navigation_hierarchy_.callers) {
+                draw_symbol(symbol, "");
+            }
+            if (navigation_hierarchy_.callers.empty()) {
+                ImGui::TextDisabled("No indexed callers.");
+            }
+            ImGui::Separator();
+            ImGui::TextUnformatted("Callees");
+            for (const auto& symbol : navigation_hierarchy_.callees) {
+                draw_symbol(symbol, "");
+            }
+            if (navigation_hierarchy_.callees.empty()) {
+                ImGui::TextDisabled("No indexed callees.");
+            }
+        }
+    }
+    ImGui::End();
+    if (!open) {
+        navigation_results_open_ = false;
     }
 }
 
@@ -2582,6 +3088,12 @@ void App::draw_command_palette() {
             ImGui::CloseCurrentPopup();
         }
     };
+    for (const auto& navigation : navigation_commands()) {
+        const auto label =
+            std::string(navigation.name) + " (" + std::string(navigation.default_binding) + ")";
+        command(label.c_str(),
+                [this, action = navigation.action] { invoke_navigation_action(action); });
+    }
     for (const auto& descriptor : standard_panel_descriptors()) {
         const auto show = "Panels: Show " + std::string(descriptor.title);
         command(show.c_str(), [this, id = descriptor.id] {
@@ -2952,7 +3464,34 @@ void App::draw_plugin_panels() {
 void App::draw_editor() {
     const auto path = std::string(editor_->display_path());
     const auto graph_snapshot = editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
-    ImGui::Text("%s%s", path.c_str(), editor_->dirty() ? " *" : "");
+    auto symbol_name = std::optional<std::string_view>{};
+    if (const auto* symbol = navigation_symbol_at_cursor()) {
+        symbol_name = symbol->name;
+    } else if (screenshot_mode()) {
+        symbol_name = "greeting";
+    }
+    const auto path_breadcrumbs = breadcrumbs(path, symbol_name);
+    if (breadcrumb_focus_requested_) {
+        ImGui::SetKeyboardFocusHere();
+        breadcrumb_focus_requested_ = false;
+    }
+    for (std::size_t index = 0; index < path_breadcrumbs.size(); ++index) {
+        const auto& breadcrumb = path_breadcrumbs[index];
+        const auto label = breadcrumb.label + "##breadcrumb-" + std::to_string(index);
+        if (ImGui::SmallButton(label.c_str()) && !breadcrumb.symbol &&
+            breadcrumb.path == std::filesystem::path(path)) {
+            editor_focused_ = true;
+        }
+        if (index + 1 < path_breadcrumbs.size()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled(">");
+            ImGui::SameLine();
+        }
+    }
+    if (editor_->dirty()) {
+        ImGui::SameLine();
+        ImGui::TextUnformatted("*");
+    }
     ImGui::SameLine();
     if (review_diff_open_) {
         ImGui::TextDisabled("read-only text diff");
@@ -3451,19 +3990,19 @@ void App::draw_panel(PanelId id) {
         if (screenshot_mode()) {
             ImGui::TextDisabled("orama/liquify");
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-            if (ImGui::TreeNode("src")) {
-                ImGui::Selectable("app.cpp", true);
-                ImGui::Selectable("app_state.cpp");
-                ImGui::Selectable("editor_buffer.cpp");
+            if (ImGui::TreeNode("[dir] src  [offline]")) {
+                ImGui::Selectable("[C++] app.cpp  [modified]", true);
+                ImGui::Selectable("[C++] app_state.cpp  [in change]");
+                ImGui::Selectable("[C++] editor_buffer.cpp");
                 ImGui::TreePop();
             }
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-            if (ImGui::TreeNode("docs")) {
-                ImGui::Selectable("ui");
+            if (ImGui::TreeNode("[dir] docs  [not here]")) {
+                ImGui::Selectable("[dir] ui  [conflicted]");
                 ImGui::TreePop();
             }
-            ImGui::Selectable("CMakeLists.txt");
-            ImGui::Selectable("README.md");
+            ImGui::Selectable("[cmake] CMakeLists.txt  [online only]");
+            ImGui::Selectable("[md] README.md");
         } else if (repository_) {
             draw_repository_tree();
         } else {
@@ -3471,6 +4010,13 @@ void App::draw_panel(PanelId id) {
         }
         break;
     case PanelId::search:
+        if (ImGui::Button("Quick open", ImVec2(-1.0F, 0.0F))) {
+            invoke_navigation_action(NavigationAction::quick_open);
+        }
+        if (ImGui::Button("Symbol search", ImVec2(-1.0F, 0.0F))) {
+            invoke_navigation_action(NavigationAction::symbol_search);
+        }
+        ImGui::Separator();
         ImGui::InputTextWithHint("##repository-search", "Search this repository", &sidebar_search_);
         ImGui::InputTextWithHint("##repository-replace", "Replace with", &replace_query_);
         ImGui::Checkbox("Regular expression", &find_options_.regular_expression);
@@ -3513,6 +4059,26 @@ void App::draw_panel(PanelId id) {
                              hit.column == 0 ? 0 : static_cast<std::size_t>(hit.column - 1)});
                         ensure_cursor_visible();
                     }
+                }
+            }
+        }
+        ImGui::Separator();
+        ImGui::TextUnformatted("Symbols");
+        ImGui::InputTextWithHint(
+            "##repository-symbol-filter", "Filter symbols", &symbol_search_query_);
+        if (!repository_) {
+            ImGui::TextDisabled("Open a repository to search symbols.");
+        } else if (repository_->navigation_loading()) {
+            ImGui::TextDisabled("Indexing libliquid symbol records...");
+        } else {
+            for (const auto& match :
+                 rank_symbols(repository_->navigation_symbols(), symbol_search_query_, 12)) {
+                const auto& symbol = repository_->navigation_symbols()[match.index];
+                const auto label = symbol.name + "  " + symbol.path.generic_string() + "##side-" +
+                                   std::to_string(match.index);
+                if (ImGui::Selectable(label.c_str())) {
+                    open_navigation_location(
+                        {symbol.path, symbol.range.start_line, symbol.range.start_column});
                 }
             }
         }
@@ -3892,6 +4458,9 @@ void App::draw_contents() {
 
     draw_floating_panels();
     draw_command_palette();
+    draw_navigation_popups();
+    draw_repository_action_popup();
+    draw_navigation_results();
     draw_review_comment_popup();
     draw_structural_editing();
 }
@@ -3995,6 +4564,9 @@ void App::render_editor() {
 }
 
 void App::frame() {
+    if (repository_) {
+        repository_->poll();
+    }
     poll_editor_graph();
     poll_review();
     poll_plugins();
@@ -4005,6 +4577,9 @@ void App::frame() {
     update_window_title();
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
+    if (screenshot_mode()) {
+        ImGui::GetIO().DeltaTime = 1.0F;
+    }
     ImGui::NewFrame();
     editor_visible_ = false;
 
@@ -4154,6 +4729,27 @@ int App::run() {
                     break;
                 case menu_shrink_selection:
                     shrink_structural_selection();
+                    break;
+                case menu_quick_open:
+                    invoke_navigation_action(NavigationAction::quick_open);
+                    break;
+                case menu_symbol_search:
+                    invoke_navigation_action(NavigationAction::symbol_search);
+                    break;
+                case menu_references:
+                    invoke_navigation_action(NavigationAction::find_references);
+                    break;
+                case menu_call_hierarchy:
+                    invoke_navigation_action(NavigationAction::call_hierarchy);
+                    break;
+                case menu_open_recent:
+                    invoke_navigation_action(NavigationAction::open_recent);
+                    break;
+                case menu_back:
+                    invoke_navigation_action(NavigationAction::back);
+                    break;
+                case menu_forward:
+                    invoke_navigation_action(NavigationAction::forward);
                     break;
                 default:
                     break;

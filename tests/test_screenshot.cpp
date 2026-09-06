@@ -61,7 +61,15 @@ TEST(Screenshot, EditorViewShowsSearchGutterAndBothThemes) {
 TEST(Screenshot, RegistryIncludesPanelSystemInBothThemes) {
     EXPECT_NE(find_screenshot_state("panels-light"), nullptr);
     EXPECT_NE(find_screenshot_state("panels-dark"), nullptr);
-    EXPECT_EQ(screenshot_states().size(), 22U);
+    EXPECT_EQ(screenshot_states().size(), 24U);
+}
+
+TEST(Screenshot, NavigationRendersQuickOpenAndAnnotatedTree) {
+    const auto image = render_state("navigation-light");
+    EXPECT_TRUE(
+        test::region_contains_color(image, {320, 365, 650, 30}, {237, 245, 255, 255}, 1, 10'000));
+    EXPECT_TRUE(
+        test::region_contains_color(image, {88, 92, 224, 24}, {225, 230, 237, 255}, 1, 1'000));
 }
 
 } // namespace

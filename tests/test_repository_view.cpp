@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "../src/repository_view.hpp"
+#include "liquid/frontend.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
 
@@ -46,6 +47,20 @@ auto bytes(std::string_view value) -> std::vector<std::byte> {
     const auto characters = std::span(value.data(), value.size());
     const auto source = std::as_bytes(characters);
     return {source.begin(), source.end()};
+}
+
+void wait_for_navigation(liquify::RepositoryView& view) {
+    while (view.navigation_loading()) {
+        view.poll();
+        std::this_thread::yield();
+    }
+}
+
+void wait_for_mutation(liquify::RepositoryView& view) {
+    while (view.mutation_running()) {
+        view.poll();
+        std::this_thread::yield();
+    }
 }
 
 TEST(RepositoryView, OpensFixtureCreatedByPinnedLiquid) {
@@ -108,6 +123,89 @@ TEST(RepositoryView, ReportsLiquidErrorForUnreadableRepository) {
     const auto view = liquify::RepositoryView::open(location.path());
     EXPECT_TRUE(view.entries().empty());
     EXPECT_EQ(view.error(), "not-a-liquid-digest: unknown digest algorithm");
+}
+
+TEST(RepositoryView, IndexesPathsSymbolsAndChangeStatesOffTheRenderThread) {
+    TemporaryDirectory location;
+    auto created = liquid::runtime::block_on(liquid::repository::create(location.path()));
+    ASSERT_TRUE(created) << created.error().message;
+
+    auto repository = std::move(*created);
+    ASSERT_TRUE(liquid::runtime::block_on(repository.write("README.md", bytes("baseline"))));
+    ASSERT_TRUE(liquid::runtime::block_on(repository.cut("baseline")));
+    ASSERT_TRUE(
+        liquid::runtime::block_on(repository.write("src/render.cpp", bytes("void render() {}"))));
+    auto root = liquid::runtime::block_on(repository.root());
+    ASSERT_TRUE(root) << root.error().message;
+    const auto src = std::ranges::find(root->entries, "src", &liquid::tree_entry::name);
+    ASSERT_NE(src, root->entries.end());
+    auto source_tree = liquid::runtime::block_on(repository.tree(src->ref));
+    ASSERT_TRUE(source_tree) << source_tree.error().message;
+    const auto source =
+        std::ranges::find(source_tree->entries, "render.cpp", &liquid::tree_entry::name);
+    ASSERT_NE(source, source_tree->entries.end());
+    auto record = liquid::symbol_record{
+        .subject = source->id,
+        .language = "c++",
+        .origin = liquid::symbol_origin::compiler,
+        .grammar = "test",
+        .occurrences = {{"render-id",
+                         "render",
+                         liquid::symbol_kind::function,
+                         liquid::symbol_role::definition,
+                         {{5, 0, 5}, {11, 0, 11}},
+                         {},
+                         {}}},
+    };
+    ASSERT_TRUE(liquid::runtime::block_on(repository.store_symbols(std::move(record))));
+    ASSERT_TRUE(liquid::runtime::block_on(repository.cut("render change")));
+    ASSERT_TRUE(liquid::runtime::block_on(repository.write("README.md", bytes("modified"))));
+    ASSERT_TRUE(repository.status());
+    ASSERT_EQ(repository.status()->pending_drips, 1U);
+    auto pending_drips = liquid::runtime::block_on(repository.drips());
+    ASSERT_TRUE(pending_drips) << pending_drips.error().message;
+    ASSERT_FALSE(pending_drips->empty());
+    ASSERT_FALSE(pending_drips->back().ops.empty());
+    ASSERT_EQ(pending_drips->back().ops.front().path, "README.md");
+    repository = liquid::repository{};
+
+    auto view = liquify::RepositoryView::open(location.path());
+    ASSERT_TRUE(view.error().empty()) << view.error();
+    wait_for_navigation(view);
+    ASSERT_TRUE(view.navigation_error().empty()) << view.navigation_error();
+
+    const auto* readme = view.metadata("README.md");
+    ASSERT_NE(readme, nullptr);
+    EXPECT_EQ(readme->kind, liquify::NavigationFileKind::markdown);
+    EXPECT_EQ(readme->change, liquify::NavigationChangeState::modified);
+    const auto* render = view.metadata("src/render.cpp");
+    ASSERT_NE(render, nullptr);
+    EXPECT_EQ(render->kind, liquify::NavigationFileKind::cpp_source);
+    EXPECT_EQ(render->change, liquify::NavigationChangeState::in_change);
+    ASSERT_EQ(view.navigation_symbols().size(), 1U);
+    EXPECT_EQ(view.navigation_symbols()[0].name, "render");
+    EXPECT_TRUE(view.navigation_symbols()[0].definition);
+}
+
+TEST(RepositoryView, ContextMutationsRefreshTheTreeAndNavigationIndex) {
+    TemporaryDirectory location;
+    auto created = liquid::runtime::block_on(liquid::repository::create(location.path()));
+    ASSERT_TRUE(created) << created.error().message;
+    ASSERT_TRUE(liquid::runtime::block_on(created->write("before.txt", bytes("before"))));
+
+    auto view = liquify::RepositoryView::open(location.path());
+    wait_for_navigation(view);
+    view.request_move("before.txt", "after.txt");
+    wait_for_mutation(view);
+    wait_for_navigation(view);
+    EXPECT_NE(view.metadata("after.txt"), nullptr);
+    EXPECT_EQ(view.metadata("before.txt"), nullptr);
+
+    view.request_new_file("notes/new.txt");
+    wait_for_mutation(view);
+    wait_for_navigation(view);
+    EXPECT_NE(view.metadata("notes/new.txt"), nullptr);
+    EXPECT_EQ(view.mutation_status(), "created notes/new.txt");
 }
 
 } // namespace

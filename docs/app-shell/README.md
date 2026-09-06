@@ -9,7 +9,9 @@ registry for metadata, commands, placement, focus, state and notifications
 unit that includes SDL3 or ImGui.** `RepositoryView` (`src/repository_view.hpp`,
 `src/repository_view.cpp`) is plain C++ and holds either the root `liquid::tree_entry` values or
 an error string. Nested directory trees are requested from libliquid only when their row is
-expanded, then published to the panel after the worker completes.
+expanded, then published to the panel after the worker completes. Its second worker walks the
+full tree and libliquid symbol records for navigation, drive and change annotations without
+blocking the render thread ([`../ui/navigation.md`](../ui/navigation.md)).
 
 **Decision.** liquify is a native, cross-platform IDE from the start (Steve, 2026-09-02), not an
 editor extension. The repository panel is its first Phase 1 client. The editor buffer is a retained
@@ -79,8 +81,11 @@ git add modules/liquid && git commit -m "Bump liquid to <sha>: <why>"
 ```
 
 **Tests.** Repository and editor fixtures are created at test time by the pinned liquid, then
-written and reopened through the same public API. A separate corrupt-marker case proves that the
-liquid error reaches the view and that `--print-tree` exits non-zero with that message. Buffer and
+written and reopened through the same public API. Repository cases also verify path and symbol
+indexes, change annotations, and context mutations; pure navigation cases verify matcher order,
+graph relationships, breadcrumbs, location history, and command bindings. A separate
+corrupt-marker case proves that the liquid error reaches the view and that `--print-tree` exits
+non-zero with that message. Buffer and
 layout-cache unit tests cover editing, UTF-8 cursor movement, save, reuse and line-local
 invalidation. No repository fixture bytes are committed.
 Plugin tests cover configured global and repository paths; a bad module remains a visible load

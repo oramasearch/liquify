@@ -2,8 +2,13 @@
 
 `test_repository_view.cpp` creates its readable repository through the pinned `liquid::repository`
 API, writes root and nested entries, and proves that `RepositoryView` reads the same on-disk format
-it links while leaving nested trees unloaded until requested. It also creates a corrupt
-`LIQUID_REPO` marker and checks that the liquid error reaches the view.
+it links while leaving nested trees unloaded until requested. It also checks the complete path and
+symbol indexes, modified and recorded-change annotations, context move and new-file refresh, then
+creates a corrupt `LIQUID_REPO` marker and checks that the liquid error reaches the view.
+
+`test_navigation.cpp` covers file-kind labels, deterministic fuzzy path and definition ordering,
+identifier lookup, definition-first references, caller and callee relationships, breadcrumbs,
+back/forward/recent location history, and unique default bindings for every navigation action.
 
 `test_print_tree_error.cmake` runs the built `liquify --print-tree` command against a corrupt
 repository created in the build tree. It requires a non-zero exit and the same liquid error on
@@ -67,8 +72,8 @@ cases cover a normal streamed answer, a refusal stop reason, and a connection en
 It also proves a proposed replacement leaves repository content unchanged until acceptance, then
 creates exactly one drip and a local assisted-edit record without recording the prompt.
 
-`test_screenshot.cpp` renders the deterministic C++ editor, complete editor view, diagnostics and
-panel-system states through SDL's dummy video driver and software renderer, decodes their PNG
-output and uses
-`ui_pixel_assert.hpp` to prove that a highlighted line, panel title and count badge occupy their
-expected regions.
+`test_screenshot.cpp` renders the deterministic C++ editor, complete editor view, diagnostics,
+panel-system, and navigation states through SDL's dummy video driver and software renderer,
+decodes their PNG output and uses `ui_pixel_assert.hpp` to prove that a highlighted line, themed
+gutter, panel title, count badge, annotated tree, and Quick Open selection occupy their expected
+regions.

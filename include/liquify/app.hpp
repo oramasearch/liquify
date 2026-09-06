@@ -11,6 +11,7 @@
 
 #include "liquify/app_state.hpp"
 #include "liquify/editor_model.hpp"
+#include "liquify/navigation.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
 #include "liquify/structural_edit.hpp"
@@ -72,12 +73,23 @@ private:
     void draw_split_editor();
     void draw_repository_tree();
     void draw_repository_entries(std::string_view directory);
+    void draw_navigation_popups();
+    void draw_repository_action_popup();
+    void draw_navigation_results();
     void draw_review_panel();
     void draw_review_comment_popup();
     void draw_editor();
     void draw_build_panel(const EditorGraphSnapshot& snapshot);
     void render_editor();
-    void open_editor(std::string path, std::string blob_id);
+    void open_editor(std::string path, std::string blob_id, bool record_history = true);
+    void open_navigation_location(const NavigationLocation& location, bool record_history = true);
+    void navigate_history(bool forward);
+    void invoke_navigation_action(NavigationAction action);
+    void show_symbol_references();
+    void show_call_hierarchy();
+    void reveal_repository_path();
+    [[nodiscard]] auto current_navigation_location() const -> std::optional<NavigationLocation>;
+    [[nodiscard]] auto navigation_symbol_at_cursor() const -> const NavigationSymbol*;
     void open_review(std::string id);
     void show_review_diff(const ReviewSnapshot& review);
     void navigate_hunk(bool forward);
@@ -166,6 +178,13 @@ private:
     std::vector<TextMatch> buffer_matches_;
     std::size_t find_match_index_{};
     std::optional<TextPosition> column_selection_anchor_;
+    std::string quick_open_query_;
+    std::string symbol_search_query_;
+    std::string repository_selection_;
+    std::string repository_selection_blob_;
+    std::string repository_action_source_;
+    std::string repository_action_target_;
+    std::string navigation_results_title_;
     std::string window_title_;
     std::optional<AssistantAction> pending_assistant_action_;
     std::string pending_assistant_prompt_;
@@ -179,6 +198,10 @@ private:
     std::string review_comment_body_;
     std::vector<PluginLoadFailure> plugin_failures_;
     std::vector<PluginPanelSnapshot> plugin_panels_;
+    std::vector<NavigationSymbol> navigation_results_;
+    CallHierarchy navigation_hierarchy_;
+    NavigationHistory navigation_history_;
+    std::optional<NavigationLocation> pending_definition_origin_;
     std::optional<std::chrono::steady_clock::time_point> typing_started_;
     std::chrono::steady_clock::time_point next_status_refresh_{};
     std::chrono::steady_clock::time_point next_review_refresh_{};
@@ -211,6 +234,14 @@ private:
     bool initialized_ = false;
     bool command_palette_open_{};
     bool find_open_{};
+    bool quick_open_open_{};
+    bool symbol_search_open_{};
+    bool open_recent_open_{};
+    bool navigation_results_open_{};
+    bool repository_move_open_{};
+    bool repository_new_file_open_{};
+    bool breadcrumb_focus_requested_{};
+    bool repository_focused_{};
     bool context_preview_open_{};
     bool review_diff_open_{};
     bool review_comment_popup_open_{};

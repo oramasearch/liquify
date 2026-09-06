@@ -16,7 +16,12 @@ over one pinned libliquid.
 thread, renders its root entries, loads nested trees on expansion, and opens blobs into an
 editable in-memory buffer; save writes through libliquid as a drip. Unreadable repositories show
 liquid's error and make `--print-tree` exit non-zero; `liquify` with no path retains the hello
-state. The standard input mode is non-modal and a modal command/insert mode is available.
+state. A background index classifies every path, adds libliquid drive and repository change
+annotations, and retains libliquid symbol records. Quick Open, Symbol Search, definitions,
+references, available call relationships, breadcrumbs, recent locations, back/forward, and the
+repository context actions share one registered default-key command set
+([`../ui/navigation.md`](../ui/navigation.md)). The standard input mode is non-modal and a modal
+command/insert mode is available.
 `--smoke` scrolls and edits a 50,000-line buffer, reports frame and typing latency, and exits 0
 ([`../app-shell/README.md`](../app-shell/README.md), [`../editor/README.md`](../editor/README.md)).
 The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
@@ -28,8 +33,8 @@ sizes and complete panel layouts persist per repository and can be reset; one st
 reports build, saved-drip sync, repository hydration and assistant progress. macOS installs native
 command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.md),
 [`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
-`--screenshot` renders the fixed welcome, repository, C++ editor and panel registry in light and
-dark through a headless software renderer; the committed image set and pixel tests are described
+`--screenshot` renders the fixed welcome, repository, navigation, C++ editor, and panel registry
+in light and dark through a headless software renderer; the committed image set and pixel tests are described
 in [`../ui/README.md`](../ui/README.md).
 
 The editor supports multi-cursor and rectangular edits, repository-configured indentation,

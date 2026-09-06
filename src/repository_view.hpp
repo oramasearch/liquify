@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "liquid/object.hpp"
+#include "liquify/navigation.hpp"
 
 namespace liquify {
 
@@ -29,8 +30,17 @@ public:
     [[nodiscard]] auto loaded_directory_count() const -> std::size_t;
     [[nodiscard]] auto directory_error_count() const -> std::size_t;
     [[nodiscard]] auto open_time() const -> std::chrono::duration<double, std::milli>;
+    [[nodiscard]] auto navigation_paths() const -> std::span<const NavigationPath>;
+    [[nodiscard]] auto navigation_symbols() const -> std::span<const NavigationSymbol>;
+    [[nodiscard]] auto navigation_loading() const -> bool;
+    [[nodiscard]] auto navigation_error() const -> std::string_view;
+    [[nodiscard]] auto metadata(std::string_view path) const -> const NavigationPath*;
+    [[nodiscard]] auto mutation_running() const -> bool;
+    [[nodiscard]] auto mutation_status() const -> std::string_view;
 
     void request_directory(std::string path, liquid::digest id);
+    void request_move(std::string from, std::string to);
+    void request_new_file(std::string path);
     void poll();
 
 private:
@@ -46,15 +56,49 @@ private:
         bool loaded{};
     };
 
+    struct NavigationLoad {
+        std::vector<NavigationPath> paths;
+        std::vector<NavigationSymbol> symbols;
+        std::string error;
+    };
+
+    struct MutationLoad {
+        std::vector<liquid::tree_entry> entries;
+        std::vector<std::string> modified;
+        std::vector<std::string> in_change;
+        std::vector<std::string> conflicted;
+        std::string error;
+        std::string status;
+    };
+
     [[nodiscard]] static RepositoryView load(std::filesystem::path path);
     [[nodiscard]] static DirectoryLoad load_directory(std::filesystem::path repository_path,
                                                       liquid::digest id);
+    [[nodiscard]] static NavigationLoad load_navigation(std::filesystem::path repository_path,
+                                                        std::vector<std::string> modified,
+                                                        std::vector<std::string> in_change,
+                                                        std::vector<std::string> conflicted);
+    [[nodiscard]] static MutationLoad
+    move_path(std::filesystem::path repository_path, std::string from, std::string to);
+    [[nodiscard]] static MutationLoad create_file(std::filesystem::path repository_path,
+                                                  std::string path);
+    void start_navigation_load();
 
     std::filesystem::path repository_path_;
     std::vector<liquid::tree_entry> entries_;
     std::map<std::string, DirectoryState, std::less<>> directories_;
+    std::vector<NavigationPath> navigation_paths_;
+    std::vector<NavigationSymbol> navigation_symbols_;
+    std::vector<std::string> modified_paths_;
+    std::vector<std::string> in_change_paths_;
+    std::vector<std::string> conflicted_paths_;
+    std::optional<std::future<NavigationLoad>> navigation_pending_;
+    std::optional<std::future<MutationLoad>> mutation_pending_;
     std::string error_;
+    std::string navigation_error_;
+    std::string mutation_status_;
     std::chrono::duration<double, std::milli> open_time_{};
+    bool navigation_reload_pending_{};
 };
 
 [[nodiscard]] auto node_kind_name(liquid::node_kind kind) -> std::string_view;
