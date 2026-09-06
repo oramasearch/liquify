@@ -15,16 +15,17 @@ through libliquid as a drip; C and C++ buffers add graph-backed diagnostics, nav
 completion, structural editing, and F7, F8 and F9 build, test and deploy through the attached
 daemon. `--lake` adds review in place with cursor-anchored comments, native plugins register
 queries, commands and panels, and the assistant is off by default and opens no connection while
-off. Pull-request CI packages macOS, Windows and Linux installers and `v*` tags publish them;
+off. `design/` carries the stamped Orama DTCG snapshot, generated native roles and embedded IBM
+Plex assets. Pull-request CI packages macOS, Windows and Linux installers and `v*` tags publish them;
 [`docs/design/status.md`](docs/design/status.md) lists each area with its page, and the
 specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
 
 ## Build and run
 
-Requirements on macOS: CMake 3.28 or newer, Ninja, Homebrew LLVM (Clang 17 or newer), OpenSSL and
-zlib (`brew install llvm cmake ninja openssl@3`). liquid, the assistant transport and tree-sitter
-are submodules; SDL3, Dear ImGui and GoogleTest are fetched by CMake, and SDL is linked static so
-the result is one binary.
+Requirements on macOS: CMake 3.28 or newer, Ninja, Homebrew LLVM (Clang 17 or newer), Node.js,
+OpenSSL and zlib (`brew install llvm cmake ninja node openssl@3`). liquid, the assistant transport
+and tree-sitter are submodules; SDL3, Dear ImGui and GoogleTest are fetched by CMake, and SDL is
+linked static so the result is one binary.
 
 ```sh
 git clone --recurse-submodules git@github.com:oramasearch/liquify.git
@@ -52,6 +53,8 @@ its page there in the same change; this file is only the front door. The most us
 - [`docs/design/status.md`](docs/design/status.md): what the source tree does, by area.
 - [`docs/app-shell/README.md`](docs/app-shell/README.md): the SDL3 and ImGui shell, the CLI, and
   how the liquid pin is bumped.
+- [`docs/ui/design-system.md`](docs/ui/design-system.md): the stamped Orama tokens, generated
+  native constants, IBM Plex assets, and token gate.
 - [`docs/editor/README.md`](docs/editor/README.md): the buffer, the retained text layer and the
   smoke measurements.
 - [`docs/editor/interactive-analysis.md`](docs/editor/interactive-analysis.md),

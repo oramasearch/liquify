@@ -1,0 +1,14 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "duration": {
+    "$type": "duration",
+    "fast": { "$value": "120ms" },
+    "standard": { "$value": "160ms" },
+    "deliberate": { "$value": "240ms" }
+  },
+  "cubicBezier": {
+    "$type": "cubicBezier",
+    "standard": { "$value": [0.2, 0, 0.38, 0.9] },
+    "exit": { "$value": [0.4, 0.14, 1, 1] }
+  }
+}

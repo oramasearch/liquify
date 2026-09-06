@@ -1,0 +1,19 @@
+{
+  "$comment": "IBM Plex TrueType assets embedded in the native font atlas.",
+  "repo": "https://github.com/IBM/plex",
+  "commit": "bf260093582f04622aacc1e9f9ca604d7ccd0c42",
+  "files": [
+    {
+      "path": "IBMPlexMono-Regular.ttf",
+      "sha256": "7c6fbddca4b700be918f5f6183d9bd4464fa427fe435f0b480d77fe2bb8c5a43"
+    },
+    {
+      "path": "IBMPlexSans-Regular.ttf",
+      "sha256": "975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5"
+    },
+    {
+      "path": "OFL.txt",
+      "sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
+    }
+  ]
+}

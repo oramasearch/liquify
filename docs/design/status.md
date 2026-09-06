@@ -19,6 +19,9 @@ liquid's error and make `--print-tree` exit non-zero; `liquify` with no path ret
 state. The standard input mode is non-modal and a modal command/insert mode is available.
 `--smoke` scrolls and edits a 50,000-line buffer, reports frame and typing latency, and exits 0
 ([`../app-shell/README.md`](../app-shell/README.md), [`../editor/README.md`](../editor/README.md)).
+The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
+its gate verifies source hashes and rejects stale generated output
+([`../ui/design-system.md`](../ui/design-system.md)).
 
 ## The liquid pin
 

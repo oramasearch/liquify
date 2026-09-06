@@ -1,0 +1,30 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "fontFamily": {
+    "$type": "fontFamily",
+    "sans": { "$value": ["IBM Plex Sans", "Helvetica Neue", "Arial", "sans-serif"] },
+    "mono": { "$value": ["IBM Plex Mono", "SFMono-Regular", "Consolas", "monospace"] }
+  },
+  "fontSize": {
+    "$type": "dimension",
+    "11": { "$value": "11px" },
+    "12": { "$value": "12px" },
+    "14": { "$value": "14px" },
+    "16": { "$value": "16px" },
+    "20": { "$value": "20px" },
+    "24": { "$value": "24px" },
+    "32": { "$value": "32px" }
+  },
+  "fontWeight": {
+    "$type": "number",
+    "regular": { "$value": 400 },
+    "medium": { "$value": 500 },
+    "semibold": { "$value": 600 }
+  },
+  "lineHeight": {
+    "$type": "number",
+    "tight": { "$value": 1.25 },
+    "ui": { "$value": 1.43 },
+    "copy": { "$value": 1.5 }
+  }
+}

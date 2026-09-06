@@ -14,3 +14,4 @@ instructions; both point here. The product specification is `oramasearch/liquid`
 | [`packaging/`](packaging/) | [`README.md`](packaging/README.md) — release artifacts, signing and notarization credentials, verification, digest records, and the later liquid projection switch; [`macos.md`](packaging/macos.md) — self-contained bundle dependency rules, auditing, relocation tests, and inspection |
 | [`plugins/`](plugins/) | [`README.md`](plugins/README.md) — the shared native ABI, configured and static loading, graph queries, palette commands, CBOR panel models, fault handling, versioning, and sample plugin |
 | [`stub-trees/`](stub-trees/) | [`README.md`](stub-trees/README.md) — graph-backed C/C++ declaration stubs, resolver, parser pins, verification, and liquid-tree benchmark |
+| [`ui/`](ui/) | [`design-system.md`](ui/design-system.md) — stamped Orama tokens, generated native constants, embedded IBM Plex assets, and the token gate |

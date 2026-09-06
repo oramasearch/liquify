@@ -9,6 +9,7 @@ libliquid's public API.
 | `include/liquify/app.hpp`, `src/app.cpp` | the application shell: window, renderer, ImGui context, frame loop. **The one TU that includes SDL3 or ImGui.** |
 | `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory text buffer, input modes, and libliquid blob read/write path |
 | `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
+| `design/`, `include/liquify/design_tokens.generated.hpp` | stamped Orama DTCG and IBM Plex inputs, reviewed role map, dependency-free compiler, generated native palettes and type scale, and tamper/staleness gate |
 | `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: reads the root on a worker, loads nested trees on expansion, and exposes entries, open latency, or an error |
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |

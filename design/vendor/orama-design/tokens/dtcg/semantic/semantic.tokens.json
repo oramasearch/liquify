@@ -1,0 +1,74 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "$extensions": {
+    "orama.modes": ["Light", "Dark"]
+  },
+  "surface": {
+    "$type": "color",
+    "canvas": { "$value": "{color.neutral.canvas}", "$extensions": { "orama.dark": "{color.night.100}" } },
+    "default": { "$value": "{color.white}", "$extensions": { "orama.dark": "{color.night.90}" } },
+    "layer": { "$value": "{color.gray.10}", "$extensions": { "orama.dark": "{color.night.80}" } },
+    "layer-hover": { "$value": "{color.neutral.hover-light}", "$extensions": { "orama.dark": "{color.night.70}" } },
+    "selected": { "$value": "{color.blue.10}", "$extensions": { "orama.dark": "{color.blue.90}" } },
+    "selection": { "$value": "{color.gray.20}", "$extensions": { "orama.dark": "{color.night.60}" } },
+    "overlay": { "$value": "{color.white}", "$extensions": { "orama.dark": "{color.night.80}" } }
+  },
+  "text": {
+    "$type": "color",
+    "primary": { "$value": "{color.gray.100}", "$extensions": { "orama.dark": "{color.night.10}" } },
+    "secondary": { "$value": "{color.gray.70}", "$extensions": { "orama.dark": "{color.night.20}" } },
+    "tertiary": { "$value": "{color.gray.60}", "$extensions": { "orama.dark": "{color.night.30}" } },
+    "disabled": { "$value": "{color.gray.40}", "$extensions": { "orama.dark": "{color.night.40}" } },
+    "inverse": { "$value": "{color.white}", "$extensions": { "orama.dark": "{color.night.100}" } },
+    "on-action": { "$value": "{color.white}", "$extensions": { "orama.dark": "{color.white}" } },
+    "on-danger": { "$value": "{color.white}", "$extensions": { "orama.dark": "{color.night.100}" } }
+  },
+  "border": {
+    "$type": "color",
+    "subtle": { "$value": "{color.gray.20}", "$extensions": { "orama.dark": "{color.night.60}" } },
+    "strong": { "$value": "{color.gray.50}", "$extensions": { "orama.dark": "{color.night.50}" } },
+    "interactive": { "$value": "{color.blue.60}", "$extensions": { "orama.dark": "{color.blue.50}" } }
+  },
+  "action": {
+    "$type": "color",
+    "default": { "$value": "{color.blue.60}", "$extensions": { "orama.dark": "{color.blue.50}" } },
+    "hover": { "$value": "{color.blue.70}", "$extensions": { "orama.dark": "{color.blue.40}" } },
+    "pressed": { "$value": "{color.blue.80}", "$extensions": { "orama.dark": "{color.blue.55}" } },
+    "filled": { "$value": "{color.blue.60}", "$extensions": { "orama.dark": "{color.blue.60}" } },
+    "filled-hover": { "$value": "{color.blue.70}", "$extensions": { "orama.dark": "{color.blue.70}" } },
+    "filled-pressed": { "$value": "{color.blue.80}", "$extensions": { "orama.dark": "{color.blue.80}" } },
+    "soft": { "$value": "{color.blue.10}", "$extensions": { "orama.dark": "{color.blue.90}" } },
+    "focus": { "$value": "{color.blue.60}", "$extensions": { "orama.dark": "{color.blue.40}" } }
+  },
+  "status": {
+    "$type": "color",
+    "success": { "$value": "{color.green.60}", "$extensions": { "orama.dark": "{color.green.30}" } },
+    "success-soft": { "$value": "{color.green.10}", "$extensions": { "orama.dark": "{color.green.90}" } },
+    "indicator-success": { "$value": "{color.green.40}", "$extensions": { "orama.dark": "{color.green.30}" } },
+    "warning": { "$value": "{color.yellow.70}", "$extensions": { "orama.dark": "{color.yellow.30}" } },
+    "warning-soft": { "$value": "{color.yellow.10}", "$extensions": { "orama.dark": "{color.yellow.90}" } },
+    "danger": { "$value": "{color.red.60}", "$extensions": { "orama.dark": "{color.red.45}" } },
+    "danger-hover": { "$value": "{color.red.80}", "$extensions": { "orama.dark": "{color.red.30}" } },
+    "danger-soft": { "$value": "{color.red.10}", "$extensions": { "orama.dark": "{color.red.100}" } },
+    "indicator-danger": { "$value": "{color.red.40}", "$extensions": { "orama.dark": "{color.red.45}" } },
+    "info": { "$value": "{color.blue.60}", "$extensions": { "orama.dark": "{color.blue.50}" } },
+    "info-soft": { "$value": "{color.blue.10}", "$extensions": { "orama.dark": "{color.blue.90}" } }
+  },
+  "change": {
+    "$type": "color",
+    "design": { "$value": "{color.violet.70}", "$extensions": { "orama.dark": "{color.violet.40}" } },
+    "design-soft": { "$value": "{color.violet.10}", "$extensions": { "orama.dark": "{color.violet.90}" } }
+  },
+  "context": {
+    "$type": "color",
+    "ai": { "$value": "{color.violet.70}", "$extensions": { "orama.dark": "{color.violet.40}" } },
+    "ai-soft": { "$value": "{color.violet.10}", "$extensions": { "orama.dark": "{color.violet.90}" } }
+  },
+  "identity": {
+    "$type": "color",
+    "reader": { "$value": "{color.violet.60}", "$extensions": { "orama.dark": "{color.violet.40}" } },
+    "reader-soft": { "$value": "{color.violet.20}", "$extensions": { "orama.dark": "{color.violet.90}" } },
+    "brand-surface": { "$value": "{color.blue.60}", "$extensions": { "orama.dark": "{color.blue.60}" } },
+    "on-brand": { "$value": "{color.white}", "$extensions": { "orama.dark": "{color.white}" } }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "shadow": {
+    "$type": "shadow",
+    "popover": {
+      "$value": {
+        "color": "#00000029",
+        "offsetX": "0px",
+        "offsetY": "4px",
+        "blur": "16px",
+        "spread": "0px"
+      }
+    },
+    "dialog": {
+      "$value": {
+        "color": "#0000003d",
+        "offsetX": "0px",
+        "offsetY": "16px",
+        "blur": "48px",
+        "spread": "0px"
+      }
+    }
+  },
+  "zIndex": {
+    "$type": "number",
+    "base": { "$value": 0 },
+    "sticky": { "$value": 20 },
+    "popover": { "$value": 40 },
+    "dialog": { "$value": 60 },
+    "toast": { "$value": 80 }
+  }
+}

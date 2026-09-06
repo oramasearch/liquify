@@ -3,6 +3,7 @@
 ## Requirements
 
 - CMake 3.28 or newer and Ninja.
+- Node.js for the design-token gate when tests are enabled.
 - Clang 17 or newer. On macOS `CMakeLists.txt` selects Homebrew LLVM
   (`/opt/homebrew/opt/llvm/bin/clang++`) and the Xcode SDK before `project()`; on Linux it takes
   the newest `clang++-NN` on the path. `-DLIQUIFY_USE_SYSTEM_COMPILER=ON` or an explicit
@@ -40,7 +41,7 @@ ctest --test-dir build --output-on-failure
 
 CTest holds the GoogleTest cases discovered from `liquify-tests` (buffer, text layout, repository
 view, stub trees, interactive analysis, editor graph, structural edits, review, assistant, plugins
-and version) plus `liquify-print-tree-unreadable`, which proves that an unreadable repository
+and version), the design-token gate, plus `liquify-print-tree-unreadable`, which proves that an unreadable repository
 makes `--print-tree` exit non-zero with liquid's error. `version` and the unit tests run without a
 display; `--smoke` needs one.
 

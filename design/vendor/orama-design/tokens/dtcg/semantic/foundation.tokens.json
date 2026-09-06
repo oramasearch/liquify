@@ -1,0 +1,39 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "spacing": {
+    "$type": "dimension",
+    "component": {
+      "padding-inline": { "$value": "{space.3}" },
+      "padding-block": { "$value": "{space.2}" },
+      "gap": { "$value": "{space.2}" }
+    },
+    "layout": {
+      "gap": { "$value": "{space.6}" },
+      "section": { "$value": "{space.8}" }
+    },
+    "page": {
+      "gutter": { "$value": "{space.6}" },
+      "gutter-compact": { "$value": "{space.4}" }
+    }
+  },
+  "shape": {
+    "$type": "dimension",
+    "control-radius": { "$value": "{radius.xs}" },
+    "panel-radius": { "$value": "{radius.sm}" },
+    "overlay-radius": { "$value": "{radius.md}" },
+    "border-width": { "$value": "{border.default}" }
+  },
+  "motion": {
+    "duration": {
+      "$type": "duration",
+      "fast": { "$value": "{duration.fast}" },
+      "standard": { "$value": "{duration.standard}" },
+      "deliberate": { "$value": "{duration.deliberate}" }
+    },
+    "easing": {
+      "$type": "cubicBezier",
+      "standard": { "$value": "{cubicBezier.standard}" },
+      "exit": { "$value": "{cubicBezier.exit}" }
+    }
+  }
+}
