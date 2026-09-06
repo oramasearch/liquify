@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 #include <limits>
 #include <span>
 #include <string>
@@ -17,11 +18,16 @@
 #include "misc/cpp/imgui_stdlib.h"
 #include <SDL3/SDL.h>
 
+#if defined(__APPLE__) && defined(__OBJC__)
+#import <AppKit/AppKit.h>
+#endif
+
 #include "editor_buffer.hpp"
 #include "liquid/hash.hpp"
 #include "liquid/liquid.hpp"
 #include "liquify/ai_config.hpp"
 #include "liquify/assistant.hpp"
+#include "liquify/design_tokens.generated.hpp"
 #include "liquify/editor_graph.hpp"
 #include "liquify/screenshot.hpp"
 #include "liquify/stub_tree.hpp"
@@ -29,10 +35,132 @@
 #include "repository_view.hpp"
 #include "text_layout.hpp"
 
+#if defined(__APPLE__) && defined(__OBJC__)
+enum NativeMenuCommand : std::int32_t {
+    menu_save = 1,
+    menu_palette,
+    menu_sidebar,
+    menu_panel,
+    menu_split,
+    menu_theme,
+    menu_definition,
+    menu_hover,
+    menu_build,
+    menu_tests,
+    menu_deploy,
+    menu_next_hunk,
+    menu_previous_hunk,
+    menu_next_comment,
+    menu_expand_selection,
+    menu_shrink_selection,
+};
+
+@interface LiquifyMenuTarget : NSObject
+- (void)performLiquifyCommand:(id)sender;
+@end
+
+@implementation LiquifyMenuTarget
+- (void)performLiquifyCommand:(id)sender {
+    auto event = SDL_Event{};
+    event.type = SDL_EVENT_USER;
+    event.user.code = static_cast<Sint32>([sender tag]);
+    SDL_PushEvent(&event);
+}
+@end
+
+struct NativeMenuEntry {
+    NSString* title;
+    NSString* key;
+    NSEventModifierFlags modifiers;
+    NativeMenuCommand command;
+};
+
+static LiquifyMenuTarget* native_menu_target = nullptr;
+
+static void add_native_menu(NSMenu* main_menu,
+                            NSString* title,
+                            std::initializer_list<NativeMenuEntry> entries) {
+    auto* root = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+    auto* menu = [[NSMenu alloc] initWithTitle:title];
+    for (const auto& entry : entries) {
+        auto* item = [[NSMenuItem alloc] initWithTitle:entry.title
+                                                action:@selector(performLiquifyCommand:)
+                                         keyEquivalent:entry.key];
+        [item setKeyEquivalentModifierMask:entry.modifiers];
+        [item setTag:entry.command];
+        [item setTarget:native_menu_target];
+        [menu addItem:item];
+    }
+    [root setSubmenu:menu];
+    [main_menu addItem:root];
+}
+
+static void install_native_menu() {
+    native_menu_target = [[LiquifyMenuTarget alloc] init];
+    auto* main_menu = [[NSMenu alloc] initWithTitle:@"liquify"];
+    auto* application_root =
+        [[NSMenuItem alloc] initWithTitle:@"liquify" action:nil keyEquivalent:@""];
+    auto* application_menu = [[NSMenu alloc] initWithTitle:@"liquify"];
+    auto* about = [[NSMenuItem alloc] initWithTitle:@"About liquify"
+                                             action:@selector(orderFrontStandardAboutPanel:)
+                                      keyEquivalent:@""];
+    [application_menu addItem:about];
+    [application_menu addItem:[NSMenuItem separatorItem]];
+    auto* quit = [[NSMenuItem alloc] initWithTitle:@"Quit liquify"
+                                            action:@selector(terminate:)
+                                     keyEquivalent:@"q"];
+    [application_menu addItem:quit];
+    [application_root setSubmenu:application_menu];
+    [main_menu addItem:application_root];
+
+    constexpr auto command = NSEventModifierFlagCommand;
+    constexpr auto command_shift = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+    add_native_menu(main_menu, @"File", {{@"Save", @"s", command, menu_save}});
+    add_native_menu(main_menu, @"Edit", {{@"Command Palette", @"p", command_shift, menu_palette}});
+    add_native_menu(main_menu,
+                    @"Selection",
+                    {{@"Expand Selection", @"", 0, menu_expand_selection},
+                     {@"Shrink Selection", @"", 0, menu_shrink_selection}});
+    add_native_menu(main_menu,
+                    @"View",
+                    {{@"Toggle Sidebar", @"b", command, menu_sidebar},
+                     {@"Toggle Bottom Panel", @"j", command, menu_panel},
+                     {@"Toggle Editor Split", @"\\", command, menu_split},
+                     {@"Cycle Color Theme", @"t", command_shift, menu_theme}});
+    add_native_menu(
+        main_menu,
+        @"Go",
+        {{@"Go to Definition", @"", 0, menu_definition}, {@"Show Hover", @"", 0, menu_hover}});
+    add_native_menu(main_menu,
+                    @"Run",
+                    {{@"Build", @"", 0, menu_build},
+                     {@"Test", @"", 0, menu_tests},
+                     {@"Deploy", @"", 0, menu_deploy}});
+    add_native_menu(main_menu,
+                    @"Review",
+                    {{@"Next Hunk", @"", 0, menu_next_hunk},
+                     {@"Previous Hunk", @"", 0, menu_previous_hunk},
+                     {@"Next Comment", @"", 0, menu_next_comment}});
+    [NSApp setMainMenu:main_menu];
+}
+
+#endif
+
 namespace liquify {
 namespace {
 
-constexpr float editor_padding = 8.0F;
+constexpr float editor_padding = design::space2;
+constexpr float activity_bar_width = design::control_lg;
+constexpr float divider_size = design::space1;
+constexpr float status_bar_height = design::space6;
+
+auto imgui_color(design::Rgba color) -> ImVec4 {
+    return {color.red, color.green, color.blue, color.alpha};
+}
+
+auto packed_color(design::Rgba color) -> ImU32 {
+    return ImGui::ColorConvertFloat4ToU32(imgui_color(color));
+}
 
 auto smoke_text() -> std::string {
     constexpr std::size_t line_count = 50'000;
@@ -47,6 +175,25 @@ auto smoke_text() -> std::string {
         }
     }
     return text;
+}
+
+auto screenshot_text() -> std::string {
+    return R"cpp(#include <print>
+#include <string_view>
+
+namespace liquify {
+
+auto greeting(std::string_view repository) -> std::string {
+    return "Open " + std::string(repository) + " through libliquid";
+}
+
+} // namespace liquify
+
+int main() {
+    std::println("{}", liquify::greeting("orama/liquify"));
+    return 0;
+}
+)cpp";
 }
 
 auto percentile(std::vector<double> values, double fraction) -> double {
@@ -142,6 +289,8 @@ public:
     auto render(SDL_Renderer* renderer,
                 EditorBuffer& buffer,
                 TextLayoutCache& layouts,
+                ImFont& font,
+                design::Rgba text_color,
                 std::span<const Diagnostic> diagnostics,
                 float x,
                 float y,
@@ -153,9 +302,13 @@ public:
                 float horizontal_scroll,
                 std::span<const ReviewDiffLine> review_lines,
                 std::span<const std::size_t> comment_lines) -> std::size_t {
-        if (cell_width_ != cell_width || font_size_ != ImGui::GetFontSize()) {
+        const auto color_changed =
+            text_color_.red != text_color.red || text_color_.green != text_color.green ||
+            text_color_.blue != text_color.blue || text_color_.alpha != text_color.alpha;
+        if (cell_width_ != cell_width || font_size_ != font.FontSize || color_changed) {
             cell_width_ = cell_width;
-            font_size_ = ImGui::GetFontSize();
+            font_size_ = font.FontSize;
+            text_color_ = text_color;
             for (auto& line : lines_) {
                 line.reset();
             }
@@ -163,8 +316,14 @@ public:
 
         const auto available_lines = static_cast<std::size_t>(std::ceil(height / line_height)) + 1;
         const auto last_line = std::min(buffer.line_count(), first_line + available_lines);
-        draw_review_backgrounds(
-            renderer, review_lines, x, y, width, first_line, last_line, line_height);
+        draw_review_backgrounds(renderer,
+                                review_lines,
+                                x,
+                                y,
+                                width,
+                                first_line,
+                                last_line,
+                                line_height);
         draw_selection(renderer,
                        buffer,
                        layouts,
@@ -178,14 +337,13 @@ public:
                        horizontal_scroll);
 
         auto* texture = reinterpret_cast<SDL_Texture*>(ImGui::GetIO().Fonts->TexID);
-        auto* font = ImGui::GetFont();
         frame_vertices_.clear();
         frame_indices_.clear();
         for (std::size_t line = first_line; line < last_line; ++line) {
             const auto& layout = layouts.line(line, buffer.line(line));
             auto& retained = lines_.at(line);
             if (!retained || retained->generation != layout.generation) {
-                retained = build_geometry(layout, *font, cell_width);
+                retained = build_geometry(layout, font, cell_width, text_color);
             }
             append_line(*retained,
                         x + editor_padding - horizontal_scroll,
@@ -231,13 +389,15 @@ private:
         std::vector<int> indices;
     };
 
-    static auto build_geometry(const LineLayout& layout, ImFont& font, float cell_width)
-        -> LineGeometry {
+    static auto build_geometry(const LineLayout& layout,
+                               ImFont& font,
+                               float cell_width,
+                               design::Rgba text_color) -> LineGeometry {
         LineGeometry geometry;
         geometry.generation = layout.generation;
         geometry.vertices.reserve(layout.glyphs.size() * 4);
         geometry.indices.reserve(layout.glyphs.size() * 6);
-        const SDL_FColor color{0.10F, 0.12F, 0.14F, 1.0F};
+        const SDL_FColor color{text_color.red, text_color.green, text_color.blue, text_color.alpha};
         for (const auto& placed : layout.glyphs) {
             if (placed.codepoint == '\t') {
                 continue;
@@ -358,8 +518,10 @@ private:
             } else {
                 continue;
             }
-            const SDL_FRect rectangle{
-                x, y + static_cast<float>(line - first_line) * line_height, width, line_height};
+            const SDL_FRect rectangle{x,
+                                      y + static_cast<float>(line - first_line) * line_height,
+                                      width,
+                                      line_height};
             SDL_RenderFillRect(renderer, &rectangle);
         }
     }
@@ -442,10 +604,16 @@ private:
     std::vector<int> frame_indices_;
     float cell_width_{};
     float font_size_{};
+    design::Rgba text_color_{};
 };
 
 App::App(AppOptions options) : options_(std::move(options)) {
     if (options_.repository_path) {
+        auto loaded_state = load_app_shell_state(*options_.repository_path);
+        shell_state_ = loaded_state.state;
+        if (!loaded_state.error.empty()) {
+            editor_status_ = std::move(loaded_state.error);
+        }
         repository_ =
             std::make_unique<RepositoryView>(RepositoryView::open(*options_.repository_path));
         if (repository_->error().empty()) {
@@ -499,6 +667,39 @@ App::App(AppOptions options) : options_(std::move(options)) {
         text_layer_->reset(editor_->line_count());
         editor_focused_ = true;
     }
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    if (screenshot != nullptr) {
+        options_.forced_theme = screenshot->theme == ScreenshotTheme::dark
+                                    ? ThemePreference::dark
+                                    : ThemePreference::light;
+    }
+    if (screenshot != nullptr && screenshot->view != ScreenshotView::welcome) {
+        editor_ = std::make_unique<EditorBuffer>(
+            EditorBuffer::from_text("screenshot-main", "src/app.cpp", screenshot_text()));
+        layouts_ = std::make_unique<TextLayoutCache>();
+        layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
+        text_layer_ = std::make_unique<RetainedTextLayer>();
+        text_layer_->reset(editor_->line_count());
+        editor_focused_ = true;
+        shell_state_.sidebar = screenshot->view == ScreenshotView::review
+                                   ? SidebarSection::review
+                                   : SidebarSection::repository;
+        shell_state_.bottom_panel_visible = screenshot->view == ScreenshotView::diagnostics ||
+                                            screenshot->view == ScreenshotView::build ||
+                                            screenshot->view == ScreenshotView::assistant ||
+                                            screenshot->view == ScreenshotView::plugins;
+        shell_state_.editor_split = screenshot->view == ScreenshotView::editor_cpp;
+        if (screenshot->view == ScreenshotView::build) {
+            shell_state_.bottom_panel = BottomPanelTab::build;
+        } else if (screenshot->view == ScreenshotView::assistant) {
+            shell_state_.bottom_panel = BottomPanelTab::assistant;
+        } else if (screenshot->view == ScreenshotView::plugins) {
+            shell_state_.bottom_panel = BottomPanelTab::plugins;
+        } else {
+            shell_state_.bottom_panel = BottomPanelTab::diagnostics;
+        }
+    }
 }
 
 App::~App() {
@@ -528,8 +729,9 @@ bool App::init() {
     int window_width = static_cast<int>(screenshot_width);
     int window_height = static_cast<int>(screenshot_height);
     SDL_Rect usable{};
-    if (screenshot == nullptr && SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) &&
-        usable.w > 0 && usable.h > 0) {
+    if (screenshot == nullptr &&
+        SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 &&
+        usable.h > 0) {
         window_width = static_cast<int>(usable.w * 0.70F);
         window_height = static_cast<int>(usable.h * 0.70F);
         window_width = std::max(window_width, 900);
@@ -555,8 +757,7 @@ bool App::init() {
     }
     SDL_SetRenderVSync(renderer_, screenshot == nullptr ? 1 : 0);
     if (screenshot == nullptr) {
-        const auto* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
-        if (mode != nullptr) {
+        if (const auto* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay())) {
             display_refresh_hz_ = mode->refresh_rate;
         }
     }
@@ -566,20 +767,236 @@ bool App::init() {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.IniFilename = nullptr;
+    display_scale_ =
+        screenshot == nullptr ? std::max(SDL_GetWindowDisplayScale(window_), 1.0F) : 1.0F;
     if (screenshot != nullptr) {
         io.DisplayFramebufferScale = ImVec2(1.0F, 1.0F);
         SDL_SetRenderScale(renderer_, 1.0F, 1.0F);
     }
-    if (screenshot != nullptr && screenshot->theme == ScreenshotTheme::dark) {
-        ImGui::StyleColorsDark();
-    } else {
-        ImGui::StyleColorsLight();
-    }
+    load_font_atlas(display_scale_);
+    apply_theme();
     ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
     ImGui_ImplSDLRenderer3_Init(renderer_);
     SDL_StartTextInput(window_);
+#if defined(__APPLE__) && defined(__OBJC__)
+    if (!screenshot_mode()) {
+        install_native_menu();
+    }
+#endif
     initialized_ = true;
     return true;
+}
+
+bool App::screenshot_mode() const {
+    return options_.screenshot_state.has_value();
+}
+
+bool App::dark_theme_active() const {
+    const auto preference = options_.forced_theme.value_or(shell_state_.theme);
+    if (preference == ThemePreference::dark) {
+        return true;
+    }
+    if (preference == ThemePreference::light) {
+        return false;
+    }
+    return SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
+}
+
+void App::load_font_atlas(float scale) {
+    auto& io = ImGui::GetIO();
+    io.Fonts->Clear();
+    auto add_font = [&](const auto& bytes, float size, std::string_view name) {
+        auto config = ImFontConfig{};
+        config.FontDataOwnedByAtlas = false;
+        config.RasterizerDensity = scale;
+        std::snprintf(config.Name,
+                      sizeof(config.Name),
+                      "%.*s %.0f",
+                      static_cast<int>(name.size()),
+                      name.data(),
+                      size);
+        return io.Fonts->AddFontFromMemoryTTF(const_cast<std::uint8_t*>(bytes.data()),
+                                              static_cast<int>(bytes.size()),
+                                              size,
+                                              &config);
+    };
+    for (const auto size : {design::text11,
+                            design::text12,
+                            design::text14,
+                            design::text16,
+                            design::text20,
+                            design::text24,
+                            design::text32}) {
+        auto* font = add_font(design::ibm_plex_sans_regular, size, "IBM Plex Sans");
+        if (size == design::text14) {
+            ui_font_index_ = io.Fonts->Fonts.Size - 1;
+            io.FontDefault = font;
+        }
+    }
+    for (const auto size : {design::text12, design::text14, design::text16}) {
+        add_font(design::ibm_plex_mono_regular, size, "IBM Plex Mono");
+        if (size == design::text14) {
+            editor_font_index_ = io.Fonts->Fonts.Size - 1;
+        }
+    }
+}
+
+void App::apply_theme() {
+    const auto dark = dark_theme_active();
+    const auto& palette = dark ? design::dark_palette : design::light_palette;
+    auto& style = ImGui::GetStyle();
+    style = ImGuiStyle{};
+    style.WindowPadding = {design::space3, design::space3};
+    style.FramePadding = {design::space3, design::space2};
+    style.CellPadding = {design::space2, design::space1};
+    style.ItemSpacing = {design::space2, design::space2};
+    style.ItemInnerSpacing = {design::space1, design::space1};
+    style.ScrollbarSize = design::space3;
+    style.GrabMinSize = design::space2;
+    style.WindowRounding = design::panel_radius;
+    style.ChildRounding = design::panel_radius;
+    style.PopupRounding = design::overlay_radius;
+    style.FrameRounding = design::control_radius;
+    style.GrabRounding = design::control_radius;
+    style.TabRounding = design::control_radius;
+    style.WindowBorderSize = design::border_width;
+    style.ChildBorderSize = design::border_width;
+    style.PopupBorderSize = design::border_width;
+    style.FrameBorderSize = 0.0F;
+    style.TabBorderSize = 0.0F;
+
+    auto* colors = style.Colors;
+    colors[ImGuiCol_Text] = imgui_color(palette.text_primary);
+    colors[ImGuiCol_TextDisabled] = imgui_color(palette.text_disabled);
+    colors[ImGuiCol_WindowBg] = imgui_color(palette.canvas);
+    colors[ImGuiCol_ChildBg] = imgui_color(palette.surface);
+    colors[ImGuiCol_PopupBg] = imgui_color(palette.overlay);
+    colors[ImGuiCol_Border] = imgui_color(palette.border_subtle);
+    colors[ImGuiCol_BorderShadow] = {0.0F, 0.0F, 0.0F, 0.0F};
+    colors[ImGuiCol_FrameBg] = imgui_color(palette.layer);
+    colors[ImGuiCol_FrameBgHovered] = imgui_color(palette.layer_hover);
+    colors[ImGuiCol_FrameBgActive] = imgui_color(palette.selected);
+    colors[ImGuiCol_TitleBg] = imgui_color(palette.surface);
+    colors[ImGuiCol_TitleBgActive] = imgui_color(palette.surface);
+    colors[ImGuiCol_MenuBarBg] = imgui_color(palette.surface);
+    colors[ImGuiCol_ScrollbarBg] = imgui_color(palette.layer);
+    colors[ImGuiCol_ScrollbarGrab] = imgui_color(palette.border_strong);
+    colors[ImGuiCol_ScrollbarGrabHovered] = imgui_color(palette.action_hover);
+    colors[ImGuiCol_ScrollbarGrabActive] = imgui_color(palette.action_pressed);
+    colors[ImGuiCol_CheckMark] = imgui_color(palette.action);
+    colors[ImGuiCol_SliderGrab] = imgui_color(palette.action);
+    colors[ImGuiCol_SliderGrabActive] = imgui_color(palette.action_pressed);
+    colors[ImGuiCol_Button] = imgui_color(palette.layer);
+    colors[ImGuiCol_ButtonHovered] = imgui_color(palette.layer_hover);
+    colors[ImGuiCol_ButtonActive] = imgui_color(palette.selected);
+    colors[ImGuiCol_Header] = imgui_color(palette.selected);
+    colors[ImGuiCol_HeaderHovered] = imgui_color(palette.layer_hover);
+    colors[ImGuiCol_HeaderActive] = imgui_color(palette.action_soft);
+    colors[ImGuiCol_Separator] = imgui_color(palette.border_subtle);
+    colors[ImGuiCol_SeparatorHovered] = imgui_color(palette.border_interactive);
+    colors[ImGuiCol_SeparatorActive] = imgui_color(palette.action);
+    colors[ImGuiCol_ResizeGrip] = imgui_color(palette.border_subtle);
+    colors[ImGuiCol_ResizeGripHovered] = imgui_color(palette.action_hover);
+    colors[ImGuiCol_ResizeGripActive] = imgui_color(palette.action_pressed);
+    colors[ImGuiCol_Tab] = imgui_color(palette.layer);
+    colors[ImGuiCol_TabHovered] = imgui_color(palette.layer_hover);
+    colors[ImGuiCol_TabSelected] = imgui_color(palette.surface);
+    colors[ImGuiCol_TabDimmed] = imgui_color(palette.layer);
+    colors[ImGuiCol_TabDimmedSelected] = imgui_color(palette.surface);
+    colors[ImGuiCol_TextSelectedBg] = imgui_color(palette.selection);
+    colors[ImGuiCol_NavCursor] = imgui_color(palette.focus);
+    applied_dark_theme_ = dark;
+}
+
+void App::cycle_theme() {
+    if (shell_state_.theme == ThemePreference::system) {
+        shell_state_.theme = ThemePreference::light;
+    } else if (shell_state_.theme == ThemePreference::light) {
+        shell_state_.theme = ThemePreference::dark;
+    } else {
+        shell_state_.theme = ThemePreference::system;
+    }
+    apply_theme();
+    persist_shell_state();
+}
+
+void App::persist_shell_state() {
+    if (!options_.repository_path || screenshot_mode()) {
+        return;
+    }
+    const auto error = save_app_shell_state(*options_.repository_path, shell_state_);
+    if (!error.empty()) {
+        editor_status_ = error;
+    }
+}
+
+void App::update_window_title() {
+    auto repository_name = std::string{"Welcome"};
+    if (options_.repository_path) {
+        repository_name = options_.repository_path->filename().string();
+        if (repository_name.empty()) {
+            repository_name = options_.repository_path->string();
+        }
+    } else if (screenshot_mode()) {
+        repository_name = "liquify";
+    }
+    auto change_name = std::string{"Working change"};
+    if (review_) {
+        const auto snapshot = review_->snapshot();
+        if (snapshot.review.selected) {
+            change_name = "Change " + snapshot.review.selected->id;
+        }
+    } else if (screenshot_mode()) {
+        change_name = "Change #31";
+    }
+    const auto title = repository_name + " — " + change_name + " — liquify";
+    if (title != window_title_) {
+        SDL_SetWindowTitle(window_, title.c_str());
+        window_title_ = title;
+    }
+}
+
+void App::capture_screenshot() {
+    if (screenshot_written_ || screenshot_failed_ || !options_.screenshot_output) {
+        return;
+    }
+    auto* pixels = SDL_RenderReadPixels(renderer_, nullptr);
+    if (pixels == nullptr) {
+        std::fprintf(stderr, "liquify: screenshot readback failed: %s\n", SDL_GetError());
+        screenshot_failed_ = true;
+        return;
+    }
+    auto* rgba = SDL_ConvertSurface(pixels, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(pixels);
+    if (rgba == nullptr) {
+        std::fprintf(stderr, "liquify: screenshot conversion failed: %s\n", SDL_GetError());
+        screenshot_failed_ = true;
+        return;
+    }
+    const auto width = rgba->w;
+    const auto height = rgba->h;
+    auto image = ScreenshotImage{};
+    image.width = static_cast<std::uint32_t>(width);
+    image.height = static_cast<std::uint32_t>(height);
+    image.rgba.reserve(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+    const auto* source = static_cast<const std::uint8_t*>(rgba->pixels);
+    for (int row = 0; row < height; ++row) {
+        const auto offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(rgba->pitch);
+        image.rgba.insert(image.rgba.end(), source + offset, source + offset + width * 4);
+    }
+    SDL_DestroySurface(rgba);
+    const auto written = write_png(*options_.screenshot_output, image);
+    if (!written) {
+        std::fprintf(stderr, "liquify: screenshot failed: %s\n", written.error().c_str());
+        screenshot_failed_ = true;
+        return;
+    }
+    screenshot_written_ = true;
+    std::printf("screenshot: state=%s size=%dx%d out=%s\n",
+                options_.screenshot_state->c_str(),
+                width,
+                height,
+                options_.screenshot_output->string().c_str());
 }
 
 void App::open_editor(std::string path, std::string blob_id) {
@@ -610,8 +1027,9 @@ void App::open_editor(std::string path, std::string blob_id) {
     }
     analysis_text_ = editor_->text();
     analysis_buffer_open_ = true;
-    editor_graph_->open_buffer(
-        std::filesystem::path(editor_->display_path()), *language, analysis_text_);
+    editor_graph_->open_buffer(std::filesystem::path(editor_->display_path()),
+                               *language,
+                               analysis_text_);
     editor_graph_->request_diagnostics(std::filesystem::path(editor_->display_path()));
 }
 
@@ -1071,8 +1489,9 @@ void App::accept_assistant_edit() {
     if (editor_->dirty()) {
         return;
     }
-    const auto recorded = record_assisted_edit(
-        *options_.repository_path, std::filesystem::path(editor_->display_path()), *accepted);
+    const auto recorded = record_assisted_edit(*options_.repository_path,
+                                               std::filesystem::path(editor_->display_path()),
+                                               *accepted);
     if (!recorded) {
         editor_status_ = recorded.error().message;
     } else {
@@ -1104,8 +1523,9 @@ void App::toggle_assistant() {
     ai_context_bytes_ = config->context_bytes;
     auto key = anthropic_api_key();
     const auto secret = key.value;
-    assistant_ = std::make_unique<Assistant>(
-        *config, key.configured, [secret] { return std::make_unique<AnthropicProvider>(secret); });
+    assistant_ = std::make_unique<Assistant>(*config, key.configured, [secret] {
+        return std::make_unique<AnthropicProvider>(secret);
+    });
     editor_status_ = key.configured ? "AI on" : "AI on; key not configured";
 }
 
@@ -1175,10 +1595,11 @@ void App::poll_editor_graph() {
                              " refused=" + std::to_string(refused);
             const auto current_path =
                 editor_ ? std::string(editor_->display_path()) : std::string{};
-            const auto changed_current = std::ranges::any_of(
-                snapshot.structural_result->applied, [&current_path](const auto& item) {
-                    return item.path.generic_string() == current_path;
-                });
+            const auto changed_current =
+                std::ranges::any_of(snapshot.structural_result->applied,
+                                    [&current_path](const auto& item) {
+                                        return item.path.generic_string() == current_path;
+                                    });
             structural_preview_open_ = false;
             structural_preview_.clear();
             if (changed_current) {
@@ -1227,10 +1648,27 @@ void App::handle_text(std::string_view text) {
 }
 
 void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
-    if (!editor_) {
+    const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
+    const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+    if (primary && key == SDLK_B) {
+        shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
+        persist_shell_state();
         return;
     }
-    const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
+    if (primary && key == SDLK_J) {
+        shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
+        persist_shell_state();
+        return;
+    }
+    if (primary && key == SDLK_BACKSLASH) {
+        shell_state_.editor_split = !shell_state_.editor_split;
+        persist_shell_state();
+        return;
+    }
+    if (primary && shift && key == SDLK_T) {
+        cycle_theme();
+        return;
+    }
     if (primary && key == SDLK_P) {
         command_palette_open_ = true;
         return;
@@ -1247,10 +1685,12 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         request_deploy();
         return;
     }
+    if (!editor_) {
+        return;
+    }
     if (!editor_focused_) {
         return;
     }
-    const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
     const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
     if (primary && shift && key == SDLK_P) {
         command_palette_open_ = true;
@@ -1481,8 +1921,6 @@ void App::draw_repository_tree() {
     }
     repository_->poll();
     draw_repository_entries({});
-    ImGui::Separator();
-    draw_review_panel();
 }
 
 void App::draw_review_panel() {
@@ -1561,8 +1999,9 @@ void App::draw_review_comment_popup() {
         return;
     }
     ImGui::TextUnformatted("Comment on the current cursor");
-    ImGui::InputTextMultiline(
-        "##review-comment-body", &review_comment_body_, ImVec2(520.0F, 140.0F));
+    ImGui::InputTextMultiline("##review-comment-body",
+                              &review_comment_body_,
+                              ImVec2(520.0F, 140.0F));
     ImGui::BeginDisabled(review_comment_body_.empty());
     if (ImGui::Button("Post comment")) {
         submit_review_comment();
@@ -1607,8 +2046,9 @@ void App::draw_repository_entries(std::string_view directory) {
                 ImGui::TreePop();
             }
         } else {
-            ImGui::Text(
-                "%s (%s)", entry.name.c_str(), std::string(node_kind_name(entry.kind)).c_str());
+            ImGui::Text("%s (%s)",
+                        entry.name.c_str(),
+                        std::string(node_kind_name(entry.kind)).c_str());
         }
         ImGui::PopID();
     }
@@ -1624,8 +2064,9 @@ void App::draw_assistant() {
     if (ImGui::SmallButton("What will be sent")) {
         request_assistant_context(std::nullopt);
     }
-    ImGui::InputTextWithHint(
-        "##assistant-prompt", "Ask about the selection or current definition", &assistant_prompt_);
+    ImGui::InputTextWithHint("##assistant-prompt",
+                             "Ask about the selection or current definition",
+                             &assistant_prompt_);
     ImGui::BeginDisabled(!snapshot.enabled || snapshot.running);
     if (ImGui::Button("Ask")) {
         request_assistant_context(AssistantAction::ask);
@@ -1647,8 +2088,9 @@ void App::draw_assistant() {
         ImGui::TextUnformatted("Anthropic key: configured");
     }
     if (snapshot.refusal) {
-        ImGui::TextColored(
-            ImVec4(0.65F, 0.30F, 0.05F, 1.0F), "Refusal: %s", snapshot.response.c_str());
+        ImGui::TextColored(ImVec4(0.65F, 0.30F, 0.05F, 1.0F),
+                           "Refusal: %s",
+                           snapshot.response.c_str());
     } else if (!snapshot.response.empty()) {
         ImGui::TextWrapped("%s", snapshot.response.c_str());
     }
@@ -1751,6 +2193,29 @@ void App::draw_command_palette() {
 }
 
 void App::draw_structural_editing() {
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    if (screenshot != nullptr && screenshot->view == ScreenshotView::structural_editing) {
+        const auto center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5F, 0.5F));
+        ImGui::SetNextWindowSize(ImVec2(420.0F, 210.0F), ImGuiCond_Always);
+        if (ImGui::Begin("Structural edit preview",
+                         nullptr,
+                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoSavedSettings)) {
+            ImGui::TextUnformatted("Rename symbol: render_shell to draw_shell");
+            ImGui::Separator();
+            ImGui::TextUnformatted("src/app.cpp");
+            ImGui::BulletText("replace function_definition bytes 3812..4059");
+            ImGui::TextDisabled("1 file selected · fingerprint verified");
+            ImGui::Separator();
+            ImGui::Button("Accept selected file");
+            ImGui::SameLine();
+            ImGui::Button("Dismiss");
+        }
+        ImGui::End();
+        return;
+    }
     if (rename_open_) {
         ImGui::OpenPopup("Rename symbol");
         rename_open_ = false;
@@ -1790,7 +2255,9 @@ void App::draw_structural_editing() {
                                 static_cast<std::uint32_t>(selection->end.line),
                                 static_cast<std::uint32_t>(selection->end.byte)};
                 editor_graph_->request_extract_function(
-                    std::filesystem::path(editor_->display_path()), range, structural_name_);
+                    std::filesystem::path(editor_->display_path()),
+                    range,
+                    structural_name_);
                 editor_status_ = "building extract-function preview";
                 ImGui::CloseCurrentPopup();
             }
@@ -1923,8 +2390,10 @@ void App::draw_plugin_panels() {
     for (const auto& failure : plugin_failures_) {
         const auto path =
             failure.path.empty() ? std::string("configuration") : failure.path.generic_string();
-        ImGui::TextColored(
-            ImVec4(0.75F, 0.20F, 0.15F, 1.0F), "%s: %s", path.c_str(), failure.error.c_str());
+        ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
+                           "%s: %s",
+                           path.c_str(),
+                           failure.error.c_str());
     }
     for (const auto& panel : plugin_panels_) {
         const auto panel_name = panel.plugin + "/" + panel.name;
@@ -2001,6 +2470,16 @@ void App::draw_editor() {
             request_completion();
         }
     }
+    ImGui::SameLine();
+    if (ImGui::Button(shell_state_.editor_split ? "Unsplit" : "Split")) {
+        shell_state_.editor_split = !shell_state_.editor_split;
+        persist_shell_state();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(shell_state_.bottom_panel_visible ? "Hide panel" : "Show panel")) {
+        shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
+        persist_shell_state();
+    }
     if (!editor_status_.empty()) {
         ImGui::SameLine();
         ImGui::TextUnformatted(editor_status_.c_str());
@@ -2013,8 +2492,9 @@ void App::draw_editor() {
         const auto status = editor_graph_status(graph_snapshot);
         ImGui::TextWrapped("%s", status.c_str());
         if (!graph_snapshot.query_error.empty()) {
-            ImGui::TextColored(
-                ImVec4(0.75F, 0.12F, 0.12F, 1.0F), "%s", graph_snapshot.query_error.c_str());
+            ImGui::TextColored(ImVec4(0.75F, 0.12F, 0.12F, 1.0F),
+                               "%s",
+                               graph_snapshot.query_error.c_str());
         }
         if (graph_snapshot.hover) {
             ImGui::TextWrapped("%s", graph_snapshot.hover->signature.c_str());
@@ -2025,18 +2505,20 @@ void App::draw_editor() {
     }
 
     const auto available = ImGui::GetContentRegionAvail();
-    const auto panel_height =
-        editor_graph_ ? std::max(0.0F, std::min(320.0F, available.y * 0.45F)) : 0.0F;
-    const auto size =
-        ImVec2(std::max(available.x, 1.0F), std::max(available.y - panel_height, 1.0F));
+    const auto size = ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F));
+    auto* editor_font = ImGui::GetIO().Fonts->Fonts[editor_font_index_];
+    ImGui::PushFont(editor_font);
     const auto position = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton("editor-surface", size, ImGuiButtonFlags_MouseButtonLeft);
     const auto hovered = ImGui::IsItemHovered();
     auto* draw_list = ImGui::GetWindowDrawList();
-    draw_list->AddRectFilled(
-        position, ImVec2(position.x + size.x, position.y + size.y), IM_COL32(250, 250, 248, 255));
-    draw_list->AddRect(
-        position, ImVec2(position.x + size.x, position.y + size.y), IM_COL32(205, 208, 212, 255));
+    const auto& palette = applied_dark_theme_ ? design::dark_palette : design::light_palette;
+    draw_list->AddRectFilled(position,
+                             ImVec2(position.x + size.x, position.y + size.y),
+                             packed_color(palette.surface));
+    draw_list->AddRect(position,
+                       ImVec2(position.x + size.x, position.y + size.y),
+                       packed_color(palette.border_subtle));
 
     editor_x_ = position.x;
     editor_y_ = position.y;
@@ -2060,21 +2542,26 @@ void App::draw_editor() {
         }
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             editor_focused_ = true;
-            position_cursor(
-                ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y, ImGui::GetIO().KeyShift);
+            position_cursor(ImGui::GetIO().MousePos.x,
+                            ImGui::GetIO().MousePos.y,
+                            ImGui::GetIO().KeyShift);
         } else if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
             position_cursor(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y, true);
         }
     }
+    ImGui::PopFont();
+}
 
-    if (!editor_graph_) {
+void App::draw_diagnostics_panel(const EditorGraphSnapshot& graph_snapshot) {
+    if (screenshot_mode()) {
+        const auto& palette = applied_dark_theme_ ? design::dark_palette : design::light_palette;
+        ImGui::TextUnformatted("Diagnostics (3)");
+        ImGui::TextColored(imgui_color(palette.danger),
+                           "error: expected ';' after return statement");
+        ImGui::TextUnformatted("warning: unused result from save_app_shell_state");
+        ImGui::TextDisabled("info: 47 graph queries are current");
         return;
     }
-    ImGui::BeginChild("diagnostics-panel",
-                      ImVec2(std::max(available.x, 1.0F), panel_height),
-                      ImGuiChildFlags_Border);
-    draw_assistant();
-    ImGui::Separator();
     auto visible_diagnostics = graph_snapshot.diagnostics;
     visible_diagnostics.insert(visible_diagnostics.end(),
                                graph_snapshot.build_diagnostics.begin(),
@@ -2116,9 +2603,6 @@ void App::draw_editor() {
             }
         }
     }
-    draw_plugin_panels();
-    ImGui::EndChild();
-    draw_build_panel(graph_snapshot);
 }
 
 void App::draw_build_panel(const EditorGraphSnapshot& snapshot) {
@@ -2127,6 +2611,22 @@ void App::draw_build_panel(const EditorGraphSnapshot& snapshot) {
                       ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F)),
                       ImGuiChildFlags_Border);
     ImGui::TextUnformatted("Build, test and deploy");
+    if (screenshot_mode()) {
+        const auto& palette = applied_dark_theme_ ? design::dark_palette : design::light_palette;
+        ImGui::SameLine();
+        ImGui::TextColored(imgui_color(palette.success), "passed");
+        ImGui::TextUnformatted("configure: hit");
+        ImGui::TextUnformatted("liquify-core: done");
+        ImGui::SameLine();
+        ImGui::TextDisabled("worker local-arm64 · critical");
+        ImGui::TextUnformatted("liquify: done");
+        ImGui::TextDisabled("requires liquify-core");
+        ImGui::Separator();
+        ImGui::TextUnformatted("Tests 49 passed · 0 failed");
+        ImGui::TextDisabled("Deploy: no saved drips pending");
+        ImGui::EndChild();
+        return;
+    }
     if (snapshot.build_running) {
         ImGui::SameLine();
         ImGui::TextDisabled("running");
@@ -2135,8 +2635,9 @@ void App::draw_build_panel(const EditorGraphSnapshot& snapshot) {
         ImGui::TextUnformatted(snapshot.build_result.c_str());
     }
     for (const auto& action : snapshot.build_actions) {
-        ImGui::Text(
-            "%s: %s", action.identity.c_str(), build_action_state_name(action.state).data());
+        ImGui::Text("%s: %s",
+                    action.identity.c_str(),
+                    build_action_state_name(action.state).data());
         if (!action.worker.empty()) {
             ImGui::SameLine();
             ImGui::TextDisabled("worker %s", action.worker.c_str());
@@ -2189,8 +2690,9 @@ void App::draw_build_panel(const EditorGraphSnapshot& snapshot) {
             ImGui::TextUnformatted("Deploying saved drips...");
         }
         if (!snapshot.deploy.error.empty()) {
-            ImGui::TextColored(
-                ImVec4(0.75F, 0.12F, 0.12F, 1.0F), "%s", snapshot.deploy.error.c_str());
+            ImGui::TextColored(ImVec4(0.75F, 0.12F, 0.12F, 1.0F),
+                               "%s",
+                               snapshot.deploy.error.c_str());
         }
         if (!snapshot.deploy.references.empty()) {
             ImGui::Text("Transferred %llu objects, %llu bytes",
@@ -2198,8 +2700,9 @@ void App::draw_build_panel(const EditorGraphSnapshot& snapshot) {
                         static_cast<unsigned long long>(snapshot.deploy.bytes));
         }
         for (const auto& reference : snapshot.deploy.references) {
-            ImGui::Text(
-                "%s: %s", reference.name.c_str(), deploy_outcome_name(reference.outcome).data());
+            ImGui::Text("%s: %s",
+                        reference.name.c_str(),
+                        deploy_outcome_name(reference.outcome).data());
             if (!reference.reason.empty()) {
                 ImGui::SameLine();
                 ImGui::TextDisabled("%s", reference.reason.c_str());
@@ -2209,235 +2712,339 @@ void App::draw_build_panel(const EditorGraphSnapshot& snapshot) {
     ImGui::EndChild();
 }
 
-void App::draw_screenshot_panel(float left, float top, float right, float bottom) {
-    const auto* state = find_screenshot_state(*options_.screenshot_state);
-    const auto dark = state->theme == ScreenshotTheme::dark;
-    const auto foreground = dark ? IM_COL32(224, 228, 234, 255) : IM_COL32(30, 35, 42, 255);
-    const auto muted = dark ? IM_COL32(150, 159, 171, 255) : IM_COL32(99, 108, 120, 255);
-    const auto panel = dark ? IM_COL32(32, 38, 47, 255) : IM_COL32(246, 247, 249, 255);
-    const auto border = dark ? IM_COL32(63, 72, 84, 255) : IM_COL32(210, 215, 222, 255);
-    const auto accent = IM_COL32(95, 82, 214, 255);
-    auto* draw = ImGui::GetWindowDrawList();
-    draw->AddRectFilled({left, top}, {right, bottom}, panel);
-    draw->AddLine({left, top}, {right, top}, border);
-    draw->AddRectFilled({left, top}, {left + 4.0F, bottom}, accent);
-
-    auto title = std::string_view{"Symbols"};
-    auto first = std::string_view{"render_workspace()"};
-    auto second = std::string_view{"ScreenshotState"};
-    auto badge = std::string_view{"2 symbols"};
-    switch (state->view) {
-    case ScreenshotView::diagnostics:
-        title = "Diagnostics";
-        first = "warning  unused result on line 6";
-        second = "info     build graph is current";
-        badge = "2 findings";
-        break;
-    case ScreenshotView::build:
-        title = "Build, test and deploy";
-        first = "compile src/workspace.cpp     passed";
-        second = "link liquify                  passed";
-        badge = "2 actions";
-        break;
-    case ScreenshotView::review:
-        title = "Reviews";
-        first = "PR #38  Screenshot proof and UI tests";
-        second = "1 comment on src/app.cpp:214";
-        badge = "changes requested";
-        break;
-    case ScreenshotView::assistant:
-        title = "Assistant";
-        first = "AI is off. No provider exists.";
-        second = "Context preview is available before sending.";
-        badge = "offline";
-        break;
-    case ScreenshotView::plugins:
-        title = "Plugins";
-        first = "sample/status: Ready";
-        second = "Commands and data-only panels loaded";
-        badge = "1 active";
-        break;
-    case ScreenshotView::structural_editing:
-        title = "Structural edit preview";
-        first = "Rename selected symbol in 2 files";
-        second = "All fingerprints match the current revision";
-        badge = "3 edits";
-        break;
-    default:
-        break;
-    }
-    draw->AddText(
-        {left + 24.0F, top + 20.0F}, foreground, title.data(), title.data() + title.size());
-    const auto title_width = ImGui::CalcTextSize(title.data(), title.data() + title.size()).x;
-    const auto badge_left = left + 36.0F + title_width;
-    const auto badge_width =
-        ImGui::CalcTextSize(badge.data(), badge.data() + badge.size()).x + 16.0F;
-    draw->AddRectFilled(
-        {badge_left, top + 15.0F}, {badge_left + badge_width, top + 38.0F}, accent, 11.0F);
-    draw->AddText({badge_left + 8.0F, top + 20.0F},
-                  IM_COL32_WHITE,
-                  badge.data(),
-                  badge.data() + badge.size());
-    draw->AddText(
-        {left + 24.0F, top + 60.0F}, foreground, first.data(), first.data() + first.size());
-    draw->AddText({left + 24.0F, top + 88.0F}, muted, second.data(), second.data() + second.size());
-}
-
-void App::draw_screenshot_workspace() {
-    const auto* state = find_screenshot_state(*options_.screenshot_state);
-    const auto dark = state->theme == ScreenshotTheme::dark;
-    const auto foreground = dark ? IM_COL32(224, 228, 234, 255) : IM_COL32(30, 35, 42, 255);
-    const auto muted = dark ? IM_COL32(150, 159, 171, 255) : IM_COL32(99, 108, 120, 255);
-    const auto surface = dark ? IM_COL32(25, 30, 37, 255) : IM_COL32(250, 250, 248, 255);
-    const auto sidebar = dark ? IM_COL32(32, 38, 47, 255) : IM_COL32(242, 244, 247, 255);
-    const auto toolbar = dark ? IM_COL32(37, 44, 54, 255) : IM_COL32(255, 255, 255, 255);
-    const auto border = dark ? IM_COL32(63, 72, 84, 255) : IM_COL32(210, 215, 222, 255);
-    const auto highlight = dark ? IM_COL32(59, 67, 117, 255) : IM_COL32(218, 224, 255, 255);
-    const auto accent = IM_COL32(95, 82, 214, 255);
-    const auto origin = ImGui::GetWindowPos();
-    const auto size = ImGui::GetWindowSize();
-    const auto left = origin.x;
-    const auto top = origin.y;
-    const auto right = left + size.x;
-    const auto bottom = top + size.y;
-    constexpr auto header_height = 64.0F;
-    constexpr auto sidebar_width = 240.0F;
-    constexpr auto toolbar_height = 48.0F;
-    constexpr auto panel_height = 232.0F;
-    auto* draw = ImGui::GetWindowDrawList();
-
-    draw->AddRectFilled({left, top}, {right, bottom}, surface);
-    draw->AddRectFilled({left, top}, {right, top + header_height}, toolbar);
-    draw->AddLine({left, top + header_height}, {right, top + header_height}, border);
-    draw->AddCircleFilled({left + 32.0F, top + 32.0F}, 14.0F, accent);
-    draw->AddText({left + 56.0F, top + 24.0F}, foreground, "liquify");
-    draw->AddText({right - 190.0F, top + 24.0F}, muted, "main  |  synced");
-
-    draw->AddRectFilled({left, top + header_height}, {left + sidebar_width, bottom}, sidebar);
-    draw->AddLine(
-        {left + sidebar_width, top + header_height}, {left + sidebar_width, bottom}, border);
-    draw->AddText({left + 20.0F, top + 88.0F}, muted, "EXPLORER");
-    draw->AddText({left + 20.0F, top + 124.0F}, foreground, "liquify");
-    draw->AddText({left + 36.0F, top + 158.0F}, foreground, "include");
-    draw->AddText({left + 36.0F, top + 188.0F}, foreground, "src");
-    draw->AddText({left + 56.0F, top + 218.0F}, foreground, "app.cpp");
-    draw->AddText({left + 56.0F, top + 248.0F}, foreground, "main.cpp");
-    draw->AddText({left + 36.0F, top + 278.0F}, foreground, "tests");
-    draw->AddText({left + 36.0F, top + 308.0F}, foreground, "docs");
-
-    const auto editor_left = left + sidebar_width;
-    const auto editor_top = top + header_height;
-    draw->AddRectFilled({editor_left, editor_top}, {right, editor_top + toolbar_height}, toolbar);
-    draw->AddLine(
-        {editor_left, editor_top + toolbar_height}, {right, editor_top + toolbar_height}, border);
-    draw->AddRectFilled({editor_left + 16.0F, editor_top + 12.0F},
-                        {editor_left + 126.0F, editor_top + toolbar_height},
-                        surface);
-    draw->AddText({editor_left + 30.0F, editor_top + 19.0F}, foreground, "workspace.cpp");
-    draw->AddText({right - 148.0F, editor_top + 19.0F}, muted, "C++  |  UTF-8");
-
-    const auto editor_bottom = bottom - panel_height;
-    const auto text_top = editor_top + toolbar_height + 24.0F;
-    constexpr auto line_height = 28.0F;
-    const std::array<std::string_view, 9> lines{
-        "#include <string_view>",
-        "",
-        "namespace liquify {",
-        "",
-        "auto render_workspace(std::string_view name) -> bool {",
-        "    const auto state = find_screenshot_state(name);",
-        "    return state != nullptr;",
-        "}",
-        "",
+void App::draw_activity_bar() {
+    const auto item = [&](const char* label, const char* tooltip, SidebarSection section) {
+        const auto selected = shell_state_.sidebar == section && shell_state_.sidebar_visible;
+        if (selected) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_Header));
+        }
+        if (ImGui::Button(label, ImVec2(activity_bar_width - design::space2, design::control_md))) {
+            if (shell_state_.sidebar == section) {
+                shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
+            } else {
+                shell_state_.sidebar = section;
+                shell_state_.sidebar_visible = true;
+            }
+            if (section == SidebarSection::build) {
+                shell_state_.bottom_panel = BottomPanelTab::build;
+                shell_state_.bottom_panel_visible = true;
+            }
+            persist_shell_state();
+        }
+        if (selected) {
+            ImGui::PopStyleColor();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", tooltip);
+        }
     };
-    draw->AddRectFilled({editor_left + 1.0F, text_top + 5.0F * line_height - 4.0F},
-                        {right, text_top + 6.0F * line_height - 4.0F},
-                        highlight);
-    draw->AddRectFilled({editor_left + 1.0F, text_top + 5.0F * line_height - 4.0F},
-                        {editor_left + 5.0F, text_top + 6.0F * line_height - 4.0F},
-                        accent);
-    for (std::size_t index = 0; index < lines.size(); ++index) {
-        const auto number = std::to_string(index + 1);
-        const auto y = text_top + static_cast<float>(index) * line_height;
-        draw->AddText({editor_left + 22.0F, y}, muted, number.c_str());
-        draw->AddText({editor_left + 62.0F, y},
-                      foreground,
-                      lines[index].data(),
-                      lines[index].data() + lines[index].size());
-    }
-    draw->AddLine({editor_left, editor_bottom}, {right, editor_bottom}, border);
-    draw_screenshot_panel(editor_left, editor_bottom, right, bottom);
+    item("R", "Repository", SidebarSection::repository);
+    item("S", "Search", SidebarSection::search);
+    item("V", "Review", SidebarSection::review);
+    item("B", "Build", SidebarSection::build);
+    item("M", "Multiplayer", SidebarSection::multiplayer);
 }
 
-void App::draw_screenshot_contents() {
-    const auto* state = find_screenshot_state(*options_.screenshot_state);
-    if (state->view != ScreenshotView::welcome && state->view != ScreenshotView::repository) {
-        draw_screenshot_workspace();
+void App::draw_sidebar() {
+    switch (shell_state_.sidebar) {
+    case SidebarSection::repository:
+        if (screenshot_mode()) {
+            ImGui::TextUnformatted("LIQUIFY");
+            ImGui::TextDisabled("orama/liquify");
+            ImGui::Separator();
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+            if (ImGui::TreeNode("src")) {
+                ImGui::Selectable("app.cpp", true);
+                ImGui::Selectable("app_state.cpp");
+                ImGui::Selectable("editor_buffer.cpp");
+                ImGui::TreePop();
+            }
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+            if (ImGui::TreeNode("docs")) {
+                ImGui::Selectable("ui");
+                ImGui::TreePop();
+            }
+            ImGui::Selectable("CMakeLists.txt");
+            ImGui::Selectable("README.md");
+        } else if (repository_) {
+            draw_repository_tree();
+        } else {
+            ImGui::TextUnformatted("Repository");
+            ImGui::Separator();
+            ImGui::TextDisabled("Open a liquid repository to browse files.");
+        }
+        break;
+    case SidebarSection::search:
+        ImGui::TextUnformatted("Search");
+        ImGui::Separator();
+        ImGui::InputTextWithHint("##repository-search", "Search this repository", &sidebar_search_);
+        ImGui::TextDisabled("Repository search is provided by the liquid graph.");
+        break;
+    case SidebarSection::review:
+        if (screenshot_mode()) {
+            ImGui::TextUnformatted("Review");
+            ImGui::TextDisabled("Change #31");
+            ImGui::Separator();
+            ImGui::Selectable("App shell on the Orama design system", true);
+            ImGui::Spacing();
+            ImGui::TextDisabled("8 files changed");
+            ImGui::TextUnformatted("2 comments");
+            ImGui::Selectable("src/app.cpp:584  Active");
+            ImGui::Selectable("docs/ui/app-shell.md:12  Moved");
+            ImGui::Spacing();
+            ImGui::Button("Approve");
+            ImGui::SameLine();
+            ImGui::Button("Request changes");
+        } else {
+            draw_review_panel();
+        }
+        break;
+    case SidebarSection::build:
+        ImGui::TextUnformatted("Build");
+        ImGui::Separator();
+        if (ImGui::Button("Build repository", ImVec2(-1.0F, 0.0F))) {
+            request_build();
+        }
+        if (ImGui::Button("Run tests", ImVec2(-1.0F, 0.0F))) {
+            request_tests();
+        }
+        if (ImGui::Button("Deploy saved drips", ImVec2(-1.0F, 0.0F))) {
+            request_deploy();
+        }
+        break;
+    case SidebarSection::multiplayer:
+        ImGui::TextUnformatted("Multiplayer");
+        ImGui::Separator();
+        ImGui::TextDisabled("Presence appears here when a repository session is attached.");
+        break;
+    }
+}
+
+void App::draw_split_editor() {
+    ImGui::TextDisabled("Secondary split — read-only overview");
+    ImGui::Separator();
+    if (!editor_) {
         return;
     }
-    const auto dark = state->theme == ScreenshotTheme::dark;
-    const auto background = dark ? IM_COL32(25, 30, 37, 255) : IM_COL32(250, 250, 248, 255);
-    const auto foreground = dark ? IM_COL32(224, 228, 234, 255) : IM_COL32(30, 35, 42, 255);
-    const auto muted = dark ? IM_COL32(150, 159, 171, 255) : IM_COL32(99, 108, 120, 255);
-    const auto accent = IM_COL32(95, 82, 214, 255);
-    const auto origin = ImGui::GetWindowPos();
-    const auto size = ImGui::GetWindowSize();
-    auto* draw = ImGui::GetWindowDrawList();
-    draw->AddRectFilled(origin, {origin.x + size.x, origin.y + size.y}, background);
-    draw->AddCircleFilled({origin.x + 640.0F, origin.y + 218.0F}, 36.0F, accent);
-    draw->AddText({origin.x + 585.0F, origin.y + 282.0F}, foreground, "Welcome to liquify");
-    if (state->view == ScreenshotView::welcome) {
-        draw->AddText(
-            {origin.x + 505.0F, origin.y + 322.0F}, muted, "The IDE for liquid repositories");
-        draw->AddRectFilled({origin.x + 520.0F, origin.y + 382.0F},
-                            {origin.x + 760.0F, origin.y + 432.0F},
-                            accent,
-                            6.0F);
-        draw->AddText({origin.x + 592.0F, origin.y + 399.0F}, IM_COL32_WHITE, "Open repository");
-        draw->AddText({origin.x + 567.0F, origin.y + 474.0F}, muted, "Recent: liquid / main");
+    auto* editor_font = ImGui::GetIO().Fonts->Fonts[editor_font_index_];
+    ImGui::PushFont(editor_font);
+    const auto line_count = std::min<std::size_t>(editor_->line_count(), 40);
+    for (std::size_t line = 0; line < line_count; ++line) {
+        ImGui::TextUnformatted(editor_->line(line).data(),
+                               editor_->line(line).data() + editor_->line(line).size());
+    }
+    ImGui::PopFont();
+}
+
+void App::draw_editor_area() {
+    if (!editor_) {
+        const auto available = ImGui::GetContentRegionAvail();
+        ImGui::SetCursorPosY(std::max(available.y * 0.28F, design::space8));
+        ImGui::SetCursorPosX(std::max(available.x * 0.16F, design::space8));
+        ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[ui_font_index_ + 3]);
+        ImGui::TextUnformatted("liquify");
+        ImGui::PopFont();
+        ImGui::TextDisabled("The IDE for liquid");
+        ImGui::Spacing();
+        ImGui::TextUnformatted(
+            "Open a repository, then select a file from the repository sidebar.");
         return;
     }
-    draw->AddText(
-        {origin.x + 493.0F, origin.y + 322.0F}, muted, "Repository opened from the graph");
-    draw->AddRectFilled({origin.x + 410.0F, origin.y + 370.0F},
-                        {origin.x + 870.0F, origin.y + 548.0F},
-                        dark ? IM_COL32(32, 38, 47, 255) : IM_COL32(242, 244, 247, 255),
-                        8.0F);
-    draw->AddText({origin.x + 442.0F, origin.y + 402.0F}, foreground, "liquify");
-    draw->AddText({origin.x + 466.0F, origin.y + 438.0F}, foreground, "src / app.cpp");
-    draw->AddText(
-        {origin.x + 466.0F, origin.y + 472.0F}, foreground, "tests / test_screenshot.cpp");
-    draw->AddText({origin.x + 466.0F, origin.y + 506.0F}, foreground, "docs / ui / README.md");
+
+    if (ImGui::BeginTabBar("editor-tabs", ImGuiTabBarFlags_Reorderable)) {
+        const auto path = std::string(editor_->display_path());
+        const auto label = path + (editor_->dirty() ? " *" : "") + "###active-editor";
+        if (ImGui::BeginTabItem(label.c_str())) {
+            if (shell_state_.editor_split) {
+                const auto available = ImGui::GetContentRegionAvail();
+                const auto content_width = std::max(available.x - divider_size, 1.0F);
+                const auto primary_width = content_width * shell_state_.editor_split_ratio;
+                ImGui::BeginChild("primary-editor", ImVec2(primary_width, available.y));
+                draw_editor();
+                ImGui::EndChild();
+                ImGui::SameLine(0.0F, 0.0F);
+                ImGui::InvisibleButton("editor-split-divider", ImVec2(divider_size, available.y));
+                if (ImGui::IsItemActive()) {
+                    const auto change = ImGui::GetIO().MouseDelta.x / content_width;
+                    shell_state_.editor_split_ratio =
+                        std::clamp(shell_state_.editor_split_ratio + change, 0.25F, 0.75F);
+                }
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    persist_shell_state();
+                }
+                ImGui::SameLine(0.0F, 0.0F);
+                ImGui::BeginChild(
+                    "secondary-editor",
+                    ImVec2(std::max(content_width - primary_width, 1.0F), available.y),
+                    ImGuiChildFlags_Border);
+                draw_split_editor();
+                ImGui::EndChild();
+            } else {
+                draw_editor();
+            }
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+}
+
+void App::draw_bottom_panel() {
+    const auto tab = [&](const char* name, BottomPanelTab value) {
+        if (shell_state_.bottom_panel == value) {
+            ImGui::PushStyleColor(ImGuiCol_Header, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+        }
+        if (ImGui::Selectable(name, shell_state_.bottom_panel == value, 0, ImVec2(0.0F, 24.0F))) {
+            shell_state_.bottom_panel = value;
+            persist_shell_state();
+        }
+        if (shell_state_.bottom_panel == value) {
+            ImGui::PopStyleColor();
+        }
+        ImGui::SameLine();
+    };
+    tab("Diagnostics", BottomPanelTab::diagnostics);
+    tab("Build output", BottomPanelTab::build);
+    tab("Assistant", BottomPanelTab::assistant);
+    tab("Plugins", BottomPanelTab::plugins);
+    ImGui::NewLine();
+    ImGui::Separator();
+
+    const auto snapshot = editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
+    switch (shell_state_.bottom_panel) {
+    case BottomPanelTab::diagnostics:
+        draw_diagnostics_panel(snapshot);
+        break;
+    case BottomPanelTab::build:
+        draw_build_panel(snapshot);
+        break;
+    case BottomPanelTab::assistant:
+        if (screenshot_mode()) {
+            ImGui::TextUnformatted("Assistant");
+            ImGui::TextDisabled("Off · no provider exists and no connection is open");
+            ImGui::InputTextWithHint("##demo-assistant",
+                                     "Ask about the current definition",
+                                     &assistant_prompt_);
+            ImGui::Button("Ask");
+            ImGui::SameLine();
+            ImGui::Button("Explain diagnostic");
+            ImGui::SameLine();
+            ImGui::Button("Propose edit");
+        } else if (assistant_) {
+            draw_assistant();
+        } else {
+            ImGui::TextDisabled("The assistant is available after a repository opens.");
+        }
+        break;
+    case BottomPanelTab::plugins:
+        if (screenshot_mode()) {
+            ImGui::TextUnformatted("Plugins");
+            ImGui::TextUnformatted("orama.sample/status: Sample plugin");
+            ImGui::TextDisabled("Index and formatter commands ready.");
+        } else {
+            draw_plugin_panels();
+        }
+        if (!screenshot_mode() && plugin_failures_.empty() && plugin_panels_.empty()) {
+            ImGui::TextDisabled("No plugin panels are registered.");
+        }
+        break;
+    }
+}
+
+void App::draw_status_bar() {
+    const auto repository = screenshot_mode() ? std::string{"orama/liquify"}
+                                              : (options_.repository_path
+                                                     ? options_.repository_path->filename().string()
+                                                     : std::string{"No repository"});
+    ImGui::TextUnformatted(repository.c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled(screenshot_mode() ? "Change #31" : "Working change");
+    if (editor_) {
+        const auto cursor = editor_->cursor();
+        ImGui::SameLine();
+        ImGui::TextDisabled("Ln %zu, Col %zu", cursor.line + 1, cursor.byte + 1);
+    }
+    const auto preference = options_.forced_theme.value_or(shell_state_.theme);
+    const auto theme = preference == ThemePreference::system
+                           ? "Theme: system"
+                           : (preference == ThemePreference::dark ? "Theme: dark" : "Theme: light");
+    const auto width = ImGui::CalcTextSize(theme).x + design::space6;
+    ImGui::SameLine(std::max(ImGui::GetWindowWidth() - width, 0.0F));
+    if (ImGui::SmallButton(theme)) {
+        cycle_theme();
+    }
 }
 
 void App::draw_contents() {
-    if (options_.screenshot_state) {
-        draw_screenshot_contents();
-        return;
-    }
-    if (!repository_ && !editor_) {
-        ImGui::TextUnformatted("hello from liquify");
-        ImGui::Text("version %s", std::string(version_string()).c_str());
-        ImGui::Separator();
-        ImGui::Text("libliquid %s linked", std::string(liquid::version_string()).c_str());
-        ImGui::TextUnformatted("The IDE for liquid: instant open at any size, diagnostics from the "
-                               "build graph, drips.");
-        return;
+    const auto available = ImGui::GetContentRegionAvail();
+    const auto center_height =
+        std::max(available.y - status_bar_height - ImGui::GetStyle().ItemSpacing.y, 1.0F);
+    ImGui::BeginChild("activity-bar",
+                      ImVec2(activity_bar_width, center_height),
+                      ImGuiChildFlags_Border);
+    draw_activity_bar();
+    ImGui::EndChild();
+    ImGui::SameLine(0.0F, 0.0F);
+
+    if (shell_state_.sidebar_visible) {
+        ImGui::BeginChild("sidebar",
+                          ImVec2(shell_state_.sidebar_width, center_height),
+                          ImGuiChildFlags_Border);
+        draw_sidebar();
+        ImGui::EndChild();
+        ImGui::SameLine(0.0F, 0.0F);
+        ImGui::InvisibleButton("sidebar-divider", ImVec2(divider_size, center_height));
+        if (ImGui::IsItemActive()) {
+            shell_state_.sidebar_width =
+                std::clamp(shell_state_.sidebar_width + ImGui::GetIO().MouseDelta.x,
+                           180.0F,
+                           520.0F);
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            persist_shell_state();
+        }
+        ImGui::SameLine(0.0F, 0.0F);
     }
 
-    if (repository_) {
-        ImGui::BeginChild("repository-tree", ImVec2(260.0F, 0.0F), ImGuiChildFlags_Border);
-        draw_repository_tree();
+    const auto workspace_width = std::max(ImGui::GetContentRegionAvail().x, 1.0F);
+    ImGui::BeginChild("workspace", ImVec2(workspace_width, center_height));
+    const auto workspace = ImGui::GetContentRegionAvail();
+    const auto maximum_panel = std::max(workspace.y - 160.0F, 120.0F);
+    shell_state_.bottom_panel_height =
+        std::clamp(shell_state_.bottom_panel_height, 120.0F, maximum_panel);
+    const auto bottom_height =
+        shell_state_.bottom_panel_visible ? shell_state_.bottom_panel_height : 0.0F;
+    const auto bottom_spacing =
+        shell_state_.bottom_panel_visible ? ImGui::GetStyle().ItemSpacing.y * 2.0F : 0.0F;
+    const auto editor_height =
+        std::max(workspace.y - bottom_height -
+                     (shell_state_.bottom_panel_visible ? divider_size : 0.0F) - bottom_spacing,
+                 1.0F);
+    ImGui::BeginChild("editor-area", ImVec2(workspace.x, editor_height));
+    draw_editor_area();
+    ImGui::EndChild();
+    if (shell_state_.bottom_panel_visible) {
+        ImGui::InvisibleButton("bottom-divider", ImVec2(workspace.x, divider_size));
+        if (ImGui::IsItemActive()) {
+            shell_state_.bottom_panel_height =
+                std::clamp(shell_state_.bottom_panel_height - ImGui::GetIO().MouseDelta.y,
+                           120.0F,
+                           maximum_panel);
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            persist_shell_state();
+        }
+        ImGui::BeginChild("bottom-panel",
+                          ImVec2(workspace.x, shell_state_.bottom_panel_height),
+                          ImGuiChildFlags_Border);
+        draw_bottom_panel();
         ImGui::EndChild();
-        ImGui::SameLine();
     }
-    ImGui::BeginGroup();
-    if (editor_) {
-        draw_editor();
-    } else {
-        ImGui::TextUnformatted("Select a file from the repository tree.");
-    }
-    ImGui::EndGroup();
+    ImGui::EndChild();
+
+    ImGui::BeginChild("status-bar", ImVec2(available.x, status_bar_height), ImGuiChildFlags_Border);
+    draw_status_bar();
+    ImGui::EndChild();
+
     draw_command_palette();
     draw_review_comment_popup();
     draw_structural_editing();
@@ -2492,9 +3099,13 @@ void App::render_editor() {
     visible_diagnostics.insert(visible_diagnostics.end(),
                                graph_snapshot.build_diagnostics.begin(),
                                graph_snapshot.build_diagnostics.end());
+    auto* editor_font = ImGui::GetIO().Fonts->Fonts[editor_font_index_];
+    const auto& palette = applied_dark_theme_ ? design::dark_palette : design::light_palette;
     visible_lines_ = text_layer_->render(renderer_,
                                          *editor_,
                                          *layouts_,
+                                         *editor_font,
+                                         palette.text_primary,
                                          visible_diagnostics,
                                          editor_x_,
                                          editor_y_,
@@ -2510,42 +3121,14 @@ void App::render_editor() {
     SDL_SetRenderScale(renderer_, old_scale_x, old_scale_y);
 }
 
-bool App::capture_screenshot() {
-    auto* rendered = SDL_RenderReadPixels(renderer_, nullptr);
-    if (rendered == nullptr) {
-        screenshot_error_ = std::string{"SDL_RenderReadPixels failed: "} + SDL_GetError();
-        return false;
-    }
-    auto* rgba = SDL_ConvertSurface(rendered, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(rendered);
-    if (rgba == nullptr) {
-        screenshot_error_ = std::string{"SDL_ConvertSurface failed: "} + SDL_GetError();
-        return false;
-    }
-    auto image = ScreenshotImage{};
-    image.width = static_cast<std::uint32_t>(rgba->w);
-    image.height = static_cast<std::uint32_t>(rgba->h);
-    const auto row_bytes = static_cast<std::size_t>(rgba->w) * 4;
-    image.rgba.reserve(row_bytes * static_cast<std::size_t>(rgba->h));
-    const auto* pixels = static_cast<const std::uint8_t*>(rgba->pixels);
-    for (int row = 0; row < rgba->h; ++row) {
-        const auto* begin = pixels + static_cast<std::ptrdiff_t>(row) * rgba->pitch;
-        image.rgba.insert(image.rgba.end(), begin, begin + row_bytes);
-    }
-    SDL_DestroySurface(rgba);
-    auto written = write_png(*options_.screenshot_output, image);
-    if (!written) {
-        screenshot_error_ = written.error();
-        return false;
-    }
-    screenshot_captured_ = true;
-    return true;
-}
-
 void App::frame() {
     poll_editor_graph();
     poll_review();
     poll_plugins();
+    if (applied_dark_theme_ != dark_theme_active()) {
+        apply_theme();
+    }
+    update_window_title();
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -2562,18 +3145,20 @@ void App::frame() {
     ImGui::End();
 
     ImGui::Render();
-    const auto* screenshot =
-        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
-    if (screenshot != nullptr && screenshot->theme == ScreenshotTheme::dark) {
-        SDL_SetRenderDrawColor(renderer_, 25, 30, 37, 255);
-    } else {
-        SDL_SetRenderDrawColor(renderer_, 250, 250, 248, 255);
-    }
+    const auto& palette = applied_dark_theme_ ? design::dark_palette : design::light_palette;
+    SDL_SetRenderDrawColor(renderer_,
+                           static_cast<std::uint8_t>(palette.canvas.red * 255.0F),
+                           static_cast<std::uint8_t>(palette.canvas.green * 255.0F),
+                           static_cast<std::uint8_t>(palette.canvas.blue * 255.0F),
+                           static_cast<std::uint8_t>(palette.canvas.alpha * 255.0F));
     SDL_RenderClear(renderer_);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
     render_editor();
-    if (screenshot != nullptr && !screenshot_captured_) {
-        capture_screenshot();
+    if (screenshot_mode()) {
+        ++screenshot_frames_rendered_;
+        if (screenshot_frames_rendered_ >= 2) {
+            capture_screenshot();
+        }
     }
     SDL_RenderPresent(renderer_);
 }
@@ -2599,15 +3184,17 @@ void App::print_smoke_metrics() const {
     const auto mean_frame = average(frame_times_ms_);
     const auto mean_typing = average(typing_times_ms_);
     const auto refresh = mean_frame > 0.0 ? 1000.0 / mean_frame : 0.0;
-    std::printf(
-        "smoke: lines=50000 frames=%zu visible_lines=%zu ", frame_times_ms_.size(), visible_lines_);
+    std::printf("smoke: lines=50000 frames=%zu visible_lines=%zu ",
+                frame_times_ms_.size(),
+                visible_lines_);
     std::printf("avg_frame_ms=%.3f p95_frame_ms=%.3f achieved_hz=%.1f display_hz=%.1f ",
                 mean_frame,
                 percentile(frame_times_ms_, 0.95),
                 refresh,
                 display_refresh_hz_);
-    std::printf(
-        "avg_typing_ms=%.3f p95_typing_ms=%.3f\n", mean_typing, percentile(typing_times_ms_, 0.95));
+    std::printf("avg_typing_ms=%.3f p95_typing_ms=%.3f\n",
+                mean_typing,
+                percentile(typing_times_ms_, 0.95));
 }
 
 int App::run() {
@@ -2626,12 +3213,81 @@ int App::run() {
                 event.window.windowID == SDL_GetWindowID(window_)) {
                 quit_ = true;
             }
+            if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED &&
+                event.window.windowID == SDL_GetWindowID(window_)) {
+                const auto next_scale = std::max(SDL_GetWindowDisplayScale(window_), 1.0F);
+                if (next_scale != display_scale_) {
+                    ImGui_ImplSDLRenderer3_DestroyFontsTexture();
+                    display_scale_ = next_scale;
+                    load_font_atlas(display_scale_);
+                    ImGui_ImplSDLRenderer3_CreateFontsTexture();
+                }
+            }
             if (event.type == SDL_EVENT_TEXT_INPUT) {
                 handle_text(event.text.text);
             }
             if (event.type == SDL_EVENT_KEY_DOWN) {
                 handle_key(event.key.key, static_cast<std::uint16_t>(event.key.mod));
             }
+#if defined(__APPLE__) && defined(__OBJC__)
+            if (event.type == SDL_EVENT_USER) {
+                switch (event.user.code) {
+                case menu_save:
+                    save_editor();
+                    break;
+                case menu_palette:
+                    command_palette_open_ = true;
+                    break;
+                case menu_sidebar:
+                    shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
+                    persist_shell_state();
+                    break;
+                case menu_panel:
+                    shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
+                    persist_shell_state();
+                    break;
+                case menu_split:
+                    shell_state_.editor_split = !shell_state_.editor_split;
+                    persist_shell_state();
+                    break;
+                case menu_theme:
+                    cycle_theme();
+                    break;
+                case menu_definition:
+                    request_definition();
+                    break;
+                case menu_hover:
+                    request_hover();
+                    break;
+                case menu_build:
+                    request_build();
+                    break;
+                case menu_tests:
+                    request_tests();
+                    break;
+                case menu_deploy:
+                    request_deploy();
+                    break;
+                case menu_next_hunk:
+                    navigate_hunk(true);
+                    break;
+                case menu_previous_hunk:
+                    navigate_hunk(false);
+                    break;
+                case menu_next_comment:
+                    navigate_comment();
+                    break;
+                case menu_expand_selection:
+                    expand_structural_selection();
+                    break;
+                case menu_shrink_selection:
+                    shrink_structural_selection();
+                    break;
+                default:
+                    break;
+                }
+            }
+#endif
         }
 
         prepare_smoke_frame(frames);
@@ -2658,22 +3314,14 @@ int App::run() {
     if (options_.smoke) {
         print_smoke_metrics();
     }
-    if (options_.screenshot_state) {
-        if (!screenshot_captured_) {
-            std::fprintf(stderr, "liquify: screenshot failed: %s\n", screenshot_error_.c_str());
-            return 1;
-        }
-        std::printf("screenshot: %s -> %s\n",
-                    options_.screenshot_state->c_str(),
-                    options_.screenshot_output->string().c_str());
-    }
-    return 0;
+    return screenshot_failed_ ? 1 : 0;
 }
 
 void App::shutdown() {
     if (!initialized_) {
         return;
     }
+    persist_shell_state();
     SDL_StopTextInput(window_);
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();

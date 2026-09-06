@@ -3,6 +3,7 @@
 ## Requirements
 
 - CMake 3.28 or newer and Ninja.
+- Node.js for the design-token gate when tests are enabled.
 - Clang 17 or newer. On macOS `CMakeLists.txt` selects Homebrew LLVM
   (`/opt/homebrew/opt/llvm/bin/clang++`) and the Xcode SDK before `project()`; on Linux it takes
   the newest `clang++-NN` on the path. `-DLIQUIFY_USE_SYSTEM_COMPILER=ON` or an explicit
@@ -39,8 +40,9 @@ ctest --test-dir build --output-on-failure
 ```
 
 CTest holds the GoogleTest cases discovered from `liquify-tests` (buffer, text layout, repository
-view, stub trees, interactive analysis, editor graph, structural edits, review, assistant, plugins
-and version) plus `liquify-print-tree-unreadable`, which proves that an unreadable repository
+view, app-shell state, screenshot capture, stub trees, interactive analysis, editor graph,
+structural edits, review, assistant, plugins and version), the design-token gate, plus
+`liquify-print-tree-unreadable`, which proves that an unreadable repository
 makes `--print-tree` exit non-zero with liquid's error. Screenshot cases render the editor and a
 panel through SDL's dummy video driver and software renderer and inspect stable pixel regions.
 `version`, the unit tests and `--screenshot` run without a display; `--smoke` needs one.
@@ -53,6 +55,7 @@ panel through SDL's dummy video driver and software renderer and inspect stable 
 ./build/liquify --lake <repository-url> <path> # add lake reviews; bearer is LIQUID_TOKEN
 ./build/liquify --print-tree <path>
 ./build/liquify --apply-edits request.cbor <path> > result.cbor
+LIQUIFY_BINARY=./build/liquify ./tools/ui/screenshot.sh
 ./build/liquify --smoke    # scroll/edit 50,000 lines for 30 frames, report latency, exit 0
 ./build/liquify --smoke 300
 ./build/liquify --screenshot editor-cpp-light --out editor.png

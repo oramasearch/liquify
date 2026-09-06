@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iterator>
 #include <print>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -109,8 +110,9 @@ int main(int argc, char** argv) {
                 std::println(stderr, "liquify: version accepts no other arguments");
                 return 2;
             }
-            std::println(
-                "liquify {} (libliquid {})", liquify::version_string(), liquid::version_string());
+            std::println("liquify {} (libliquid {})",
+                         liquify::version_string(),
+                         liquid::version_string());
             return 0;
         }
         if (arg == "--help" || arg == "-h") {
@@ -139,7 +141,7 @@ int main(int argc, char** argv) {
                 return 2;
             }
             opts.screenshot_state = std::string{argv[++i]};
-            opts.max_frames = 1;
+            opts.max_frames = 2;
             continue;
         }
         if (arg == "--out") {
@@ -198,18 +200,7 @@ int main(int argc, char** argv) {
         std::println(stderr, "liquify: --lake requires a repository path");
         return 2;
     }
-    if (should_print_tree) {
-        return print_tree(*opts.repository_path);
-    }
-    if (opts.screenshot_state.has_value() != opts.screenshot_output.has_value()) {
-        std::println(stderr, "liquify: --screenshot and --out must be used together");
-        return 2;
-    }
     if (opts.screenshot_state) {
-        if (opts.smoke || opts.lake_url) {
-            std::println(stderr, "liquify: --screenshot cannot be combined with another mode");
-            return 2;
-        }
         if (liquify::find_screenshot_state(*opts.screenshot_state) == nullptr) {
             std::println(stderr, "liquify: unknown screenshot state {}", *opts.screenshot_state);
             std::print(stderr, "liquify: states:");
@@ -219,6 +210,20 @@ int main(int argc, char** argv) {
             std::println(stderr);
             return 2;
         }
+        if (!opts.screenshot_output) {
+            std::println(stderr, "liquify: --screenshot requires --out");
+            return 2;
+        }
+        if (opts.repository_path || opts.smoke || opts.lake_url) {
+            std::println(stderr, "liquify: --screenshot cannot open a repository or run smoke");
+            return 2;
+        }
+    } else if (opts.screenshot_output) {
+        std::println(stderr, "liquify: --out requires --screenshot");
+        return 2;
+    }
+    if (should_print_tree) {
+        return print_tree(*opts.repository_path);
     }
     liquify::App app(opts);
     if (!app.init())

@@ -37,7 +37,18 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(LIQUIFY_BUILD_TESTS "Build the test suite" ON)
 
+find_program(LIQUIFY_NODE_EXECUTABLE NAMES node nodejs)
+if(LIQUIFY_NODE_EXECUTABLE)
+  add_custom_target(liquify-token-gate
+    COMMAND ${LIQUIFY_NODE_EXECUTABLE} ${CMAKE_SOURCE_DIR}/design/test-token-gates.mjs
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Checking the stamped Orama design-system snapshot")
+elseif(LIQUIFY_BUILD_TESTS)
+  message(FATAL_ERROR "Node.js is required when LIQUIFY_BUILD_TESTS is ON")
+endif()
+
 if(APPLE)
+  enable_language(OBJCXX)
   # SDL3 + ImGui are fine at macOS 12+. Native architecture by default.
   set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "")
 endif()
@@ -117,6 +128,7 @@ add_library(liquify-core STATIC
   src/ai_config.cpp
   src/ai_provider.cpp
   src/assistant.cpp
+  src/app_state.cpp
   src/context_builder.cpp
   src/editor_buffer.cpp
   src/editor_graph.cpp
@@ -178,6 +190,10 @@ endif()
 add_library(liquify-app STATIC src/app.cpp)
 target_include_directories(liquify-app PUBLIC include)
 target_link_libraries(liquify-app PUBLIC liquify-core PRIVATE imgui)
+if(APPLE)
+  set_source_files_properties(src/app.cpp PROPERTIES LANGUAGE OBJCXX)
+  target_link_libraries(liquify-app PRIVATE "-framework AppKit")
+endif()
 
 add_executable(liquify src/main.cpp)
 target_link_libraries(liquify PRIVATE liquify-app)
@@ -190,4 +206,7 @@ if(LIQUIFY_BUILD_TESTS)
   FetchContent_MakeAvailable(googletest)
   enable_testing()
   add_subdirectory(tests)
+  add_test(
+    NAME liquify-token-gate
+    COMMAND ${LIQUIFY_NODE_EXECUTABLE} ${CMAKE_SOURCE_DIR}/design/test-token-gates.mjs)
 endif()

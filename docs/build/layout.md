@@ -6,10 +6,12 @@ libliquid's public API.
 
 | Path | Role |
 |---|---|
-| `include/liquify/app.hpp`, `src/app.cpp` | the application shell: window, renderer, ImGui context, frame loop. **The one TU that includes SDL3 or ImGui.** |
+| `include/liquify/app.hpp`, `src/app.cpp` | the token-derived application shell: window, native macOS menus, renderer, ImGui context, persisted panel layout, frame loop, and screenshot renderer. **The one TU that includes SDL3 or ImGui.** |
+| `include/liquify/app_state.hpp`, `src/app_state.cpp` | bounded repository-local shell layout, active surfaces, and theme persistence |
 | `include/liquify/screenshot.hpp`, `src/screenshot.cpp` | named screenshot registry plus the in-tree RGBA PNG reader and writer |
 | `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory text buffer, input modes, and libliquid blob read/write path |
 | `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
+| `design/`, `include/liquify/design_tokens.generated.hpp` | stamped Orama DTCG and IBM Plex inputs, reviewed role map, dependency-free compiler, generated native palettes and type scale, and tamper/staleness gate |
 | `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: reads the root on a worker, loads nested trees on expansion, and exposes entries, open latency, or an error |
 | `include/liquify/version.hpp`, `src/version.cpp` | version |
 | `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
@@ -25,7 +27,7 @@ libliquid's public API.
 | `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
 | `packaging/` | hand-built macOS, Windows, AppImage, and Flatpak release inputs used until liquid's projection targets land |
 | `bench/` | stub-tree benchmarks, built with `LIQUIFY_BUILD_BENCH` |
-| `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `--screenshot`, `version`, `--smoke [N]`, `--help` |
+| `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `--screenshot STATE --out PNG`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest, including screenshot pixel-region assertions; `ctest --test-dir build` |
 | `tools/ui/` | refreshes every named screenshot under `docs/ui/screenshots/` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |

@@ -1,7 +1,8 @@
 # The application shell
 
 **What.** `liquify::App` (`include/liquify/app.hpp`, `src/app.cpp`): one window, one renderer,
-one Dear ImGui context, one frame loop, a repository root panel and an editor surface. SDL3 3.2
+one Dear ImGui context, one frame loop, an activity bar, contextual sidebar, tabbed and split
+editor, bottom panel and status bar. SDL3 3.2
 (static) and Dear ImGui 1.91 use the SDL_Renderer backend. **`src/app.cpp` is the only translation
 unit that includes SDL3 or ImGui.** `RepositoryView` (`src/repository_view.hpp`,
 `src/repository_view.cpp`) is plain C++ and holds either the root `liquid::tree_entry` values or
@@ -15,8 +16,8 @@ Diagnostics and the incremental graph follow the liquid #20 and #21 interfaces.
 
 **Lifecycle** (mirrors Zetta `src/gui/app.cpp`): `SDL_Init(VIDEO)` → window at 70 % of the usable
 display (floors 900×600), resizable, high-pixel-density → `SDL_CreateRenderer` + vsync → ImGui
-context (keyboard nav, no `imgui.ini`, light style except deterministic dark screenshot states) →
-`ImGui_ImplSDL3_InitForSDLRenderer` +
+context (keyboard nav, no `imgui.ini`, token-derived system/light/dark style and high-density IBM
+Plex atlas) → `ImGui_ImplSDL3_InitForSDLRenderer` +
 `ImGui_ImplSDLRenderer3_Init`. Each frame: poll events (quit on `SDL_EVENT_QUIT` or the window's
 close request), ImGui frame, one full-viewport window, render, present. Shutdown in reverse.
 
@@ -41,11 +42,11 @@ the command palette, and a daemon status line;
 `liquify --print-tree <path>` prints name, kind and mode without a display;
 `liquify --apply-edits <file> <path>` applies canonical-CBOR structural edits without a display
 and writes the result record to standard output
-([`../editor/structural-editing.md`](../editor/structural-editing.md)); `liquify --smoke [N]`
-scrolls and edits a generated 50,000-line buffer for N frames (default 30), prints latency metrics,
-and exits 0; `liquify --screenshot <state> --out <png>` renders one named, fixed UI state through
-SDL's dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md)); `liquify
-version` prints
+([`../editor/structural-editing.md`](../editor/structural-editing.md));
+`liquify --screenshot <state> --out <png>` renders one named, fixed shell state through SDL's
+dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md),
+[`../ui/app-shell.md`](../ui/app-shell.md)); `liquify --smoke [N]` scrolls and edits a generated
+50,000-line buffer for N frames (default 30), prints latency metrics, and exits 0; `liquify version` prints
 `liquify <v> (libliquid <v>)`. The complete build, test and run sequence is
 [`../build/local.md`](../build/local.md).
 
@@ -81,6 +82,9 @@ layout-cache unit tests cover editing, UTF-8 cursor movement, save, reuse and li
 invalidation. No repository fixture bytes are committed.
 Plugin tests cover configured global and repository paths; a bad module remains a visible load
 failure while later valid modules register normally.
+App-shell state tests cover repository-local round trips and invalid state. Screenshot tests read
+the in-tree PNG output and inspect stable pixel regions, and `tools/ui/screenshot.sh` renders the
+full light/dark state matrix.
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.
