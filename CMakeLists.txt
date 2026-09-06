@@ -112,6 +112,7 @@ target_link_libraries(tree-sitter-cpp-parser PUBLIC tree-sitter-runtime)
 # liquify
 # -----------------------------------------------------------------------------
 add_library(liquify-core STATIC
+  modules/liquid/src/encoding/cbor.cpp
   src/ai_config.cpp
   src/ai_provider.cpp
   src/assistant.cpp
@@ -120,12 +121,13 @@ add_library(liquify-core STATIC
   src/editor_graph.cpp
   src/interactive_analysis.cpp
   src/repository_view.cpp
+  src/structural_edit.cpp
   src/text_layout.cpp
   src/stub_tree.cpp
   src/version.cpp)
 target_include_directories(liquify-core
   PUBLIC include
-  PRIVATE modules/corosio/include modules/http/include)
+  PRIVATE modules/corosio/include modules/http/include modules/liquid/src)
 target_link_libraries(liquify-core
   PUBLIC liquid::liquid
   PRIVATE Boost::corosio Boost::corosio_openssl Boost::http Boost::json
@@ -147,6 +149,8 @@ if(LIQUIFY_BUILD_BENCH)
   target_link_libraries(liquify-editor-graph-bench PRIVATE liquify-core)
   add_executable(liquify-ai-context-bench bench/ai_context_bench.cpp)
   target_link_libraries(liquify-ai-context-bench PRIVATE liquify-core)
+  add_executable(liquify-structural-edit-bench bench/structural_edit_bench.cpp)
+  target_link_libraries(liquify-structural-edit-bench PRIVATE liquify-core)
 endif()
 
 add_library(liquify-app STATIC src/app.cpp)
