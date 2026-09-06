@@ -7,9 +7,12 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
+#include <string_view>
 #include <utility>
 
 #if defined(_WIN32)
@@ -19,14 +22,87 @@
 #endif
 
 #include "liquid/graph.hpp"
+#include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
+#include "liquify/ai_config.hpp"
 
 namespace liquify {
 namespace {
 
+constexpr auto plugins_key = "config.liquify.plugins";
+
 auto plugin_error(liquid::errc code, std::string message, std::string context = {})
     -> liquid::error {
     return {code, std::move(message), std::move(context)};
+}
+
+auto trim(std::string_view value) -> std::string_view {
+    while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() &&
+           (value.back() == ' ' || value.back() == '\t' || value.back() == '\r')) {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
+void append_plugin_paths(std::vector<std::filesystem::path>& output,
+                         std::string_view value,
+                         const std::filesystem::path& base) {
+    while (!value.empty()) {
+        const auto delimiter = value.find(';');
+        const auto part = trim(value.substr(0, delimiter));
+        if (!part.empty()) {
+            auto path = std::filesystem::path(part);
+            if (path.is_relative()) {
+                path = base / path;
+            }
+            output.push_back(path.lexically_normal());
+        }
+        if (delimiter == std::string_view::npos) {
+            break;
+        }
+        value.remove_prefix(delimiter + 1);
+    }
+}
+
+auto configured_file_paths(const std::filesystem::path& path)
+    -> liquid::result<std::vector<std::filesystem::path>> {
+    auto output = std::vector<std::filesystem::path>{};
+    if (path.empty() || !std::filesystem::exists(path)) {
+        return output;
+    }
+    auto input = std::ifstream(path);
+    if (!input) {
+        return std::unexpected(plugin_error(
+            liquid::errc::invalid_argument, "could not open global configuration", path.string()));
+    }
+    auto line = std::string{};
+    auto line_number = std::size_t{};
+    while (std::getline(input, line)) {
+        ++line_number;
+        const auto view = trim(line);
+        if (view.empty() || view.starts_with('#')) {
+            continue;
+        }
+        const auto equals = view.find('=');
+        if (equals == std::string_view::npos) {
+            return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                                "expected key=value",
+                                                path.string() + ":" + std::to_string(line_number)));
+        }
+        if (trim(view.substr(0, equals)) != plugins_key) {
+            continue;
+        }
+        append_plugin_paths(output, view.substr(equals + 1), path.parent_path());
+    }
+    return output;
+}
+
+void deduplicate_paths(std::vector<std::filesystem::path>& paths) {
+    auto seen = std::set<std::filesystem::path>{};
+    std::erase_if(paths, [&seen](const auto& path) { return !seen.insert(path).second; });
 }
 
 auto utf8_valid(std::span<const std::byte> value) -> bool {
@@ -791,6 +867,50 @@ auto decode_plugin_text_panel(std::span<const std::byte> value) -> liquid::resul
 auto plugin_null_cbor() -> std::span<const std::byte> {
     static constexpr auto value = std::array{std::byte{0xf6}};
     return value;
+}
+
+auto plugin_empty_map_cbor() -> std::span<const std::byte> {
+    static constexpr auto value = std::array{std::byte{0xa0}};
+    return value;
+}
+
+auto load_configured_plugins(const std::filesystem::path& repository_path,
+                             std::optional<std::filesystem::path> global_config_path)
+    -> liquid::result<ConfiguredPlugins> {
+    const auto config_path = global_config_path.value_or(global_ai_config_path());
+    auto paths = configured_file_paths(config_path);
+    if (!paths) {
+        return std::unexpected(paths.error());
+    }
+
+    auto repository = liquid::runtime::block_on(liquid::repository::open(repository_path));
+    if (!repository) {
+        return std::unexpected(repository.error());
+    }
+    auto repository_value = liquid::runtime::block_on(repository->metadata(plugins_key));
+    if (!repository_value) {
+        return std::unexpected(repository_value.error());
+    }
+    if (*repository_value) {
+        const auto& bytes = **repository_value;
+        const auto value =
+            std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        append_plugin_paths(*paths, value, repository_path);
+    }
+    deduplicate_paths(*paths);
+
+    auto configured = ConfiguredPlugins{std::make_shared<PluginHost>(), std::move(*paths), {}};
+    for (const auto& path : configured.paths) {
+        auto loaded = configured.host->load(path);
+        if (!loaded) {
+            auto message = loaded.error().message;
+            if (!loaded.error().context.empty()) {
+                message += ": " + loaded.error().context;
+            }
+            configured.failures.push_back({path, std::move(message)});
+        }
+    }
+    return configured;
 }
 
 } // namespace liquify

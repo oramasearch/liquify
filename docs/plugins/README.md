@@ -38,6 +38,25 @@ descriptor size, plugin and registration names, operations, duplicate names with
 kind, command schemas, inputs, results, and owned-buffer release callbacks. A wrong version is
 refused before any registration becomes visible.
 
+The application loads dynamic modules from repeated `config.liquify.plugins` entries in the
+global liquify config and from the repository metadata value with the same name. A value may list
+multiple paths separated by semicolons. Relative global paths start at the config file's directory;
+relative repository paths start at the repository root. Global entries come first and duplicate
+normalized paths load once:
+
+```text
+config.liquify.plugins=plugins/format.so
+config.liquify.plugins=/opt/liquify/navigation.so;/opt/liquify/build.so
+```
+
+These are native libraries. Opening an untrusted repository whose metadata names a plugin can run
+native code, so repositories and configured paths must be trusted. One failed path is reported in
+the plugin panel without suppressing modules that loaded successfully.
+
+Plugin commands appear in the command palette with their declared default binding. Selecting one
+invokes it with an empty canonical-CBOR map. Plugin text panels refresh independently and render
+their decoded view model below the analysis results; the plugin never receives UI objects.
+
 Each panel operation is invoked independently. A returned error, exception, malformed owned value,
 non-canonical CBOR value, or unsupported view model becomes that panel's error snapshot and
 does not prevent another panel from updating. Native process faults remain process faults; plugins
@@ -57,5 +76,6 @@ command, and panel schemas can carry their own version fields.
 through the in-process liquid graph, `sample.reset` supplies its binding and argument schema, and
 `sample.status` returns a text view model. CMake builds the source as both a module and a static
 library; `test_plugin.cpp` exercises query, command, and panel behavior through both loading paths,
-refuses an ABI mismatch and non-canonical CBOR, and proves one failed panel leaves a healthy
-panel available.
+loads global and repository configuration, reports a bad path without losing a healthy module,
+refuses an ABI mismatch and non-canonical CBOR, and proves one failed panel leaves a healthy panel
+available.

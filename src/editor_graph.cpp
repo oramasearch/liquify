@@ -19,6 +19,7 @@
 #include "liquid/frontend.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
+#include "liquify/plugin.hpp"
 #include "liquify/stub_tree.hpp"
 
 namespace liquify {
@@ -298,8 +299,9 @@ struct EditorGraph::Impl {
         bool concurrent{};
     };
 
-    explicit Impl(std::filesystem::path path)
-        : repository_path(std::move(path)), worker([this] { run(); }) {}
+    explicit Impl(std::filesystem::path path, std::shared_ptr<PluginHost> configured_plugins)
+        : repository_path(std::move(path)), plugins(std::move(configured_plugins)),
+          worker([this] { run(); }) {}
 
     ~Impl() {
         wait_until_idle();
@@ -339,7 +341,8 @@ struct EditorGraph::Impl {
 
     void initialize() {
         initialize_daemon();
-        auto opened = InteractiveAnalysis::open(repository_path / ".liquid" / "liquify-graph");
+        auto opened =
+            InteractiveAnalysis::open(repository_path / ".liquid" / "liquify-graph", plugins);
         auto opened_stubs = StubTrees::open(repository_path / ".liquid" / "liquify-stub-graph");
         auto lock = std::lock_guard(mutex);
         if (!opened) {
@@ -450,6 +453,7 @@ struct EditorGraph::Impl {
     std::condition_variable idle;
     std::deque<Task> tasks;
     std::shared_ptr<InteractiveAnalysis> analysis;
+    std::shared_ptr<PluginHost> plugins;
     std::optional<StubTrees> stubs;
     std::optional<liquid::daemon> daemon;
     EditorGraphSnapshot current;
@@ -466,8 +470,8 @@ struct EditorGraph::Impl {
     bool daemon_hosted{};
 };
 
-EditorGraph::EditorGraph(std::filesystem::path repository_path)
-    : impl_(std::make_unique<Impl>(std::move(repository_path))) {}
+EditorGraph::EditorGraph(std::filesystem::path repository_path, std::shared_ptr<PluginHost> plugins)
+    : impl_(std::make_unique<Impl>(std::move(repository_path), std::move(plugins))) {}
 
 EditorGraph::~EditorGraph() = default;
 

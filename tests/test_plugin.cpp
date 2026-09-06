@@ -6,11 +6,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <span>
 #include <string>
 #include <vector>
 
+#include "liquid/repository.hpp"
+#include "liquid/runtime.hpp"
 #include "liquify/interactive_analysis.hpp"
 #include "liquify/plugin.hpp"
 #include "sample_plugin.hpp"
@@ -44,6 +47,12 @@ auto bytes(std::span<const std::uint8_t> value) -> std::vector<std::byte> {
     auto output = std::vector<std::byte>(value.size());
     std::memcpy(output.data(), value.data(), value.size());
     return output;
+}
+
+auto text_bytes(std::string_view value) -> std::vector<std::byte> {
+    const auto characters = std::span(value.data(), value.size());
+    const auto value_bytes = std::as_bytes(characters);
+    return {value_bytes.begin(), value_bytes.end()};
 }
 
 void release_bytes(void*, std::uint8_t* data, std::size_t) {
@@ -114,7 +123,7 @@ void exercise_sample(const std::shared_ptr<liquify::PluginHost>& host,
               std::vector<std::byte>(liquify::plugin_null_cbor().begin(),
                                      liquify::plugin_null_cbor().end()));
 
-    auto command = host->invoke_command("sample.reset", liquify::plugin_null_cbor());
+    auto command = host->invoke_command("sample.reset", liquify::plugin_empty_map_cbor());
     ASSERT_TRUE(command) << command.error().message;
     static constexpr std::uint8_t expected_command[] = {0xa1, 0x62, 'o', 'k', 0xf5};
     EXPECT_EQ(*command, bytes(expected_command));
@@ -144,6 +153,30 @@ TEST(PluginHost, LoadsTheSampleDynamically) {
     auto loaded = host->load(LIQUIFY_SAMPLE_PLUGIN);
     ASSERT_TRUE(loaded) << loaded.error().message << ": " << loaded.error().context;
     exercise_sample(host, location.path());
+}
+
+TEST(PluginHost, LoadsConfiguredPluginsAndReportsFailures) {
+    auto location = TemporaryDirectory("liquify-plugin-config");
+    const auto repository_path = location.path() / "repository";
+    auto repository = liquid::runtime::block_on(liquid::repository::create(repository_path));
+    ASSERT_TRUE(repository) << repository.error().message;
+    auto configured_repository = liquid::runtime::block_on(
+        repository->set_metadata("config.liquify.plugins", text_bytes(LIQUIFY_SAMPLE_PLUGIN)));
+    ASSERT_TRUE(configured_repository) << configured_repository.error().message;
+
+    const auto config_path = location.path() / "config";
+    auto config = std::ofstream(config_path);
+    ASSERT_TRUE(config);
+    config << "config.liquify.plugins=missing-plugin\n";
+    config << "config.liquify.plugins=" << LIQUIFY_SAMPLE_PLUGIN << "\n";
+    config.close();
+
+    auto plugins = liquify::load_configured_plugins(repository_path, config_path);
+    ASSERT_TRUE(plugins) << plugins.error().message;
+    ASSERT_EQ(plugins->paths.size(), 2);
+    ASSERT_EQ(plugins->failures.size(), 1);
+    EXPECT_EQ(plugins->failures.front().path, location.path() / "missing-plugin");
+    exercise_sample(plugins->host, location.path() / "state");
 }
 
 TEST(PluginHost, RefusesAnAbiVersionMismatch) {

@@ -33,7 +33,8 @@ non-zero.
 
 **CLI.** `liquify` opens the hello state; `liquify <path>` opens the repository panel and lets a
 blob at any expanded depth be opened in the editor. C and C++ buffers add graph-query controls, an
-inline diagnostics layer, diagnostics/completion panel and daemon status line;
+inline diagnostics layer, diagnostics/completion and configured plugin panels, plugin commands in
+the command palette, and a daemon status line;
 `liquify --print-tree <path>` prints name, kind and mode without a display; `liquify --smoke [N]`
 scrolls and edits a generated 50,000-line buffer for N frames (default 30), prints latency metrics,
 and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`.
@@ -65,6 +66,8 @@ written and reopened through the same public API. A separate corrupt-marker case
 liquid error reaches the view and that `--print-tree` exits non-zero with that message. Buffer and
 layout-cache unit tests cover editing, UTF-8 cursor movement, save, reuse and line-local
 invalidation. No repository fixture bytes are committed.
+Plugin tests cover configured global and repository paths; a bad module remains a visible load
+failure while later valid modules register normally.
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.

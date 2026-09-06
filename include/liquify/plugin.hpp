@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -16,6 +17,8 @@ class query_registry;
 }
 
 namespace liquify {
+
+class PluginHost;
 
 struct PluginCommand {
     std::string plugin;
@@ -34,6 +37,17 @@ struct PluginPanelSnapshot {
 struct PluginTextPanel {
     std::string title;
     std::string text;
+};
+
+struct PluginLoadFailure {
+    std::filesystem::path path;
+    std::string error;
+};
+
+struct ConfiguredPlugins {
+    std::shared_ptr<PluginHost> host;
+    std::vector<std::filesystem::path> paths;
+    std::vector<PluginLoadFailure> failures;
 };
 
 class PluginHost {
@@ -72,5 +86,10 @@ private:
 [[nodiscard]] auto decode_plugin_text_panel(std::span<const std::byte> value)
     -> liquid::result<PluginTextPanel>;
 [[nodiscard]] auto plugin_null_cbor() -> std::span<const std::byte>;
+[[nodiscard]] auto plugin_empty_map_cbor() -> std::span<const std::byte>;
+[[nodiscard]] auto
+load_configured_plugins(const std::filesystem::path& repository_path,
+                        std::optional<std::filesystem::path> global_config_path = std::nullopt)
+    -> liquid::result<ConfiguredPlugins>;
 
 } // namespace liquify

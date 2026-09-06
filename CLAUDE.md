@@ -24,8 +24,9 @@ demands, and reports daemon drip triggers and the validation backlog. A default-
 assembles inspectable context from the same graph, streams through a pinned provider transport,
 and previews edits until the user accepts one normal drip. When off it constructs no provider and
 opens no connection. Native plugins use liquid's versioned frontend C boundary to register graph
-queries, commands, and canonical-CBOR panels through checked static or dynamic loading. Next:
-inline build, test and deploy (liquify #6).
+queries, commands, and canonical-CBOR panels through checked static or configured dynamic loading;
+their commands and data-only panels appear in the editor surface. Next: inline build, test and
+deploy (liquify #6).
 
 ## Decisions — recorded
 
