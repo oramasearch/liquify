@@ -62,6 +62,10 @@ private:
     void draw_sidebar();
     void draw_editor_area();
     void draw_bottom_panel();
+    void draw_floating_panels();
+    void draw_panel(PanelId id);
+    void draw_panel_header(PanelId id);
+    void draw_panel_menu(PanelId id);
     void draw_diagnostics_panel(const EditorGraphSnapshot& snapshot);
     void draw_status_bar();
     void draw_split_editor();
@@ -102,8 +106,12 @@ private:
     void draw_assistant();
     void draw_command_palette();
     void draw_plugin_panels();
+    void draw_structural_panel();
     void invoke_plugin_command(std::string_view name);
+    void execute_panel_command(std::string_view command);
     void poll_plugins();
+    void sync_panel_system();
+    void reset_panel_layout();
     void poll_editor_graph();
     void apply_change(std::size_t first_line, std::size_t erased_lines, std::size_t inserted_lines);
     void handle_key(std::uint32_t key, std::uint16_t modifiers);
@@ -132,6 +140,7 @@ private:
     std::unique_ptr<TextLayoutCache> layouts_;
     std::unique_ptr<RetainedTextLayer> text_layer_;
     AppShellState shell_state_;
+    PanelRegistry panels_;
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     float editor_x_{};
@@ -199,6 +208,10 @@ private:
     bool rename_open_{};
     bool extract_function_open_{};
     bool structural_preview_open_{};
+    bool build_was_running_{};
+    bool sync_was_running_{};
+    bool hydration_was_running_{};
+    bool assistant_was_running_{};
     bool quit_ = false;
 };
 

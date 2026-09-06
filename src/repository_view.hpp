@@ -25,6 +25,9 @@ public:
     [[nodiscard]] auto directory_error(std::string_view directory) const -> std::string_view;
     [[nodiscard]] auto directory_loading(std::string_view directory) const -> bool;
     [[nodiscard]] auto directory_loaded(std::string_view directory) const -> bool;
+    [[nodiscard]] auto loading_directory_count() const -> std::size_t;
+    [[nodiscard]] auto loaded_directory_count() const -> std::size_t;
+    [[nodiscard]] auto directory_error_count() const -> std::size_t;
     [[nodiscard]] auto open_time() const -> std::chrono::duration<double, std::milli>;
 
     void request_directory(std::string path, liquid::digest id);

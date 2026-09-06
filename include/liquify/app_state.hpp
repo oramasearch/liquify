@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <string>
 
+#include "liquify/panel.hpp"
+
 namespace liquify {
 
 enum class ThemePreference {
@@ -11,28 +13,12 @@ enum class ThemePreference {
     dark,
 };
 
-enum class SidebarSection {
-    repository,
-    search,
-    review,
-    build,
-    multiplayer,
-};
-
-enum class BottomPanelTab {
-    diagnostics,
-    build,
-    assistant,
-    plugins,
-};
-
 struct AppShellState {
     float sidebar_width = 260.0F;
     float bottom_panel_height = 260.0F;
     float editor_split_ratio = 0.58F;
     ThemePreference theme = ThemePreference::system;
-    SidebarSection sidebar = SidebarSection::repository;
-    BottomPanelTab bottom_panel = BottomPanelTab::diagnostics;
+    PanelRegistryState panel_layout = default_panel_registry_state();
     bool sidebar_visible = true;
     bool bottom_panel_visible = true;
     bool editor_split = false;
@@ -49,5 +35,6 @@ struct AppShellStateLoad {
     -> AppShellStateLoad;
 [[nodiscard]] auto save_app_shell_state(const std::filesystem::path& repository,
                                         const AppShellState& state) -> std::string;
+void reset_app_shell_layout(AppShellState& state);
 
 } // namespace liquify

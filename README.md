@@ -16,9 +16,10 @@ completion, structural editing, and F7, F8 and F9 build, test and deploy through
 daemon. `--lake` adds review in place with cursor-anchored comments, native plugins register
 queries, commands and panels, and the assistant is off by default and opens no connection while
 off. `design/` carries the stamped Orama DTCG snapshot, generated native roles and embedded IBM
-Plex assets. The light/dark application shell hosts those panels in a persisted repository-local
-layout with native macOS menus. Pull-request CI packages macOS, Windows and Linux installers and
-`v*` tags publish them;
+Plex assets. The light/dark application shell hosts every surface through one panel registry;
+dock, editor-tab and floating placement plus focus persist per repository, layouts reset to their
+defaults, and one channel reports long-operation progress. Native macOS menus remain available.
+Pull-request CI packages macOS, Windows and Linux installers and `v*` tags publish them;
 [`docs/design/status.md`](docs/design/status.md) lists each area with its page, and the
 specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
 
@@ -59,6 +60,8 @@ its page there in the same change; this file is only the front door. The most us
   native constants, IBM Plex assets, and token gate.
 - [`docs/ui/app-shell.md`](docs/ui/app-shell.md): the persisted editor layout, themes, native
   macOS conventions, and light/dark screenshot matrix.
+- [`docs/ui/panels.md`](docs/ui/panels.md): the panel registry, docking, layout persistence,
+  commands, states, and shared progress channel.
 - [`docs/editor/README.md`](docs/editor/README.md): the buffer, the retained text layer and the
   smoke measurements.
 - [`docs/editor/interactive-analysis.md`](docs/editor/interactive-analysis.md),
