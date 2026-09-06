@@ -21,6 +21,7 @@
 #include <dlfcn.h>
 #endif
 
+#include "encoding/cbor.hpp"
 #include "liquid/graph.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
@@ -408,6 +409,7 @@ struct PluginModule {
     std::vector<Operation> queries;
     std::vector<CommandOperation> commands;
     std::vector<Operation> panels;
+    liquify_plugin_event_callbacks_v1 events{};
 
     ~PluginModule() {
         if (descriptor && descriptor->destroy) {
@@ -423,6 +425,117 @@ struct PluginModule {
 #endif
     }
 };
+
+namespace cbor = liquid::encoding::cbor;
+
+auto cbor_map(std::initializer_list<std::pair<std::string, cbor::value>> fields) -> cbor::value {
+    auto output = cbor::value::map{};
+    output.reserve(fields.size());
+    for (const auto& [key, value] : fields) {
+        output.emplace_back(cbor::value{key}, value);
+    }
+    return cbor::value{std::move(output)};
+}
+
+auto range_value(const std::optional<liquid::frontend_source_range>& range) -> cbor::value {
+    if (!range) {
+        return cbor::value{cbor::null{}};
+    }
+    const auto point = [](const liquid::frontend_source_position& value) {
+        return cbor_map({{"byte", cbor::value{value.byte}},
+                         {"line", cbor::value{value.line}},
+                         {"column", cbor::value{value.column}}});
+    };
+    return cbor_map({{"start", point(range->start)}, {"end", point(range->end)}});
+}
+
+auto activity_name(liquid::presence_activity value) -> std::string_view {
+    switch (value) {
+    case liquid::presence_activity::editing:
+        return "editing";
+    case liquid::presence_activity::reading:
+        return "reading";
+    case liquid::presence_activity::idle:
+        return "idle";
+    }
+    return "idle";
+}
+
+auto lease_kind_name(liquid::lease_kind value) -> std::string_view {
+    switch (value) {
+    case liquid::lease_kind::file:
+        return "file";
+    case liquid::lease_kind::symbol:
+        return "symbol";
+    case liquid::lease_kind::range:
+        return "range";
+    }
+    return "file";
+}
+
+auto lease_authority_name(liquid::lease_authority value) -> std::string_view {
+    switch (value) {
+    case liquid::lease_authority::advisory:
+        return "advisory";
+    case liquid::lease_authority::lake:
+        return "lake";
+    }
+    return "advisory";
+}
+
+auto epoch_seconds(std::chrono::sys_seconds value) -> std::int64_t {
+    return value.time_since_epoch().count();
+}
+
+auto presence_event(const liquid::presence& value) -> liquid::result<std::vector<std::byte>> {
+    return cbor::encode(
+        cbor_map({{"v", cbor::value{std::uint64_t{1}}},
+                  {"actor", cbor::value{value.actor.taap_id}},
+                  {"session", cbor::value{liquid::to_string(value.session)}},
+                  {"path", cbor::value{value.path}},
+                  {"range", range_value(value.range)},
+                  {"activity", cbor::value{std::string(activity_name(value.activity))}},
+                  {"at", cbor::value{epoch_seconds(value.at)}}}));
+}
+
+auto lease_event(const liquid::semantic_lease& value, bool active)
+    -> liquid::result<std::vector<std::byte>> {
+    const auto& claim = value.claim;
+    const auto claim_value =
+        cbor_map({{"path", cbor::value{claim.path}},
+                  {"kind", cbor::value{std::string(lease_kind_name(claim.kind))}},
+                  {"symbol", claim.symbol ? cbor::value{*claim.symbol} : cbor::value{cbor::null{}}},
+                  {"range", range_value(claim.range)}});
+    return cbor::encode(
+        cbor_map({{"v", cbor::value{std::uint64_t{1}}},
+                  {"actor", cbor::value{value.by.taap_id}},
+                  {"session", cbor::value{liquid::to_string(value.session)}},
+                  {"claim", std::move(claim_value)},
+                  {"authority", cbor::value{std::string(lease_authority_name(value.authority))}},
+                  {"since", cbor::value{epoch_seconds(value.since)}},
+                  {"expires", cbor::value{epoch_seconds(value.expires)}},
+                  {"active", cbor::value{active}}}));
+}
+
+auto attribution_event(std::string_view path,
+                       const liquid::change_id& change,
+                       std::span<const liquid::line_attribution> lines)
+    -> liquid::result<std::vector<std::byte>> {
+    auto values = cbor::value::array{};
+    values.reserve(lines.size());
+    for (const auto& line : lines) {
+        values.emplace_back(cbor_map({{"line", cbor::value{line.line}},
+                                      {"text", cbor::value{line.text}},
+                                      {"actor", cbor::value{line.by.taap_id}},
+                                      {"session", cbor::value{liquid::to_string(line.session)}},
+                                      {"change", cbor::value{liquid::to_string(line.change.value)}},
+                                      {"agent", cbor::value{line.agent}}}));
+    }
+    return cbor::encode(cbor_map({{"v", cbor::value{std::uint64_t{1}}},
+                                  {"path", cbor::value{std::string(path)}},
+                                  {"change", cbor::value{liquid::to_string(change.value)}},
+                                  {"lines", cbor::value{std::move(values)}}}));
+}
 
 auto status_code(std::uint32_t status) -> liquid::errc {
     switch (status) {
@@ -625,7 +738,7 @@ struct PluginHost::Impl {
 
     [[nodiscard]] auto add(const liquify_plugin_v1* descriptor, void* library, bool owns_library)
         -> liquid::result<void> {
-        constexpr auto descriptor_size = sizeof(liquify_plugin_v1);
+        constexpr auto descriptor_size = offsetof(liquify_plugin_v1, events);
         if (!descriptor || descriptor->abi_version != LIQUIFY_PLUGIN_ABI_VERSION ||
             descriptor->struct_size < descriptor_size || !nonempty(descriptor->name) ||
             (descriptor->query_count != 0 && !descriptor->queries) ||
@@ -687,6 +800,23 @@ struct PluginHost::Impl {
                     liquid::errc::invalid_argument, "plugin has an invalid panel", module->name));
             }
             module->panels.push_back({module->name, panel.name, panel.view_model});
+        }
+        if (descriptor->struct_size >= sizeof(liquify_plugin_v1) && descriptor->events &&
+            descriptor->events->abi_version == LIQUIFY_PLUGIN_EVENTS_ABI_VERSION &&
+            descriptor->events->struct_size >=
+                offsetof(liquify_plugin_event_callbacks_v1, presence)) {
+            const auto size = descriptor->events->struct_size;
+            module->events.abi_version = descriptor->events->abi_version;
+            module->events.struct_size = size;
+            if (size >= offsetof(liquify_plugin_event_callbacks_v1, lease)) {
+                module->events.presence = descriptor->events->presence;
+            }
+            if (size >= offsetof(liquify_plugin_event_callbacks_v1, attribution)) {
+                module->events.lease = descriptor->events->lease;
+            }
+            if (size >= sizeof(liquify_plugin_event_callbacks_v1)) {
+                module->events.attribution = descriptor->events->attribution;
+            }
         }
         module->descriptor = descriptor;
         module->library = library;
@@ -845,6 +975,53 @@ auto PluginHost::invoke_query(std::string_view name, std::span<const std::byte> 
             liquid::errc::not_found, "plugin query is not registered", std::string(name)));
     }
     return invoke_operation(*query, module->descriptor->plugin_context, arguments_cbor);
+}
+
+void PluginHost::publish_presence(const liquid::presence& value) {
+    auto event = presence_event(value);
+    if (!event) {
+        return;
+    }
+    const auto bytes =
+        std::span(reinterpret_cast<const std::uint8_t*>(event->data()), event->size());
+    const auto input = liquid_frontend_bytes_v1{bytes.data(), bytes.size()};
+    for (const auto& module : impl_->modules) {
+        if (module->events.presence) {
+            module->events.presence(module->descriptor->plugin_context, input);
+        }
+    }
+}
+
+void PluginHost::publish_lease(const liquid::semantic_lease& value, bool active) {
+    auto event = lease_event(value, active);
+    if (!event) {
+        return;
+    }
+    const auto bytes =
+        std::span(reinterpret_cast<const std::uint8_t*>(event->data()), event->size());
+    const auto input = liquid_frontend_bytes_v1{bytes.data(), bytes.size()};
+    for (const auto& module : impl_->modules) {
+        if (module->events.lease) {
+            module->events.lease(module->descriptor->plugin_context, input);
+        }
+    }
+}
+
+void PluginHost::publish_attribution(std::string_view path,
+                                     const liquid::change_id& change,
+                                     std::span<const liquid::line_attribution> lines) {
+    auto event = attribution_event(path, change, lines);
+    if (!event) {
+        return;
+    }
+    const auto bytes =
+        std::span(reinterpret_cast<const std::uint8_t*>(event->data()), event->size());
+    const auto input = liquid_frontend_bytes_v1{bytes.data(), bytes.size()};
+    for (const auto& module : impl_->modules) {
+        if (module->events.attribution) {
+            module->events.attribution(module->descriptor->plugin_context, input);
+        }
+    }
 }
 
 auto canonical_plugin_cbor(std::span<const std::byte> value)

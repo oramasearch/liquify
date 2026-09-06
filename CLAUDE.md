@@ -8,7 +8,7 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with indexed repository and graph-symbol navigation, interactive C/C++ analysis, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
+**Retained GPU editor with indexed repository and graph-symbol navigation, graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, indexes all paths and libliquid symbol records, annotates file
 kind plus drive and change state, and opens blobs into an editable in-memory buffer; save calls
