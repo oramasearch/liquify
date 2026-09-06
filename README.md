@@ -17,15 +17,16 @@ through libliquid as a drip; C and C++ buffers add graph-backed diagnostics, nav
 completion, structural editing, and F7, F8 and F9 build, test and deploy through the attached
 daemon. The editor adds multi-cursor and column editing, repository-configured indentation,
 liquid syntax and collaboration gutters, search/replace, and operation-log undo/redo.
-`--lake` adds review in place with cursor-anchored comments, native plugins register
-queries, commands and panels, and the assistant is off by default and opens no connection while
-off. `design/` carries the stamped Orama DTCG snapshot, generated native roles and embedded IBM
-Plex assets. The light/dark application shell hosts every surface through one panel registry;
-dock, editor-tab and floating placement plus focus persist per repository, layouts reset to their
-defaults, and one channel reports long-operation progress. Native macOS menus remain available.
-Pull-request CI packages macOS, Windows and Linux installers and `v*` tags publish them;
-[`docs/design/status.md`](docs/design/status.md) lists each area with its page, and the
-specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
+`--lake` adds review in place with cursor-anchored comments. Multiplayer surfaces presence,
+per-line attribution and semantic lease controls, including lease events delivered to native
+plugins. Native plugins register queries, commands and panels, and the assistant is off by default
+and opens no connection while off. `design/` carries the stamped Orama DTCG snapshot, generated
+native roles and embedded IBM Plex assets. The light/dark application shell hosts every surface
+through one panel registry; dock, editor-tab and floating placement plus focus persist per
+repository, layouts reset to their defaults, and one channel reports long-operation progress.
+Native macOS menus remain available. Pull-request CI packages macOS, Windows and Linux installers
+and `v*` tags publish them; [`docs/design/status.md`](docs/design/status.md) lists each area with
+its page, and the specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
 
 ## Build and run
 
@@ -52,6 +53,33 @@ of the build in [`docs/build/local.md`](docs/build/local.md). Linux requirements
 toolchains are in [`docs/build/ci.md`](docs/build/ci.md).
 
 ## Documentation
+| Path | Role |
+|---|---|
+| `include/liquify/app.hpp`, `src/app.cpp` | the application shell: window, renderer, ImGui context, frame loop. **The one TU that includes SDL3 or ImGui.** |
+| `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory text buffer, input modes, and libliquid blob read/write path |
+| `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
+| `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: reads the root on a worker, loads nested trees on expansion, and exposes entries, open latency, or an error |
+| `include/liquify/version.hpp`, `src/version.cpp` | version |
+| `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
+| `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |
+| `include/liquify/editor_graph.hpp`, `src/editor_graph.cpp` | background editor-query runtime, daemon host/attach lifetime, asynchronous query snapshots and status data |
+| `docs/editor/build.md` | graph build, test and deploy panels, event states, bindings and measurement record |
+| `include/liquify/structural_edit.hpp`, `src/structural_edit.cpp` | canonical node-level edit records, selection, rename, extract-function and repository application |
+| `include/liquify/review.hpp`, `src/review.cpp` | coroutine-native review model/controller: forge listing and state, sync pull, text diff, cursor comments, and anchor advancement |
+| `include/liquify/context_builder.hpp`, `src/context_builder.cpp` | byte-budgeted, inspectable assistant context assembled from graph facts |
+| `include/liquify/ai_provider.hpp`, `src/ai_provider.cpp` | streaming provider interface and Anthropic Messages implementation |
+| `include/liquify/ai_config.hpp`, `src/ai_config.cpp` | default-off repository/global configuration and credential lookup |
+| `include/liquify/assistant.hpp`, `src/assistant.cpp` | assistant state, proposal acceptance, and local assisted-edit record |
+| `include/liquify/plugin.hpp`, `src/plugin.cpp` | checked native plugin host, global/repository configuration, canonical-CBOR validation, graph query registration, commands, and panel view models |
+| `include/liquify/multiplayer.hpp`, `src/multiplayer.cpp` | liquid-backed presence, per-line attribution, lease operations, session identity, and editor display text |
+| `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
+| `docs/multiplayer.md` | multiplayer editor surface, plugin callback delivery, authorization boundary, and verification |
+| `packaging/` | hand-built macOS, Windows, AppImage, and Flatpak release inputs used until liquid's projection targets land |
+| `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `version`, `--smoke [N]`, `--help` |
+| `tests/` | GoogleTest; `ctest --test-dir build` |
+| `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
+| `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |
+| `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |
 
 [`docs/README.md`](docs/README.md) indexes one folder per topic. Every change to the system lands
 its page there in the same change; this file is only the front door. The most useful pages:

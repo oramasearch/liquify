@@ -69,8 +69,10 @@ per-definition C/C++ graph actions, text-anchor mapping, the coroutine-native fo
 and test double, the format registry, structural editing, hot updates, and relocation-checked
 install trees. It carries the shared `liquify_plugin_v1` descriptor merged in liquid PR #239,
 build plans and repository builds with public build event streams, graph test actions,
-per-reference sync outcomes, streaming source import, flow control, per-line attribution,
-operation-log undo, the drive-backed clone path, and multiplayer presence and session records.
+per-reference sync outcomes, streaming source import, flow control, repository presence,
+operation-log undo, liquid #30's scoped sessions, semantic leases, transient presence, and
+compaction epochs, plus liquid #248's per-line attribution query and versioned plugin event
+callbacks. It also provides the drive-backed clone path used by the repository front door.
 Checkpoints written before
 the automerge-cpp adoption in liquid #136 do not load. liquid has its own Capy, Corosio and
 automerge-cpp submodules, so

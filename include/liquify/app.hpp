@@ -13,6 +13,7 @@
 #include "liquify/app_state.hpp"
 #include "liquify/editor_model.hpp"
 #include "liquify/first_run.hpp"
+#include "liquify/multiplayer.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
 #include "liquify/structural_edit.hpp"
@@ -118,6 +119,11 @@ private:
     void poll_plugins();
     void sync_panel_system();
     void reset_panel_layout();
+    void poll_multiplayer();
+    void refresh_multiplayer();
+    void take_editor_lease();
+    void release_editor_lease();
+    [[nodiscard]] bool editor_mutation_allowed() const;
     void poll_editor_graph();
     void apply_change(std::size_t first_line, std::size_t erased_lines, std::size_t inserted_lines);
     void handle_key(std::uint32_t key, std::uint16_t modifiers);
@@ -157,6 +163,9 @@ private:
     std::unique_ptr<ReviewController> review_;
     std::unique_ptr<Assistant> assistant_;
     std::shared_ptr<PluginHost> plugin_host_;
+    std::optional<MultiplayerSnapshot> multiplayer_;
+    std::future<liquid::result<MultiplayerSnapshot>> multiplayer_refresh_;
+    liquid::session_id multiplayer_session_;
     std::unique_ptr<TextLayoutCache> layouts_;
     std::unique_ptr<RetainedTextLayer> text_layer_;
     AppShellState shell_state_;
@@ -205,6 +214,7 @@ private:
     std::chrono::steady_clock::time_point next_status_refresh_{};
     std::chrono::steady_clock::time_point next_review_refresh_{};
     std::chrono::steady_clock::time_point next_plugin_refresh_{};
+    std::chrono::steady_clock::time_point next_multiplayer_refresh_{};
     std::uint64_t definition_generation_{};
     std::uint64_t history_generation_{};
     std::uint64_t ai_context_generation_{};

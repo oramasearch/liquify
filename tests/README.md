@@ -43,6 +43,11 @@ Both paths demand its query through `InteractiveAnalysis`, invoke its command, a
 Configuration coverage loads global and repository paths, deduplicates the shared module, and
 reports a missing path without losing that module. The suite also refuses a mismatched ABI and
 non-canonical CBOR, then proves one panel error does not hide a healthy panel from the same host.
+It also installs an ABI-v1 event table and checks that presence, lease, and attribution callbacks
+each receive canonical CBOR.
+
+`test_multiplayer.cpp` checks the exact editor labels for presence, lease holders, and per-line
+attribution, including the delegated-agent marker, session, and change identifiers.
 
 `test_editor_graph.cpp` proves the application runtime hosts liquid's daemon for the first client,
 attaches when a daemon already owns the checkout, serializes overlay mutations, publishes

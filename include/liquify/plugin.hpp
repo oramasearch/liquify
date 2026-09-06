@@ -11,6 +11,7 @@
 
 #include "liquid/error.hpp"
 #include "liquid/frontend_abi.h"
+#include "liquid/session.hpp"
 
 namespace liquid {
 class query_registry;
@@ -75,6 +76,12 @@ public:
     [[nodiscard]] auto invoke_query(std::string_view name,
                                     std::span<const std::byte> arguments_cbor)
         -> liquid::result<std::vector<std::byte>>;
+
+    void publish_presence(const liquid::presence& value);
+    void publish_lease(const liquid::semantic_lease& value, bool active = true);
+    void publish_attribution(std::string_view path,
+                             const liquid::change_id& change,
+                             std::span<const liquid::line_attribution> lines);
 
 private:
     struct Impl;
