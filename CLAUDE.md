@@ -8,7 +8,7 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed interactive C/C++ analysis and optional AI.**
+**Retained GPU editor with graph-backed interactive C/C++ analysis, structural editing and optional AI.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
 libliquid and produces a drip.
@@ -20,7 +20,11 @@ declarations from closed files without retaining full parse trees. Graph-backed 
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor
 surface renders those diagnostics inline and in a panel, exposes definition, hover and completion
-demands, and reports daemon drip triggers and the validation backlog. A default-off assistant
+demands, and reports daemon drip triggers and the validation backlog. Syntax-node selection,
+cross-file rename and C/C++ extract-function are serialized on the editor worker and applied as
+fingerprinted node edits with one drip per changed file. The headless `--apply-edits` command uses
+the same canonical CBOR records as the editor. This is the local adapter for bridge decision 30
+until libliquid owns the permanent structural edit operation. A default-off assistant
 assembles inspectable context from the same graph, streams through a pinned provider transport,
 and previews edits until the user accepts one normal drip. When off it constructs no provider and
 opens no connection. Native plugins use liquid's versioned frontend C boundary to register graph

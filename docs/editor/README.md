@@ -3,6 +3,9 @@
 [`ai.md`](ai.md) records the optional assistant, its offline switch guarantee, graph-derived
 inspectable context, provider contract, keyboard commands, and accept-only edit path.
 
+[`structural-editing.md`](structural-editing.md) records syntax-node selection, canonical edit
+records, rename and extract-function previews, the headless agent surface and their limits.
+
 **Decision.** The editor buffer is a retained GPU text layer inside Dear ImGui (bridge decision
 15). ImGui owns the window, repository panel and controls. `src/app.cpp` uses the SDL renderer
 directly for buffer text, selection and cursor; no other translation unit includes SDL or ImGui.
@@ -127,6 +130,26 @@ ai context: definition=repository references=20 bytes=3215 whole_file_bytes=2754
 
 The graph context is 1.17% of the naive file payload and names every omission when a configured
 budget excludes a fact.
+
+## Structural editing measurement
+
+`liquify-structural-edit-bench` copies selected files from liquid's own source tree into a fresh
+libliquid repository. It chooses the most frequent identifier with at least 50 references, measures
+rename preview plus node application, finds a statement node spanning at least 30 lines, and
+measures extract preview plus application. Build benchmarks with `-DLIQUIFY_BUILD_BENCH=ON`.
+
+Measured on 2026-09-06 on the same machine as the editor measurements above. The load average was
+read immediately after the benchmark:
+
+```text
+$ ./build/liquify-structural-edit-bench modules/liquid build/structural-measure-repository-5
+structural edit: rename_symbol=unexpected references=667 applied=667 rename_ms=23684.745 extract_lines=36 extract_edits=11 extract_ms=123.852
+$ sysctl -n vm.loadavg
+{ 92.44 87.23 82.73 }
+```
+
+The reported duration is end to end through graph reference discovery, fingerprint validation,
+incremental buffer reparses and one repository drip for each changed file.
 
 ## Verify
 
