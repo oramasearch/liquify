@@ -52,6 +52,8 @@ Issue #38's general screenshot leaf has not landed, so this change supplies the 
 needed to review the shell. `--screenshot` selects one of nine seeded shell states, SDL's dummy
 video driver and software renderer produce a hidden fixed 1440×900 frame, and the in-tree PNG
 writer captures RGBA output. No display, repository, network, or container is involved.
+The structural capture uses a fixed edit-preview model, avoiding frame-timed caret state while the
+live rename and extract-function modals keep their normal input behavior.
 
 ```sh
 ./build/liquify --screenshot editor --theme dark --out editor-dark.png

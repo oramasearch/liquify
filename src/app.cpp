@@ -691,10 +691,6 @@ App::App(AppOptions options) : options_(std::move(options)) {
         } else {
             shell_state_.bottom_panel = BottomPanelTab::diagnostics;
         }
-        if (state == "structural") {
-            rename_open_ = true;
-            structural_name_ = "render_shell";
-        }
     }
 }
 
@@ -2168,6 +2164,27 @@ void App::draw_command_palette() {
 }
 
 void App::draw_structural_editing() {
+    if (screenshot_mode() && *options_.screenshot_state == "structural") {
+        const auto center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5F, 0.5F));
+        ImGui::SetNextWindowSize(ImVec2(420.0F, 210.0F), ImGuiCond_Always);
+        if (ImGui::Begin("Structural edit preview",
+                         nullptr,
+                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoSavedSettings)) {
+            ImGui::TextUnformatted("Rename symbol: render_shell to draw_shell");
+            ImGui::Separator();
+            ImGui::TextUnformatted("src/app.cpp");
+            ImGui::BulletText("replace function_definition bytes 3812..4059");
+            ImGui::TextDisabled("1 file selected · fingerprint verified");
+            ImGui::Separator();
+            ImGui::Button("Accept selected file");
+            ImGui::SameLine();
+            ImGui::Button("Dismiss");
+        }
+        ImGui::End();
+        return;
+    }
     if (rename_open_) {
         ImGui::OpenPopup("Rename symbol");
         rename_open_ = false;
