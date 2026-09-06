@@ -204,6 +204,8 @@ jobs:
               org.freedesktop.Platform//26.08 \
               org.freedesktop.Sdk//26.08; then
             cp build/liquify packaging/flatpak/liquify
+            cp build/frontends/liquid-frontend-tree-sitter.so \
+              packaging/flatpak/liquid-frontend-tree-sitter.so
             flatpak-builder \
               --user \
               --disable-rofiles-fuse \
@@ -212,6 +214,7 @@ jobs:
               "$RUNNER_TEMP/liquify-flatpak-build" \
               packaging/flatpak/com.oramasearch.Liquify.yml
             rm packaging/flatpak/liquify
+            rm packaging/flatpak/liquid-frontend-tree-sitter.so
             echo "Flatpak validation: passed" | tee -a "$GITHUB_STEP_SUMMARY"
           else
             echo "Flatpak validation: skipped (Freedesktop 26.08 runtime unavailable)" \

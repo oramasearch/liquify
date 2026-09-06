@@ -5,6 +5,8 @@ Liquify packages the existing release executable directly until liquid issues
 [#77](https://github.com/oramasearch/liquid/issues/77) provide platform projection and signing.
 The scripts under [`packaging/`](../../packaging/) are shared by pull-request CI and the tag release
 workflow, so a published installer has already followed the same build and verification path.
+Each artifact carries the adjacent `frontends/liquid-frontend-tree-sitter` module used by the
+editor; platform dependency collection and signing treat it as executable code.
 The macOS dependency policy, bundle audit, and relocation test are documented in
 [`macos.md`](macos.md).
 
