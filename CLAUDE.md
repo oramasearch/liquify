@@ -22,8 +22,11 @@ The stamped Orama DTCG snapshot under `design/` generates native light and dark 
 embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The
 light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel and
 status bar from those roles; repository-local state persists its dividers and selected surfaces,
-and macOS exposes the command groups and Cmd bindings through the native menu bar. C and C++ stubs
-are graph query values that resolve
+and macOS exposes the command groups and Cmd bindings through the native menu bar. The shell,
+editor, panels, and plugins share one command registry; the fuzzy palette shows recent commands
+and resolved bindings, typed `settings.liquid` files provide global and repository keymap
+overrides with conflict reporting, and `--command` invokes registered headless commands. C and C++
+stubs are graph query values that resolve
 declarations from closed files without retaining full parse trees. Graph-backed editor queries run
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor

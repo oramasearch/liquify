@@ -36,13 +36,18 @@ non-zero.
 **CLI.** `liquify` opens the hello state; `liquify <path>` opens the repository panel and lets a
 blob at any expanded depth be opened in the editor. C and C++ buffers add graph-query controls, an
 inline diagnostics layer, diagnostics/completion and configured plugin panels, plugin commands in
-the command palette, and a daemon status line;
+the shared command registry, fuzzy palette and native macOS menus, and a daemon status line;
 `liquify --lake <repository-url> <path>` adds the review panel and reads its bearer from
 `LIQUID_TOKEN`;
 `liquify --print-tree <path>` prints name, kind and mode without a display;
 `liquify --apply-edits <file> <path>` applies canonical-CBOR structural edits without a display
 and writes the result record to standard output
 ([`../editor/structural-editing.md`](../editor/structural-editing.md));
+`liquify --command <name>` invokes a registered headless command by its stable name; built-in
+version and reference commands write text, configured plugin commands consume an empty
+canonical-CBOR map and write canonical CBOR, and UI-only commands report that an open IDE is
+required. `liquify docs commands` and `liquify docs keymap` generate or check the registry-backed
+files under [`../ui/commands.md`](../ui/commands.md);
 `liquify --screenshot <state> --out <png>` renders one named, fixed shell state through SDL's
 dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md),
 [`../ui/app-shell.md`](../ui/app-shell.md)); `liquify --smoke [N]` scrolls and edits a generated
@@ -62,8 +67,8 @@ install trees. It carries the shared `liquify_plugin_v1` descriptor merged in li
 build plans and repository builds with public build event streams, graph test actions,
 per-reference sync outcomes, streaming source import, and flow control. Checkpoints written before
 the automerge-cpp adoption in liquid #136 do not load. The pin also carries liquid #74's public
-typed `.liquid` parser, checker, formatter, and configuration records. liquid has its own Capy, Corosio and
-automerge-cpp submodules, so
+typed `.liquid` parser, checker, formatter, and configuration records. liquid has its own Capy,
+Corosio and automerge-cpp submodules, so
 checkouts and pin updates must initialize submodules recursively. The
 pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
 the liquid change it takes:

@@ -97,11 +97,12 @@ retained line layer.
 
 [`build.md`](build.md) describes the graph-backed panels. F7 requests the configured repository
 build through the in-process daemon, F8 runs registered graph tests, F9 pushes saved drips to the
-configured sync remote, and primary-modifier+P opens the corresponding command-palette entries.
-The status line shows active actions and the most recent result.
+configured sync remote, and primary-modifier+Shift+P opens the corresponding command-palette
+entries. The status line shows active actions and the most recent result.
 
-Configured plugin commands are appended to the keyboard-first command palette with their declared
-default bindings. Data-only plugin text panels render below completion results. A panel operation
+Configured plugin commands are appended to the shared registry with their declared default
+bindings, so the keyboard-first palette and native macOS menu expose the same commands. Data-only
+plugin text panels render below completion results. A panel operation
 that returns an error or invalid view model displays that error in its own row without hiding other
 plugin panels. The native boundary and configuration are recorded in
 [`../plugins/README.md`](../plugins/README.md).

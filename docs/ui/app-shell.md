@@ -37,8 +37,9 @@ The source and token gate are described in [`design-system.md`](design-system.md
 ## macOS conventions
 
 On macOS, CMake compiles `src/app.cpp` as Objective-C++ so it remains the only SDL/ImGui
-translation unit while installing an AppKit menu bar. File, Edit, Selection, View, Go, Run, and
-Review are native top-level groups. Cmd-S saves, Cmd-Shift-P opens the palette, Cmd-B toggles the
+translation unit while installing an AppKit menu bar. The menu bar is generated from the same
+top-level registry groups, active bindings, and plugin commands shown by the palette. Cmd-S saves,
+Cmd-Shift-P opens the palette, Cmd-B toggles the
 sidebar, Cmd-J toggles the bottom panel, Cmd-backslash toggles the editor split, and Cmd-Shift-T
 cycles the theme. F7, F8, F9, F12, and F1 retain their existing build, test, deploy, definition,
 and hover behavior.
@@ -48,7 +49,7 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects nine seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects ten seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -72,9 +73,11 @@ The committed evidence is:
 | Assistant | [light](screenshots/assistant-light.png) | [dark](screenshots/assistant-dark.png) |
 | Review | [light](screenshots/review-light.png) | [dark](screenshots/review-dark.png) |
 | Plugins | [light](screenshots/plugins-light.png) | [dark](screenshots/plugins-dark.png) |
+| Command palette | [light](screenshots/command-palette-light.png) | [dark](screenshots/command-palette-dark.png) |
 | Structural editing | [light](screenshots/structural-editing-light.png) | [dark](screenshots/structural-editing-dark.png) |
 
-`Screenshot.EditorRendersSelectedSource` and `Screenshot.PanelRendersDiagnostics` read the
+`Screenshot.EditorRendersSelectedSource`, `Screenshot.PanelRendersDiagnostics`, and
+`Screenshot.CommandPaletteShowsSearchAndRecentCommands` read the
 generated PNG files and check stable shell pixels; `AppShellState` tests cover repository-local
 round trips and invalid state. The screenshot script checks the complete matrix and each capture
 command reports its dimensions.

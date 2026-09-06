@@ -18,7 +18,7 @@ auto render_state(std::string_view state) -> ScreenshotImage {
   auto options = AppOptions{};
   options.screenshot_state = std::string(state);
   options.screenshot_output = output;
-    options.max_frames = 2;
+  options.max_frames = 2;
   auto app = App(std::move(options));
   if (!app.init()) {
     ADD_FAILURE() << "screenshot app initialization failed";
@@ -42,11 +42,19 @@ TEST(Screenshot, EditorRendersSelectedSource) {
 }
 
 TEST(Screenshot, PanelRendersDiagnostics) {
-    const auto image = render_state("diagnostics-light");
+  const auto image = render_state("diagnostics-light");
   EXPECT_TRUE(test::region_contains_color(image, {330, 503, 930, 34},
                                           {237, 245, 255, 255}, 1, 10'000));
   EXPECT_TRUE(test::region_contains_color(image, {330, 570, 300, 18},
                                           {186, 27, 35, 255}, 40, 2));
+}
+
+TEST(Screenshot, CommandPaletteShowsSearchAndRecentCommands) {
+  const auto image = render_state("command-palette-light");
+  EXPECT_TRUE(test::region_contains_color(image, {260, 140, 760, 520},
+                                          {255, 255, 255, 255}, 1, 100'000));
+  EXPECT_TRUE(test::region_contains_color(image, {270, 180, 725, 34},
+                                          {244, 244, 244, 255}, 1, 5'000));
 }
 
 } // namespace

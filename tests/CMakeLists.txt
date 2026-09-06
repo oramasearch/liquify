@@ -1,6 +1,7 @@
 add_executable(liquify-tests
   test_ai.cpp
   test_app_state.cpp
+  test_command.cpp
   test_editor_buffer.cpp
   test_editor_graph.cpp
   test_interactive_analysis.cpp
@@ -38,3 +39,10 @@ add_test(
           -DLIQUIFY_EXECUTABLE=$<TARGET_FILE:liquify>
           -DTEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}
           -P ${CMAKE_CURRENT_SOURCE_DIR}/test_print_tree_error.cmake)
+
+add_test(
+  NAME liquify-command-cli
+  COMMAND ${CMAKE_COMMAND}
+          -DLIQUIFY_EXECUTABLE=$<TARGET_FILE:liquify>
+          -DLIQUIFY_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/test_command_cli.cmake)

@@ -129,6 +129,7 @@ add_library(liquify-core STATIC
   src/ai_provider.cpp
   src/assistant.cpp
   src/app_state.cpp
+  src/command.cpp
   src/context_builder.cpp
   src/editor_buffer.cpp
   src/editor_graph.cpp

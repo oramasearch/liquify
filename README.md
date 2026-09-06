@@ -15,7 +15,10 @@ through libliquid as a drip; C and C++ buffers add graph-backed diagnostics, nav
 completion, structural editing, and F7, F8 and F9 build, test and deploy through the attached
 daemon. `--lake` adds review in place with cursor-anchored comments, native plugins register
 queries, commands and panels, and the assistant is off by default and opens no connection while
-off. `design/` carries the stamped Orama DTCG snapshot, generated native roles and embedded IBM
+off. A shared registry makes every shell, editor, panel, and plugin command fuzzy-searchable,
+rebindable through typed `settings.liquid` keymaps, visible in native macOS menus, and addressable
+by `--command`; its generated reference is [`docs/ui/commands.md`](docs/ui/commands.md).
+`design/` carries the stamped Orama DTCG snapshot, generated native roles and embedded IBM
 Plex assets. The light/dark application shell hosts those panels in a persisted repository-local
 layout with native macOS menus. Pull-request CI packages macOS, Windows and Linux installers and
 `v*` tags publish them;
@@ -59,6 +62,8 @@ its page there in the same change; this file is only the front door. The most us
   native constants, IBM Plex assets, and token gate.
 - [`docs/ui/app-shell.md`](docs/ui/app-shell.md): the persisted editor layout, themes, native
   macOS conventions, and light/dark screenshot matrix.
+- [`docs/ui/commands.md`](docs/ui/commands.md): the generated command registry, platform defaults,
+  typed keymap overrides, conflicts, native menus, and headless invocation.
 - [`docs/editor/README.md`](docs/editor/README.md): the buffer, the retained text layer and the
   smoke measurements.
 - [`docs/editor/interactive-analysis.md`](docs/editor/interactive-analysis.md),
