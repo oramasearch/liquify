@@ -33,31 +33,32 @@ non-zero.
 
 **CLI.** `liquify` opens the hello state; `liquify <path>` opens the repository panel and lets a
 blob at any expanded depth be opened in the editor. C and C++ buffers add graph-query controls, an
-inline diagnostics layer, diagnostics/completion panel and daemon status line;
+inline diagnostics layer, diagnostics/completion and configured plugin panels, plugin commands in
+the command palette, and a daemon status line;
 `liquify --print-tree <path>` prints name, kind and mode without a display; `liquify --smoke [N]`
 scrolls and edits a generated 50,000-line buffer for N frames (default 30), prints latency metrics,
 and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`.
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is `49627a7`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
+`liquid::liquid`. The pin is `607869676b84`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
 distribution foundation, compact shallow repository checkpoints, the persisted demand-driven
 query graph from liquid #20, tree-diff and record-enumeration APIs, and the per-checkout daemon and
 cursor fan-out from liquid #21. It also includes liquid #65's registered frontend modules and
-per-definition C/C++ graph actions, liquid #181's scheduler and worker fleet, liquid #184's
-per-reference sync authorization, liquid #185's repository search index, and liquid #191's
-continuous clean-rebuild graph validation. It adds liquid #192's per-reference push outcomes,
-liquid #193's daemon build-event streams and test actions, and liquid #200's configured repository
-build plans. Checkpoints written before the
-automerge-cpp adoption in liquid #136 do not load. liquid has its own Capy, Corosio, automerge-cpp and oramacore-cpp
-submodules, so
+per-definition C/C++ graph actions, the format registry, structural editing, hot updates, and
+relocation-checked install trees. It carries the shared `liquify_plugin_v1` descriptor merged in
+liquid PR #239, build plans and repository builds with public build event streams, graph test
+actions, per-reference sync outcomes, streaming source import, and flow control. Checkpoints
+written before the automerge-cpp adoption in liquid #136 do not load. liquid has its own Capy,
+Corosio and automerge-cpp submodules, so
 checkouts and pin updates must initialize submodules recursively. The
 pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
 the liquid change it takes:
 
 ```sh
 git -C modules/liquid fetch origin && git -C modules/liquid checkout <sha>
-git -C modules/liquid submodule update --init --recursive
+git add modules/liquid
+git submodule update --init --recursive
 cmake --build build && ./build/liquify --smoke && ctest --test-dir build
 git add modules/liquid && git commit -m "Bump liquid to <sha>: <why>"
 ```
@@ -67,6 +68,8 @@ written and reopened through the same public API. A separate corrupt-marker case
 liquid error reaches the view and that `--print-tree` exits non-zero with that message. Buffer and
 layout-cache unit tests cover editing, UTF-8 cursor movement, save, reuse and line-local
 invalidation. No repository fixture bytes are committed.
+Plugin tests cover configured global and repository paths; a bad module remains a visible load
+failure while later valid modules register normally.
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.
