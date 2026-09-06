@@ -40,6 +40,9 @@ liquid is the tool. lake is where it collects. liquify is where you work.
 > pushes saved drips to the configured sync remote and reports every reference outcome, including
 > an authorization refusal while accepted references continue. Failed action diagnostics render on
 > their affected editor lines.
+> Pull-request CI also produces a hardened-runtime macOS `pkg` and `dmg`, a signed and install-tested
+> Windows MSIX, and an AppImage exercised on Ubuntu and Fedora. `v*` tags publish those installers
+> with signed and unsigned SHA-256 records; notarization runs when the release secrets are present.
 > The specification lives in
 > [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
 > [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
@@ -52,9 +55,11 @@ in-tree and linked); Corosio and Boost.HTTP are separately pinned assistant tran
 SDL3, Dear ImGui and GoogleTest are fetched by CMake; SDL is linked static so the result is one
 binary.
 
-Every push and pull request repeats the clean-clone build on Linux, macOS, and Windows, then
-runs the tests, version command, and display-backed smoke self-test. See
-[`docs/build/ci.md`](docs/build/ci.md) for the runner toolchains and dependency cache.
+Every main-branch push and pull request repeats the clean-clone release build on Linux, macOS, and
+Windows, runs the tests, version command, and display-backed smoke self-test, and produces the
+native installers. `v*` tags publish the verified artifacts and their SHA-256 records. See
+[`docs/build/ci.md`](docs/build/ci.md) for the runner toolchains and
+[`docs/packaging/README.md`](docs/packaging/README.md) for signing and verification.
 
 ```sh
 git clone --recurse-submodules git@github.com:oramasearch/liquify.git
@@ -93,6 +98,7 @@ ctest --test-dir build
 | `include/liquify/assistant.hpp`, `src/assistant.cpp` | assistant state, proposal acceptance, and local assisted-edit record |
 | `include/liquify/plugin.hpp`, `src/plugin.cpp` | checked native plugin host, global/repository configuration, canonical-CBOR validation, graph query registration, commands, and panel view models |
 | `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
+| `packaging/` | hand-built macOS, Windows, AppImage, and Flatpak release inputs used until liquid's projection targets land |
 | `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `modules/liquid` | **libliquid**, pinned as a submodule; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |

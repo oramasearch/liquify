@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -41,6 +42,8 @@ jobs:
           sudo /tmp/llvm.sh 19
           sudo apt-get install -y \
             clang-19 \
+            flatpak \
+            flatpak-builder \
             libstdc++-14-dev \
             ninja-build \
             pkg-config \
@@ -65,6 +68,7 @@ jobs:
             liburing-dev \
             libwayland-dev \
             libfuse3-dev \
+            patchelf \
             libx11-dev \
             libxcursor-dev \
             libxext-dev \
@@ -83,9 +87,11 @@ jobs:
           llvm_prefix="$(brew --prefix llvm)"
           openssl_prefix="$(brew --prefix openssl@3)"
           echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
-          echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
-          echo "OPENSSL_ROOT_DIR=$openssl_prefix" >> "$GITHUB_ENV"
+          {
+            echo "CC=$llvm_prefix/bin/clang"
+            echo "CXX=$llvm_prefix/bin/clang++"
+            echo "OPENSSL_ROOT_DIR=$openssl_prefix"
+          } >> "$GITHUB_ENV"
 
       - name: Install Windows toolchain
         if: runner.os == 'Windows'
@@ -110,7 +116,7 @@ jobs:
           CXX: clang++-19
         run: |
           clang++-19 --version
-          cmake -S . -B build -G Ninja
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build
           ctest --test-dir build --output-on-failure
           ./build/liquify version
@@ -121,7 +127,7 @@ jobs:
         shell: bash
         run: |
           "$CXX" --version
-          cmake -S . -B build -G Ninja
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build
           ctest --test-dir build --output-on-failure
           ./build/liquify version
@@ -157,9 +163,217 @@ jobs:
 
           & 'C:\Program Files\LLVM\bin\clang-cl.exe' --version
           cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_C_COMPILER='C:/Program Files/LLVM/bin/clang-cl.exe' `
             -DCMAKE_CXX_COMPILER='C:/Program Files/LLVM/bin/clang-cl.exe'
           cmake --build build
           ctest --test-dir build --output-on-failure
           .\build\liquify.exe version
           .\build\liquify.exe --smoke 30
+
+      - name: Download pinned linuxdeploy
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          LINUXDEPLOY_SHA256: c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+          LINUXDEPLOY_URL: https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+        run: |
+          curl --fail --location --silent --show-error \
+            "$LINUXDEPLOY_URL" \
+            --output "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage"
+          echo "$LINUXDEPLOY_SHA256  $RUNNER_TEMP/linuxdeploy-x86_64.AppImage" \
+            | sha256sum --check
+          chmod 755 "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage"
+
+      - name: Build and verify AppImage on Ubuntu
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          packaging/linux/package.sh \
+            build/liquify \
+            "$RUNNER_TEMP/linuxdeploy-x86_64.AppImage" \
+            dist
+
+      - name: Validate Flatpak manifest
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          if flatpak install --user --noninteractive -y flathub \
+              org.freedesktop.Platform//26.08 \
+              org.freedesktop.Sdk//26.08; then
+            cp build/liquify packaging/flatpak/liquify
+            flatpak-builder \
+              --user \
+              --disable-rofiles-fuse \
+              --force-clean \
+              --build-only \
+              "$RUNNER_TEMP/liquify-flatpak-build" \
+              packaging/flatpak/com.oramasearch.Liquify.yml
+            rm packaging/flatpak/liquify
+            echo "Flatpak validation: passed" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Flatpak validation: skipped (Freedesktop 26.08 runtime unavailable)" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Import macOS signing certificates
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CERTIFICATE_P12: ${{ secrets.LIQUIFY_APPLE_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.LIQUIFY_APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -n "$CERTIFICATE_P12" ]]; then
+            keychain_path="$RUNNER_TEMP/liquify-signing.keychain-db"
+            keychain_password="$(openssl rand -hex 24)"
+            certificate_path="$RUNNER_TEMP/liquify-signing.p12"
+            printf '%s' "$CERTIFICATE_P12" | base64 -D > "$certificate_path"
+            security create-keychain -p "$keychain_password" "$keychain_path"
+            security set-keychain-settings -lut 21600 "$keychain_path"
+            security unlock-keychain -p "$keychain_password" "$keychain_path"
+            security import "$certificate_path" \
+              -P "$CERTIFICATE_PASSWORD" \
+              -A \
+              -k "$keychain_path"
+            security set-key-partition-list \
+              -S apple-tool:,apple:,codesign: \
+              -s \
+              -k "$keychain_password" \
+              "$keychain_path"
+            security list-keychains -d user -s "$keychain_path"
+            echo "LIQUIFY_APPLE_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
+          else
+            echo "macOS release certificates: unavailable; using ad hoc signing"
+          fi
+
+      - name: Prepare App Store Connect key
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          NOTARY_KEY_P8: ${{ secrets.LIQUIFY_APPLE_NOTARY_KEY_P8 }}
+        run: |
+          if [[ -n "$NOTARY_KEY_P8" ]]; then
+            notary_key_path="$RUNNER_TEMP/liquify-notary-key.p8"
+            printf '%s' "$NOTARY_KEY_P8" | base64 -D > "$notary_key_path"
+            chmod 600 "$notary_key_path"
+            echo "LIQUIFY_APPLE_NOTARY_KEY_PATH=$notary_key_path" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and verify macOS installers
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          LIQUIFY_APPLE_APPLICATION_IDENTITY: ${{ secrets.LIQUIFY_APPLE_APPLICATION_IDENTITY }}
+          LIQUIFY_APPLE_INSTALLER_IDENTITY: ${{ secrets.LIQUIFY_APPLE_INSTALLER_IDENTITY }}
+          LIQUIFY_APPLE_NOTARY_KEY_ID: ${{ secrets.LIQUIFY_APPLE_NOTARY_KEY_ID }}
+          LIQUIFY_APPLE_NOTARY_ISSUER_ID: ${{ secrets.LIQUIFY_APPLE_NOTARY_ISSUER_ID }}
+        run: packaging/macos/package.sh build/liquify dist
+
+      - name: Remove temporary macOS keychain
+        if: runner.os == 'macOS' && always()
+        shell: bash
+        run: |
+          if [[ -n "${LIQUIFY_APPLE_KEYCHAIN_PATH:-}" ]]; then
+            security delete-keychain "$LIQUIFY_APPLE_KEYCHAIN_PATH"
+          fi
+
+      - name: Prepare Windows release certificate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CERTIFICATE_PFX: ${{ secrets.LIQUIFY_WINDOWS_CERTIFICATE_PFX }}
+          WINDOWS_PUBLISHER: ${{ secrets.LIQUIFY_WINDOWS_PUBLISHER }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:CERTIFICATE_PFX)) {
+            if ([string]::IsNullOrWhiteSpace($env:WINDOWS_PUBLISHER)) {
+              throw 'LIQUIFY_WINDOWS_PUBLISHER is required with the release certificate'
+            }
+            $certificatePath = Join-Path $env:RUNNER_TEMP 'liquify-signing.pfx'
+            [System.IO.File]::WriteAllBytes(
+              $certificatePath,
+              [System.Convert]::FromBase64String($env:CERTIFICATE_PFX)
+            )
+            "LIQUIFY_WINDOWS_CERTIFICATE_PATH=$certificatePath" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Build, sign, install, and verify MSIX
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          LIQUIFY_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.LIQUIFY_WINDOWS_CERTIFICATE_PASSWORD }}
+          LIQUIFY_WINDOWS_PUBLISHER: ${{ secrets.LIQUIFY_WINDOWS_PUBLISHER }}
+          LIQUIFY_WINDOWS_TIMESTAMP_URL: ${{ secrets.LIQUIFY_WINDOWS_TIMESTAMP_URL }}
+        run: |
+          $publisher = $env:LIQUIFY_WINDOWS_PUBLISHER
+          if ([string]::IsNullOrWhiteSpace($publisher)) {
+            $publisher = 'CN=Liquify CI'
+          }
+          $timestampUrl = $env:LIQUIFY_WINDOWS_TIMESTAMP_URL
+          if ([string]::IsNullOrWhiteSpace($timestampUrl)) {
+            $timestampUrl = 'http://timestamp.digicert.com'
+          }
+          packaging/windows/package.ps1 `
+            -BinaryPath build/liquify.exe `
+            -OutputDirectory dist `
+            -PfxPath $env:LIQUIFY_WINDOWS_CERTIFICATE_PATH `
+            -PfxPassword $env:LIQUIFY_WINDOWS_CERTIFICATE_PASSWORD `
+            -Publisher $publisher `
+            -TimestampUrl $timestampUrl
+
+      - name: Upload Linux installer
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquify-Linux
+          path: |
+            dist/*.AppImage
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Upload macOS installers
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquify-macOS
+          path: |
+            dist/*.pkg
+            dist/*.dmg
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquify-Windows
+          path: |
+            dist/*.msix
+            dist/*.sha256
+          if-no-files-found: error
+
+  verify-appimage-fedora:
+    name: Fedora AppImage verification
+    needs: build
+    runs-on: ubuntu-24.04
+    container: fedora:42
+
+    steps:
+      - name: Download Linux installer
+        uses: actions/download-artifact@v4
+        with:
+          name: liquify-Linux
+          path: dist
+
+      - name: Run liquify version from AppImage
+        shell: bash
+        run: |
+          appimages=(dist/*.AppImage)
+          if [[ ${#appimages[@]} -ne 1 ]]; then
+            echo "expected one AppImage, found ${#appimages[@]}" >&2
+            exit 1
+          fi
+          chmod 755 "${appimages[0]}"
+          APPIMAGE_EXTRACT_AND_RUN=1 "${appimages[0]}" version
