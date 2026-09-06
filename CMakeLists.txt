@@ -122,6 +122,7 @@ add_library(liquify-core STATIC
   src/interactive_analysis.cpp
   src/plugin.cpp
   src/repository_view.cpp
+  src/review.cpp
   src/structural_edit.cpp
   src/text_layout.cpp
   src/stub_tree.cpp
@@ -166,6 +167,8 @@ if(LIQUIFY_BUILD_BENCH)
   target_link_libraries(liquify-editor-graph-bench PRIVATE liquify-core)
   add_executable(liquify-ai-context-bench bench/ai_context_bench.cpp)
   target_link_libraries(liquify-ai-context-bench PRIVATE liquify-core)
+  add_executable(liquify-review-bench bench/review_bench.cpp)
+  target_link_libraries(liquify-review-bench PRIVATE liquify-core)
   add_executable(liquify-structural-edit-bench bench/structural_edit_bench.cpp)
   target_link_libraries(liquify-structural-edit-bench PRIVATE liquify-core)
 endif()

@@ -5,12 +5,16 @@ add_executable(liquify-tests
   test_interactive_analysis.cpp
   test_plugin.cpp
   test_repository_view.cpp
+  test_review.cpp
   test_structural_edit.cpp
   test_text_layout.cpp
   test_stub_tree.cpp
   test_version.cpp)
 target_link_libraries(liquify-tests PRIVATE
-  liquify-core liquify-sample-plugin-static GTest::gtest_main)
+  liquify-core
+  liquid_forge_double
+  liquify-sample-plugin-static
+  GTest::gtest_main)
 add_dependencies(liquify-tests liquify-sample-plugin)
 target_compile_definitions(liquify-tests PRIVATE LIQUIFY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_definitions(liquify-tests PRIVATE

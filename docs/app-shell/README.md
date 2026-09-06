@@ -35,6 +35,8 @@ non-zero.
 blob at any expanded depth be opened in the editor. C and C++ buffers add graph-query controls, an
 inline diagnostics layer, diagnostics/completion and configured plugin panels, plugin commands in
 the command palette, and a daemon status line;
+`liquify --lake <repository-url> <path>` adds the review panel and reads its bearer from
+`LIQUID_TOKEN`;
 `liquify --print-tree <path>` prints name, kind and mode without a display; `liquify --smoke [N]`
 scrolls and edits a generated 50,000-line buffer for N frames (default 30), prints latency metrics,
 and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`.
@@ -45,12 +47,13 @@ and exits 0; `liquify version` prints `liquify <v> (libliquid <v>)`.
 distribution foundation, compact shallow repository checkpoints, the persisted demand-driven
 query graph from liquid #20, tree-diff and record-enumeration APIs, and the per-checkout daemon and
 cursor fan-out from liquid #21. It also includes liquid #65's registered frontend modules and
-per-definition C/C++ graph actions, the format registry, structural editing, hot updates, and
-relocation-checked install trees. It carries the shared `liquify_plugin_v1` descriptor merged in
-liquid PR #239, build plans and repository builds with public build event streams, graph test
-actions, per-reference sync outcomes, streaming source import, and flow control. Checkpoints
-written before the automerge-cpp adoption in liquid #136 do not load. liquid has its own Capy,
-Corosio and automerge-cpp submodules, so
+per-definition C/C++ graph actions, text-anchor mapping, the coroutine-native forge review client
+and test double, the format registry, structural editing, hot updates, and relocation-checked
+install trees. It carries the shared `liquify_plugin_v1` descriptor merged in liquid PR #239,
+build plans and repository builds with public build event streams, graph test actions,
+per-reference sync outcomes, streaming source import, and flow control. Checkpoints written before
+the automerge-cpp adoption in liquid #136 do not load. liquid has its own Capy, Corosio and
+automerge-cpp submodules, so
 checkouts and pin updates must initialize submodules recursively. The
 pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
 the liquid change it takes:

@@ -8,14 +8,15 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed interactive C/C++ analysis, inline build, test and deploy, structural editing and optional AI.**
+**Retained GPU editor with graph-backed interactive C/C++ analysis, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
 libliquid and produces a drip.
 The standard input mode is non-modal and a modal command/insert mode is available. Unreadable
 repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
 reports frame and typing latency, and exits 0. liquid is pinned at `modules/liquid` through its
-persisted demand-driven query graph. C and C++ stubs are graph query values that resolve
+persisted demand-driven query graph, text-anchor mapping, and coroutine-native forge review client.
+C and C++ stubs are graph query values that resolve
 declarations from closed files without retaining full parse trees. Graph-backed editor queries run
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor
@@ -24,7 +25,10 @@ demands, and reports daemon drip triggers and the validation backlog. Syntax-nod
 cross-file rename and C/C++ extract-function are serialized on the editor worker and applied as
 fingerprinted node edits with one drip per changed file. The headless `--apply-edits` command uses
 the same canonical CBOR records as the editor. This is the local adapter for bridge decision 30
-until libliquid owns the permanent structural edit operation. A default-off assistant
+until libliquid owns the permanent structural edit operation. The `--lake` review panel pulls
+changes through liquid, renders retained inline text hunks and conflict values, creates
+cursor-anchored comments, advances them across revised heads, and updates review state. The
+default-off assistant
 assembles inspectable context from the same graph, streams through a pinned provider transport,
 and previews edits until the user accepts one normal drip. When off it constructs no provider and
 opens no connection. Native plugins use liquid's versioned frontend C boundary to register graph

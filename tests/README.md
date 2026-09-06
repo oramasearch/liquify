@@ -44,6 +44,10 @@ refusal, compiling C and C++ extract-function results, deterministic canonical C
 headless `--apply-edits` executable path. The extract fixtures use the C and C++ compilers selected
 by CMake for syntax-only verification.
 
+`test_review.cpp` runs against libliquid's forge test double. It opens and pulls a review, renders
+text hunks, creates a cursor-anchored comment, advances shifted and deleted anchors through a new
+head, and verifies approval plus the return to an open requested-changes review.
+
 `test_ai.cpp` verifies the default-off repository and global setting, zero provider constructions
 and zero connections against a counting network double, graph-derived context with a byte budget
 and explicit omissions, and the Anthropic Messages request over an in-process TLS server. Its SSE
