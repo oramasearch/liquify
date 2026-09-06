@@ -16,7 +16,9 @@ completion, structural editing, and F7, F8 and F9 build, test and deploy through
 daemon. `--lake` adds review in place with cursor-anchored comments, native plugins register
 queries, commands and panels, and the assistant is off by default and opens no connection while
 off. `design/` carries the stamped Orama DTCG snapshot, generated native roles and embedded IBM
-Plex assets. Pull-request CI packages macOS, Windows and Linux installers and `v*` tags publish them;
+Plex assets. The light/dark application shell hosts those panels in a persisted repository-local
+layout with native macOS menus. Pull-request CI packages macOS, Windows and Linux installers and
+`v*` tags publish them;
 [`docs/design/status.md`](docs/design/status.md) lists each area with its page, and the
 specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
 
@@ -55,6 +57,8 @@ its page there in the same change; this file is only the front door. The most us
   how the liquid pin is bumped.
 - [`docs/ui/design-system.md`](docs/ui/design-system.md): the stamped Orama tokens, generated
   native constants, IBM Plex assets, and token gate.
+- [`docs/ui/app-shell.md`](docs/ui/app-shell.md): the persisted editor layout, themes, native
+  macOS conventions, and light/dark screenshot matrix.
 - [`docs/editor/README.md`](docs/editor/README.md): the buffer, the retained text layer and the
   smoke measurements.
 - [`docs/editor/interactive-analysis.md`](docs/editor/interactive-analysis.md),

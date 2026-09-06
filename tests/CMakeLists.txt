@@ -1,9 +1,11 @@
 add_executable(liquify-tests
   test_ai.cpp
+  test_app_state.cpp
   test_editor_buffer.cpp
   test_editor_graph.cpp
   test_interactive_analysis.cpp
   test_plugin.cpp
+  test_png.cpp
   test_repository_view.cpp
   test_review.cpp
   test_structural_edit.cpp

@@ -48,6 +48,7 @@ elseif(LIQUIFY_BUILD_TESTS)
 endif()
 
 if(APPLE)
+  enable_language(OBJCXX)
   # SDL3 + ImGui are fine at macOS 12+. Native architecture by default.
   set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "")
 endif()
@@ -96,6 +97,7 @@ target_compile_options(imgui PRIVATE -w)
 # Library only: no CLI, no liquid tests in this build.
 # -----------------------------------------------------------------------------
 find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 set(LIQUID_BUILD_CLI   OFF CACHE BOOL "" FORCE)
 set(LIQUID_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LIQUID_BUILD_BENCH OFF CACHE BOOL "" FORCE)
@@ -126,11 +128,13 @@ add_library(liquify-core STATIC
   src/ai_config.cpp
   src/ai_provider.cpp
   src/assistant.cpp
+  src/app_state.cpp
   src/context_builder.cpp
   src/editor_buffer.cpp
   src/editor_graph.cpp
   src/interactive_analysis.cpp
   src/plugin.cpp
+  src/png.cpp
   src/repository_view.cpp
   src/review.cpp
   src/structural_edit.cpp
@@ -144,6 +148,7 @@ target_link_libraries(liquify-core
   PUBLIC liquid::liquid
   PRIVATE Boost::corosio Boost::corosio_openssl Boost::http Boost::json
           tree-sitter-c-parser tree-sitter-cpp-parser)
+target_link_libraries(liquify-core PRIVATE ZLIB::ZLIB)
 if(APPLE)
   target_link_libraries(liquify-core PRIVATE "-framework Security")
 elseif(WIN32)
@@ -186,6 +191,10 @@ endif()
 add_library(liquify-app STATIC src/app.cpp)
 target_include_directories(liquify-app PUBLIC include)
 target_link_libraries(liquify-app PUBLIC liquify-core PRIVATE imgui)
+if(APPLE)
+  set_source_files_properties(src/app.cpp PROPERTIES LANGUAGE OBJCXX)
+  target_link_libraries(liquify-app PRIVATE "-framework AppKit")
+endif()
 
 add_executable(liquify src/main.cpp)
 target_link_libraries(liquify PRIVATE liquify-app)

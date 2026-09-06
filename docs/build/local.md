@@ -40,8 +40,9 @@ ctest --test-dir build --output-on-failure
 ```
 
 CTest holds the GoogleTest cases discovered from `liquify-tests` (buffer, text layout, repository
-view, stub trees, interactive analysis, editor graph, structural edits, review, assistant, plugins
-and version), the design-token gate, plus `liquify-print-tree-unreadable`, which proves that an unreadable repository
+view, app-shell state, PNG capture, stub trees, interactive analysis, editor graph, structural
+edits, review, assistant, plugins and version), the design-token gate, plus
+`liquify-print-tree-unreadable`, which proves that an unreadable repository
 makes `--print-tree` exit non-zero with liquid's error. `version` and the unit tests run without a
 display; `--smoke` needs one.
 
@@ -53,6 +54,8 @@ display; `--smoke` needs one.
 ./build/liquify --lake <repository-url> <path> # add lake reviews; bearer is LIQUID_TOKEN
 ./build/liquify --print-tree <path>
 ./build/liquify --apply-edits request.cbor <path> > result.cbor
+./build/liquify --screenshot editor --theme dark --out editor-dark.png
+./tools/ui/screenshot.sh ./build/liquify
 ./build/liquify --smoke    # scroll/edit 50,000 lines for 30 frames, report latency, exit 0
 ./build/liquify --smoke 300
 ./build/liquify version

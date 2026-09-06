@@ -17,8 +17,11 @@ repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50
 reports frame and typing latency, and exits 0. liquid is pinned at `modules/liquid` through its
 persisted demand-driven query graph, text-anchor mapping, and coroutine-native forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
-embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. C and
-C++ stubs are graph query values that resolve
+embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The
+light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel and
+status bar from those roles; repository-local state persists its dividers and selected surfaces,
+and macOS exposes the command groups and Cmd bindings through the native menu bar. C and C++ stubs
+are graph query values that resolve
 declarations from closed files without retaining full parse trees. Graph-backed editor queries run
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor

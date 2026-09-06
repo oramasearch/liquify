@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "liquify/app_state.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
 #include "liquify/structural_edit.hpp"
@@ -36,6 +37,9 @@ struct AppOptions {
     bool smoke = false;
     std::optional<std::filesystem::path> repository_path;
     std::optional<std::string> lake_url;
+    std::optional<std::string> screenshot_state;
+    std::optional<std::filesystem::path> screenshot_output;
+    std::optional<ThemePreference> forced_theme;
 };
 
 class App {
@@ -54,6 +58,13 @@ public:
 private:
     void frame();
     void draw_contents();
+    void draw_activity_bar();
+    void draw_sidebar();
+    void draw_editor_area();
+    void draw_bottom_panel();
+    void draw_diagnostics_panel(const EditorGraphSnapshot& snapshot);
+    void draw_status_bar();
+    void draw_split_editor();
     void draw_repository_tree();
     void draw_repository_entries(std::string_view directory);
     void draw_review_panel();
@@ -101,6 +112,14 @@ private:
     void ensure_cursor_visible();
     void prepare_smoke_frame(int frame);
     void print_smoke_metrics() const;
+    void persist_shell_state();
+    void cycle_theme();
+    void apply_theme();
+    void load_font_atlas(float scale);
+    void update_window_title();
+    void capture_screenshot();
+    [[nodiscard]] auto dark_theme_active() const -> bool;
+    [[nodiscard]] auto screenshot_mode() const -> bool;
     void shutdown();
 
     AppOptions options_;
@@ -112,6 +131,7 @@ private:
     std::shared_ptr<PluginHost> plugin_host_;
     std::unique_ptr<TextLayoutCache> layouts_;
     std::unique_ptr<RetainedTextLayer> text_layer_;
+    AppShellState shell_state_;
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     float editor_x_{};
@@ -129,6 +149,8 @@ private:
     std::string analysis_text_;
     std::string editor_status_;
     std::string assistant_prompt_;
+    std::string sidebar_search_;
+    std::string window_title_;
     std::optional<AssistantAction> pending_assistant_action_;
     std::string pending_assistant_prompt_;
     std::string context_preview_;
@@ -162,6 +184,13 @@ private:
     std::size_t next_comment_index_{};
     std::size_t ai_context_bytes_{64 * 1024};
     float display_refresh_hz_{};
+    float display_scale_ = 1.0F;
+    int ui_font_index_ = -1;
+    int editor_font_index_ = -1;
+    bool applied_dark_theme_{};
+    bool screenshot_written_{};
+    bool screenshot_failed_{};
+    int screenshot_frames_rendered_{};
     bool initialized_ = false;
     bool command_palette_open_{};
     bool context_preview_open_{};

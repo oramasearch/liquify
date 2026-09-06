@@ -20,8 +20,11 @@ state. The standard input mode is non-modal and a modal command/insert mode is a
 `--smoke` scrolls and edits a 50,000-line buffer, reports frame and typing latency, and exits 0
 ([`../app-shell/README.md`](../app-shell/README.md), [`../editor/README.md`](../editor/README.md)).
 The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
-its gate verifies source hashes and rejects stale generated output
-([`../ui/design-system.md`](../ui/design-system.md)).
+its gate verifies source hashes and rejects stale generated output. Those roles drive the system,
+light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom
+panel and status bar. Divider sizes, visibility and selected surfaces persist per repository;
+macOS installs native command menus and Cmd bindings
+([`../ui/design-system.md`](../ui/design-system.md), [`../ui/app-shell.md`](../ui/app-shell.md)).
 
 ## The liquid pin
 
