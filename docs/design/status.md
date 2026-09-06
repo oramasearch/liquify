@@ -28,6 +28,10 @@ sizes and complete panel layouts persist per repository and can be reset; one st
 reports build, saved-drip sync, repository hydration and assistant progress. macOS installs native
 command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.md),
 [`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
+The searchable settings surface reads a user `.liquid` file plus repository overrides and applies
+theme, fonts, editor behavior, keymaps, optional AI, lake accounts and default-off telemetry live.
+Parser and typed validation errors remain inline, group reset is local, and credential values never
+enter the settings model ([`../ui/settings.md`](../ui/settings.md)).
 `--screenshot` renders the fixed welcome, repository, C++ editor and panel registry in light and
 dark through a headless software renderer; the committed image set and pixel tests are described
 in [`../ui/README.md`](../ui/README.md).

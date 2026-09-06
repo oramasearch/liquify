@@ -4,10 +4,11 @@
 #include "liquify/app.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
-#include <initializer_list>
 #include <future>
+#include <initializer_list>
 #include <limits>
 #include <span>
 #include <string>
@@ -30,8 +31,9 @@
 #include "liquify/assistant.hpp"
 #include "liquify/design_tokens.generated.hpp"
 #include "liquify/editor_graph.hpp"
-#include "liquify/screenshot.hpp"
 #include "liquify/multiplayer.hpp"
+#include "liquify/screenshot.hpp"
+#include "liquify/settings.hpp"
 #include "liquify/stub_tree.hpp"
 #include "liquify/version.hpp"
 #include "repository_view.hpp"
@@ -156,6 +158,45 @@ constexpr float editor_gutter_width = 72.0F;
 constexpr float activity_bar_width = design::control_lg;
 constexpr float divider_size = design::space1;
 constexpr float status_bar_height = design::space6;
+
+auto normalized_binding(std::string_view binding) -> std::string {
+    auto output = std::string{};
+    for (const auto value : binding) {
+        if (value != ' ') {
+            output.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(value))));
+        }
+    }
+    return output;
+}
+
+auto binding_matches(std::string_view binding, std::uint32_t key, std::uint16_t modifiers) -> bool {
+    const auto normalized = normalized_binding(binding);
+    const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
+    const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+    const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
+    const auto wants_primary = normalized.contains("cmd+") || normalized.contains("ctrl+") ||
+                               normalized.contains("primary+");
+    const auto wants_shift = normalized.contains("shift+");
+    const auto wants_alt = normalized.contains("alt+") || normalized.contains("option+");
+    if (primary != wants_primary || shift != wants_shift || alt != wants_alt) {
+        return false;
+    }
+    const auto separator = normalized.rfind('+');
+    const auto expected_key =
+        separator == std::string::npos ? normalized : normalized.substr(separator + 1);
+    return expected_key == normalized_binding(SDL_GetKeyName(key));
+}
+
+auto command_matches(const Settings& settings,
+                     std::string_view command,
+                     std::string_view default_binding,
+                     std::uint32_t key,
+                     std::uint16_t modifiers) -> bool {
+    const auto found = settings.keymap.find(std::string(command));
+    const auto binding =
+        found == settings.keymap.end() ? default_binding : std::string_view(found->second);
+    return binding_matches(binding, key, modifiers);
+}
 
 auto imgui_color(design::Rgba color) -> ImVec4 {
     return {color.red, color.green, color.blue, color.alpha};
@@ -372,7 +413,8 @@ public:
                 float cell_width,
                 float horizontal_scroll,
                 std::span<const ReviewDiffLine> review_lines,
-                std::span<const std::size_t> comment_lines) -> std::size_t {
+                std::span<const std::size_t> comment_lines,
+                bool show_whitespace) -> std::size_t {
         const auto color_changed = text_color_.red != palette.text_primary.red ||
                                    text_color_.green != palette.text_primary.green ||
                                    text_color_.blue != palette.text_primary.blue ||
@@ -451,6 +493,19 @@ public:
                                static_cast<int>(frame_indices_.size()));
         }
 
+        if (show_whitespace) {
+            draw_whitespace(renderer,
+                            buffer,
+                            layouts,
+                            palette,
+                            x,
+                            y,
+                            first_line,
+                            last_line,
+                            line_height,
+                            cell_width,
+                            horizontal_scroll);
+        }
         draw_diagnostics(renderer,
                          buffer,
                          diagnostics,
@@ -751,6 +806,43 @@ private:
         }
     }
 
+    static void draw_whitespace(SDL_Renderer* renderer,
+                                EditorBuffer& buffer,
+                                TextLayoutCache& layouts,
+                                const design::Palette& palette,
+                                float x,
+                                float y,
+                                std::size_t first_line,
+                                std::size_t last_line,
+                                float line_height,
+                                float cell_width,
+                                float horizontal_scroll) {
+        SDL_SetRenderDrawColorFloat(renderer,
+                                    palette.text_disabled.red,
+                                    palette.text_disabled.green,
+                                    palette.text_disabled.blue,
+                                    palette.text_disabled.alpha);
+        for (auto line = first_line; line < last_line; ++line) {
+            const auto text = buffer.line(line);
+            const auto& layout = layouts.line(line, text);
+            for (std::size_t byte = 0; byte < text.size(); ++byte) {
+                if (text[byte] != ' ' && text[byte] != '\t') {
+                    continue;
+                }
+                const auto column = layout.column_for_byte(byte);
+                const auto marker_x = x + editor_gutter_width + editor_padding +
+                                      (column + 0.5F) * cell_width - horizontal_scroll;
+                const auto marker_y =
+                    y + static_cast<float>(line - first_line) * line_height + line_height * 0.55F;
+                if (text[byte] == ' ') {
+                    SDL_RenderPoint(renderer, marker_x, marker_y);
+                } else {
+                    SDL_RenderLine(renderer, marker_x - 2.0F, marker_y, marker_x + 2.0F, marker_y);
+                }
+            }
+        }
+    }
+
     static void draw_bracket_match(SDL_Renderer* renderer,
                                    EditorBuffer& buffer,
                                    TextLayoutCache& layouts,
@@ -908,9 +1000,18 @@ private:
 
 App::App(AppOptions options) : options_(std::move(options)) {
     multiplayer_session_ = make_multiplayer_session();
+    const auto* requested_screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    if (requested_screenshot == nullptr) {
+        auto loaded_settings = load_settings(options_.repository_path);
+        settings_ = std::move(loaded_settings.settings);
+        settings_diagnostics_ = std::move(loaded_settings.diagnostics);
+    }
+    settings_scope_ = options_.repository_path ? SettingsScope::repository : SettingsScope::user;
     if (options_.repository_path) {
         auto loaded_state = load_app_shell_state(*options_.repository_path);
         shell_state_ = loaded_state.state;
+        shell_state_.theme = settings_.theme;
         if (!loaded_state.error.empty()) {
             editor_status_ = std::move(loaded_state.error);
         }
@@ -931,17 +1032,18 @@ App::App(AppOptions options) : options_(std::move(options)) {
             }
             editor_graph_ = std::make_unique<EditorGraph>(
                 *options_.repository_path, plugin_host_, syntax_frontend_path());
-            auto config = load_ai_config(*options_.repository_path);
-            if (!config) {
-                editor_status_ = config.error().message;
-            } else {
-                ai_context_bytes_ = config->context_bytes;
+            auto config = AiConfig{.enabled = settings_.ai.enabled,
+                                   .context_bytes = settings_.ai.context_bytes,
+                                   .model = settings_.ai.model,
+                                   .max_tokens = settings_.ai.max_tokens};
+            {
+                ai_context_bytes_ = config.context_bytes;
                 auto key = ConfiguredSecret{};
-                if (config->enabled) {
+                if (config.enabled) {
                     key = anthropic_api_key();
                 }
                 const auto secret = key.value;
-                assistant_ = std::make_unique<Assistant>(*config, key.configured, [secret] {
+                assistant_ = std::make_unique<Assistant>(config, key.configured, [secret] {
                     return std::make_unique<AnthropicProvider>(secret);
                 });
             }
@@ -1007,6 +1109,7 @@ App::App(AppOptions options) : options_(std::move(options)) {
             sidebar_search_ = "greeting";
             find_query_ = "repository";
             find_open_ = true;
+            settings_.editor.wrap = true;
             editor_->set_preferences(
                 {.indent_style = IndentStyle::spaces, .indent_size = 4, .soft_wrap = true});
             editor_->set_cursor({5, 5});
@@ -1024,6 +1127,14 @@ App::App(AppOptions options) : options_(std::move(options)) {
             panels_.update_operation("build", "Building repository", 2, 4);
         } else {
             panels_.clear_focus_request();
+        }
+        if (screenshot->view == ScreenshotView::settings) {
+            settings_open_ = true;
+            settings_.theme = screenshot->theme == ScreenshotTheme::dark ? ThemePreference::dark
+                                                                         : ThemePreference::light;
+            settings_.editor.wrap = true;
+            settings_.keymap["build.run"] = "F7";
+            settings_.lake_accounts.push_back({"orama", "https://api.oramasearch.com/liquid"});
         }
     }
 }
@@ -1100,6 +1211,11 @@ bool App::init() {
     }
     load_font_atlas(display_scale_);
     apply_theme();
+    if (editor_) {
+        auto preferences = editor_->preferences();
+        preferences.soft_wrap = settings_.editor.wrap;
+        editor_->set_preferences(preferences);
+    }
     ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
     ImGui_ImplSDLRenderer3_Init(renderer_);
     SDL_StartTextInput(window_);
@@ -1143,6 +1259,11 @@ void App::load_font_atlas(float scale) {
         return io.Fonts->AddFontFromMemoryTTF(
             const_cast<std::uint8_t*>(bytes.data()), static_cast<int>(bytes.size()), size, &config);
     };
+    ui_font_index_ = -1;
+    editor_font_index_ = -1;
+    heading_font_index_ = -1;
+    auto ui_distance = std::numeric_limits<float>::max();
+    auto editor_distance = std::numeric_limits<float>::max();
     for (const auto size : {design::text11,
                             design::text12,
                             design::text14,
@@ -1151,17 +1272,25 @@ void App::load_font_atlas(float scale) {
                             design::text24,
                             design::text32}) {
         auto* font = add_font(design::ibm_plex_sans_regular, size, "IBM Plex Sans");
-        if (size == design::text14) {
+        const auto distance = std::abs(size - static_cast<float>(settings_.fonts.ui_size));
+        if (distance < ui_distance) {
+            ui_distance = distance;
             ui_font_index_ = io.Fonts->Fonts.Size - 1;
             io.FontDefault = font;
+        }
+        if (size == design::text24) {
+            heading_font_index_ = io.Fonts->Fonts.Size - 1;
         }
     }
     for (const auto size : {design::text12, design::text14, design::text16}) {
         add_font(design::ibm_plex_mono_regular, size, "IBM Plex Mono");
-        if (size == design::text14) {
+        const auto distance = std::abs(size - static_cast<float>(settings_.fonts.editor_size));
+        if (distance < editor_distance) {
+            editor_distance = distance;
             editor_font_index_ = io.Fonts->Fonts.Size - 1;
         }
     }
+    io.FontDefault = io.Fonts->Fonts[ui_font_index_];
 }
 
 void App::apply_theme() {
@@ -1239,8 +1368,63 @@ void App::cycle_theme() {
     } else {
         shell_state_.theme = ThemePreference::system;
     }
+    settings_.theme = shell_state_.theme;
     apply_theme();
+    persist_settings();
     persist_shell_state();
+}
+
+void App::apply_settings_live(bool rebuild_fonts) {
+    shell_state_.theme = settings_.theme;
+    if (editor_) {
+        auto preferences = editor_->preferences();
+        preferences.soft_wrap = settings_.editor.wrap;
+        editor_->set_preferences(preferences);
+    }
+    ai_context_bytes_ = settings_.ai.context_bytes;
+    if (options_.repository_path && assistant_) {
+        auto key = ConfiguredSecret{};
+        if (settings_.ai.enabled) {
+            key = anthropic_api_key();
+        }
+        const auto secret = key.value;
+        auto config = AiConfig{.enabled = settings_.ai.enabled,
+                               .context_bytes = settings_.ai.context_bytes,
+                               .model = settings_.ai.model,
+                               .max_tokens = settings_.ai.max_tokens};
+        assistant_ = std::make_unique<Assistant>(config, key.configured, [secret] {
+            return std::make_unique<AnthropicProvider>(secret);
+        });
+    }
+    if (rebuild_fonts && initialized_) {
+        fonts_rebuild_requested_ = true;
+    }
+    apply_theme();
+}
+
+void App::persist_settings() {
+    if (screenshot_mode()) {
+        return;
+    }
+    auto path = user_settings_path();
+    if (settings_scope_ == SettingsScope::repository && options_.repository_path) {
+        path = repository_settings_path(*options_.repository_path);
+    }
+    const auto saved = save_settings(path, settings_);
+    if (!saved) {
+        editor_status_ = saved.error().message;
+        settings_diagnostics_ = {
+            SettingsDiagnostic{.path = path, .message = saved.error().message}};
+        return;
+    }
+    settings_diagnostics_.clear();
+    editor_status_ = "settings applied";
+}
+
+void App::reset_settings(SettingsGroup group) {
+    reset_settings_group(settings_, group);
+    apply_settings_live(group == SettingsGroup::appearance);
+    persist_settings();
 }
 
 void App::persist_shell_state() {
@@ -1341,6 +1525,9 @@ void App::open_editor(std::string path, std::string blob_id) {
     structural_references_.clear();
     editor_ = std::make_unique<EditorBuffer>(
         EditorBuffer::open(*options_.repository_path, std::move(path), std::move(blob_id)));
+    auto preferences = editor_->preferences();
+    preferences.soft_wrap = settings_.editor.wrap;
+    editor_->set_preferences(preferences);
     layouts_ = std::make_unique<TextLayoutCache>();
     layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
     text_layer_ = std::make_unique<RetainedTextLayer>();
@@ -1555,6 +1742,26 @@ void App::apply_change(std::size_t first_line,
 void App::save_editor() {
     if (!editor_) {
         return;
+    }
+    if (settings_.editor.format_on_save &&
+        std::filesystem::path(editor_->display_path()).extension() == ".liquid") {
+        auto document = liquid::parse_configuration(editor_->text(), editor_->display_path());
+        if (!document) {
+            editor_status_ = document.error().message;
+            return;
+        }
+        auto formatted = liquid::format_configuration(*document);
+        if (!formatted) {
+            editor_status_ = formatted.error().message;
+            return;
+        }
+        if (*formatted != editor_->text()) {
+            editor_->select_all();
+            const auto change = editor_->insert_text(*formatted);
+            if (change) {
+                apply_change(change->first_line, change->erased_lines, change->inserted_lines);
+            }
+        }
     }
     const auto build_running = editor_graph_ && editor_graph_->snapshot().build_running;
     auto saved = false;
@@ -1872,6 +2079,7 @@ void App::toggle_assistant() {
         editor_status_ = saved.error().message;
         return;
     }
+    settings_.ai.enabled = enable;
     if (!enable) {
         assistant_->set_enabled(false);
         editor_status_ = "AI off";
@@ -2020,6 +2228,10 @@ void App::handle_text(std::string_view text) {
 void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
     const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+    if (command_matches(settings_, "settings.open", "Primary+,", key, modifiers)) {
+        settings_open_ = true;
+        return;
+    }
     if (primary && key == SDLK_B) {
         shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
         persist_shell_state();
@@ -2039,19 +2251,19 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         cycle_theme();
         return;
     }
-    if (primary && key == SDLK_P) {
+    if (command_matches(settings_, "palette.open", "Primary+Shift+P", key, modifiers)) {
         command_palette_open_ = true;
         return;
     }
-    if (key == SDLK_F7) {
+    if (command_matches(settings_, "build.run", "F7", key, modifiers)) {
         request_build();
         return;
     }
-    if (key == SDLK_F8) {
+    if (command_matches(settings_, "tests.run", "F8", key, modifiers)) {
         request_tests();
         return;
     }
-    if (key == SDLK_F9) {
+    if (command_matches(settings_, "deploy.run", "F9", key, modifiers)) {
         request_deploy();
         return;
     }
@@ -2095,10 +2307,6 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         } else if (key == SDLK_DOWN && cursor.line + 1 < editor_->line_count()) {
             editor_->add_cursor({cursor.line + 1, cursor.byte});
         }
-        return;
-    }
-    if (primary && shift && key == SDLK_P) {
-        command_palette_open_ = true;
         return;
     }
     if (primary && alt && key == SDLK_C) {
@@ -2181,7 +2389,7 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
         }
         return;
     }
-    if (primary && key == SDLK_S) {
+    if (command_matches(settings_, "file.save", "Primary+S", key, modifiers)) {
         if (review_diff_open_) {
             editor_status_ = "review diffs are read-only";
             return;
@@ -2633,6 +2841,7 @@ void App::draw_command_palette() {
         }
     }
     command("Panels: Reset layout", [this] { reset_panel_layout(); });
+    command("Preferences: Open Settings", [this] { settings_open_ = true; });
     if (plugin_host_) {
         for (const auto& plugin_command : plugin_host_->commands()) {
             auto label = "Plugin: " + plugin_command.name;
@@ -2642,6 +2851,242 @@ void App::draw_command_palette() {
             command(label.c_str(),
                     [this, name = plugin_command.name] { invoke_plugin_command(name); });
         }
+    }
+    ImGui::EndPopup();
+}
+
+void App::draw_settings() {
+    if (settings_open_) {
+        ImGui::OpenPopup("Settings");
+        settings_open_ = false;
+    }
+    const auto center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+    ImGui::SetNextWindowSize(ImVec2(900.0F, 650.0F), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Settings", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+        settings_popup_visible_ = false;
+        return;
+    }
+    settings_popup_visible_ = true;
+
+    ImGui::InputTextWithHint("##settings-search", "Search settings", &settings_query_);
+    ImGui::SameLine();
+    auto repository_scope = settings_scope_ == SettingsScope::repository;
+    if (!options_.repository_path) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Checkbox("Repository overrides", &repository_scope)) {
+        settings_scope_ = repository_scope ? SettingsScope::repository : SettingsScope::user;
+    }
+    if (!options_.repository_path) {
+        ImGui::EndDisabled();
+    }
+    ImGui::TextDisabled("Editing %s",
+                        settings_scope_ == SettingsScope::repository
+                            ? repository_settings_path(*options_.repository_path).string().c_str()
+                            : user_settings_path().string().c_str());
+    for (const auto& diagnostic : settings_diagnostics_) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextSelectedBg));
+        ImGui::TextWrapped("%s", diagnostic.message.c_str());
+        ImGui::PopStyleColor();
+    }
+    ImGui::Separator();
+    ImGui::BeginChild("settings-scroll", ImVec2(0.0F, -36.0F), ImGuiChildFlags_Borders);
+
+    const auto begin_group = [this](SettingsGroup group) {
+        ImGui::PushID(static_cast<int>(group));
+        if (!settings_group_matches(group, settings_query_)) {
+            return false;
+        }
+        const auto collapsed_for_proof =
+            screenshot_mode() && (group == SettingsGroup::appearance ||
+                                  group == SettingsGroup::editor || group == SettingsGroup::keymap);
+        const auto flags =
+            collapsed_for_proof ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_DefaultOpen;
+        const auto open = ImGui::CollapsingHeader(settings_group_name(group).data(), flags);
+        if (open) {
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 52.0F);
+            if (ImGui::SmallButton("Reset")) {
+                reset_settings(group);
+            }
+        }
+        return open;
+    };
+    const auto end_group = [] {
+        ImGui::Spacing();
+        ImGui::PopID();
+    };
+
+    if (begin_group(SettingsGroup::appearance)) {
+        auto theme = static_cast<int>(settings_.theme);
+        constexpr auto themes = std::array{"Follow operating system", "Light", "Dark"};
+        if (ImGui::Combo("Theme", &theme, themes.data(), static_cast<int>(themes.size()))) {
+            settings_.theme = static_cast<ThemePreference>(theme);
+            apply_settings_live();
+            persist_settings();
+        }
+        ImGui::TextDisabled("UI font");
+        ImGui::SameLine(150.0F);
+        ImGui::TextUnformatted(settings_.fonts.ui_family.c_str());
+        auto ui_size = static_cast<int>(settings_.fonts.ui_size);
+        if (ImGui::SliderInt("UI size", &ui_size, 11, 32)) {
+            settings_.fonts.ui_size = static_cast<std::uint32_t>(ui_size);
+            apply_settings_live(true);
+            persist_settings();
+        }
+        ImGui::TextDisabled("Editor font");
+        ImGui::SameLine(150.0F);
+        ImGui::TextUnformatted(settings_.fonts.editor_family.c_str());
+        auto editor_size = static_cast<int>(settings_.fonts.editor_size);
+        if (ImGui::SliderInt("Editor size", &editor_size, 12, 16)) {
+            settings_.fonts.editor_size = static_cast<std::uint32_t>(editor_size);
+            apply_settings_live(true);
+            persist_settings();
+        }
+    }
+    end_group();
+
+    if (begin_group(SettingsGroup::editor)) {
+        auto changed = false;
+        changed |= ImGui::Checkbox("Wrap long lines", &settings_.editor.wrap);
+        changed |= ImGui::Checkbox("Show whitespace", &settings_.editor.whitespace);
+        changed |=
+            ImGui::Checkbox("Format .liquid files on save", &settings_.editor.format_on_save);
+        if (changed) {
+            apply_settings_live();
+            persist_settings();
+        }
+    }
+    end_group();
+
+    if (begin_group(SettingsGroup::keymap)) {
+        ImGui::TextDisabled("Command palette leaf overrides");
+        constexpr auto commands = std::array{
+            std::pair{"settings.open", "Cmd+,"},
+            std::pair{"build.run", "F7"},
+            std::pair{"tests.run", "F8"},
+            std::pair{"deploy.run", "F9"},
+        };
+        for (const auto& [command, default_binding] : commands) {
+            auto& binding = settings_.keymap[command];
+            if (binding.empty()) {
+                binding = default_binding;
+            }
+            ImGui::PushID(command);
+            ImGui::SetNextItemWidth(180.0F);
+            if (ImGui::InputText(command, &binding)) {
+                persist_settings();
+            }
+            ImGui::PopID();
+        }
+    }
+    end_group();
+
+    if (begin_group(SettingsGroup::ai)) {
+        if (ImGui::Checkbox("Enable AI surface", &settings_.ai.enabled)) {
+            apply_settings_live();
+            persist_settings();
+        }
+        ImGui::Text("Provider: %s", settings_.ai.provider.c_str());
+        if (ImGui::InputText("Model", &settings_.ai.model)) {
+            apply_settings_live();
+            persist_settings();
+        }
+        const auto key = screenshot_mode() ? ConfiguredSecret{true, {}} : anthropic_api_key();
+        ImGui::Text("Provider token: %s",
+                    key.configured ? "******** (configured)" : "not configured");
+        if (!screenshot_mode()) {
+            ImGui::SetNextItemWidth(280.0F);
+            ImGui::InputTextWithHint("##provider-token",
+                                     "New provider token",
+                                     &provider_token_input_,
+                                     ImGuiInputTextFlags_Password);
+            ImGui::SameLine();
+            if (ImGui::Button("Store token") && !provider_token_input_.empty()) {
+                const auto stored = store_anthropic_api_key(provider_token_input_);
+                std::ranges::fill(provider_token_input_, '\0');
+                provider_token_input_.clear();
+                if (!stored) {
+                    editor_status_ = stored.error().message;
+                } else {
+                    editor_status_ = "provider credential stored";
+                    apply_settings_live();
+                }
+            }
+            ImGui::TextDisabled("Tokens are read from the OS credential store or environment.");
+        }
+    }
+    end_group();
+
+    if (begin_group(SettingsGroup::lake)) {
+        auto remove = std::optional<std::size_t>{};
+        for (std::size_t index = 0; index < settings_.lake_accounts.size(); ++index) {
+            auto& account = settings_.lake_accounts[index];
+            ImGui::PushID(static_cast<int>(index));
+            ImGui::Text("%s", account.name.c_str());
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Remove")) {
+                remove = index;
+            }
+            if (screenshot_mode()) {
+                ImGui::TextDisabled("%s", account.url.c_str());
+            } else {
+                if (ImGui::InputText("URL", &account.url)) {
+                    persist_settings();
+                }
+            }
+            const auto token =
+                screenshot_mode() ? ConfiguredSecret{true, {}} : lake_account_token(account.name);
+            ImGui::Text("Token: %s", token.configured ? "******** (configured)" : "not configured");
+            if (!screenshot_mode()) {
+                ImGui::SetNextItemWidth(280.0F);
+                ImGui::InputTextWithHint("##lake-token",
+                                         "New lake token",
+                                         &lake_token_input_,
+                                         ImGuiInputTextFlags_Password);
+                ImGui::SameLine();
+                if (ImGui::Button("Store token") && !lake_token_input_.empty()) {
+                    const auto stored = store_lake_account_token(account.name, lake_token_input_);
+                    std::ranges::fill(lake_token_input_, '\0');
+                    lake_token_input_.clear();
+                    editor_status_ = stored ? "lake credential stored" : stored.error().message;
+                }
+            }
+            ImGui::PopID();
+        }
+        if (remove) {
+            settings_.lake_accounts.erase(settings_.lake_accounts.begin() +
+                                          static_cast<std::ptrdiff_t>(*remove));
+            persist_settings();
+        }
+        if (!screenshot_mode()) {
+            ImGui::SetNextItemWidth(180.0F);
+            ImGui::InputTextWithHint("##lake-name", "Account name", &lake_account_name_);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(360.0F);
+            ImGui::InputTextWithHint("##lake-url", "https://lake.example", &lake_account_url_);
+            ImGui::SameLine();
+            if (ImGui::Button("Add") && !lake_account_name_.empty() && !lake_account_url_.empty()) {
+                settings_.lake_accounts.push_back({lake_account_name_, lake_account_url_});
+                lake_account_name_.clear();
+                lake_account_url_.clear();
+                persist_settings();
+            }
+        }
+    }
+    end_group();
+
+    if (begin_group(SettingsGroup::telemetry)) {
+        if (ImGui::Checkbox("Enable telemetry", &settings_.telemetry)) {
+            persist_settings();
+        }
+        ImGui::TextDisabled("Off by default. There are no other telemetry switches.");
+    }
+    end_group();
+
+    ImGui::EndChild();
+    if (ImGui::Button("Close")) {
+        ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
 }
@@ -3795,7 +4240,7 @@ void App::draw_editor_area() {
         const auto available = ImGui::GetContentRegionAvail();
         ImGui::SetCursorPosY(std::max(available.y * 0.28F, design::space8));
         ImGui::SetCursorPosX(std::max(available.x * 0.16F, design::space8));
-        ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[ui_font_index_ + 3]);
+        ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[heading_font_index_]);
         ImGui::TextUnformatted("liquify");
         ImGui::PopFont();
         ImGui::TextDisabled("The IDE for liquid");
@@ -4076,12 +4521,14 @@ void App::draw_contents() {
 
     draw_floating_panels();
     draw_command_palette();
+    draw_settings();
     draw_review_comment_popup();
     draw_structural_editing();
 }
 
 void App::render_editor() {
-    if (!editor_visible_ || !editor_ || editor_width_ <= 0.0F || editor_height_ <= 0.0F) {
+    if (settings_popup_visible_ || !editor_visible_ || !editor_ || editor_width_ <= 0.0F ||
+        editor_height_ <= 0.0F) {
         return;
     }
     const auto maximum_scroll =
@@ -4173,7 +4620,8 @@ void App::render_editor() {
                                          cell_width_,
                                          horizontal_scroll_,
                                          review_lines,
-                                         comment_lines);
+                                         comment_lines,
+                                         settings_.editor.whitespace);
     SDL_SetRenderClipRect(renderer_, nullptr);
     SDL_SetRenderScale(renderer_, old_scale_x, old_scale_y);
 }
@@ -4188,6 +4636,11 @@ void App::frame() {
     }
     update_window_title();
     poll_multiplayer();
+    if (fonts_rebuild_requested_) {
+        ImGui_ImplSDLRenderer3_DestroyFontsTexture();
+        load_font_atlas(display_scale_);
+        fonts_rebuild_requested_ = false;
+    }
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();

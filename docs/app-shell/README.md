@@ -91,7 +91,9 @@ failure while later valid modules register normally.
 Panel-registry and app-shell state tests cover docking, focus, progress, cancellation, reset,
 repository-local round trips, version 1 migration and invalid state. Screenshot tests read the
 in-tree PNG output and inspect stable pixel regions, and `tools/ui/screenshot.sh` renders the full
-light/dark state matrix.
+light/dark state matrix. Settings model tests cover the `.liquid` user file, repository overlays,
+live-safe defaults, validation, reset, search, and credential-free serialization
+([`../ui/settings.md`](../ui/settings.md)).
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.
