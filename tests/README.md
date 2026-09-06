@@ -32,6 +32,12 @@ attaches when a daemon already owns the checkout, serializes overlay mutations, 
 diagnostics and cursor-query results, records edit-to-diagnostic latency and formats the validation
 backlog from daemon status.
 
+`test_structural_edit.cpp` covers the syntax ancestor selection chain, exact reference ranges,
+rename across two files with one drip per file, unresolved string occurrences, stale-fingerprint
+refusal, compiling C and C++ extract-function results, deterministic canonical CBOR and the real
+headless `--apply-edits` executable path. The extract fixtures use the C and C++ compilers selected
+by CMake for syntax-only verification.
+
 `test_ai.cpp` verifies the default-off repository and global setting, zero provider constructions
 and zero connections against a counting network double, graph-derived context with a byte budget
 and explicit omissions, and the Anthropic Messages request over an in-process TLS server. Its SSE
