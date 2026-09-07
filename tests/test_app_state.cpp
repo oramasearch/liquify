@@ -39,6 +39,7 @@ TEST(AppShellState, PersistsRepositoryPanelLayoutAndTheme) {
     state.bottom_panel_height = 288.0F;
     state.editor_split_ratio = 0.42F;
     state.theme = liquify::ThemePreference::dark;
+    state.high_contrast = true;
     state.sidebar_visible = false;
     state.bottom_panel_visible = true;
     state.editor_split = true;
@@ -58,6 +59,7 @@ TEST(AppShellState, PersistsRepositoryPanelLayoutAndTheme) {
     EXPECT_FLOAT_EQ(loaded.state.bottom_panel_height, 288.0F);
     EXPECT_FLOAT_EQ(loaded.state.editor_split_ratio, 0.42F);
     EXPECT_EQ(loaded.state.theme, liquify::ThemePreference::dark);
+    EXPECT_TRUE(loaded.state.high_contrast);
     EXPECT_FALSE(loaded.state.sidebar_visible);
     EXPECT_TRUE(loaded.state.bottom_panel_visible);
     EXPECT_TRUE(loaded.state.editor_split);
@@ -88,6 +90,7 @@ TEST(AppShellState, ReadsVersionOneSelection) {
 TEST(AppShellState, ResetRestoresLayoutAndPreservesTheme) {
     auto state = liquify::AppShellState{};
     state.theme = liquify::ThemePreference::dark;
+    state.high_contrast = true;
     state.sidebar_width = 400.0F;
     state.sidebar_visible = false;
     auto panels = liquify::PanelRegistry(state.panel_layout);
@@ -98,6 +101,7 @@ TEST(AppShellState, ResetRestoresLayoutAndPreservesTheme) {
     const auto reset_panels = liquify::PanelRegistry(state.panel_layout);
 
     EXPECT_EQ(state.theme, liquify::ThemePreference::dark);
+    EXPECT_TRUE(state.high_contrast);
     EXPECT_FLOAT_EQ(state.sidebar_width, 260.0F);
     EXPECT_TRUE(state.sidebar_visible);
     EXPECT_EQ(reset_panels.layout(liquify::PanelId::diagnostics).placement,

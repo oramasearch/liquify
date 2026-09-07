@@ -30,6 +30,10 @@ accounts live; telemetry remains off by default and credentials are masked. Pull
 packages macOS, Windows and Linux installers
 and `v*` tags publish them; [`docs/design/status.md`](docs/design/status.md) lists each area with
 its page, and the specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
+SDL text composition supports CJK input methods and dead keys; the editor exchanges rich and plain
+clipboard forms and accepts desktop file drops. Keyboard navigation has visible focus, macOS
+exposes labelled accessibility elements, and high contrast plus the OS reduced-motion preference
+apply across the shell.
 
 ## Build and run
 
@@ -59,6 +63,7 @@ toolchains are in [`docs/build/ci.md`](docs/build/ci.md).
 | Path | Role |
 |---|---|
 | `include/liquify/app.hpp`, `src/app.cpp` | the application shell: window, renderer, ImGui context, frame loop. **The one TU that includes SDL3 or ImGui.** |
+| `include/liquify/input.hpp`, `src/input.cpp` | the plain-C++ input and accessibility state machine: composition, clipboard, drops, preferences, and platform labels |
 | `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory text buffer, input modes, and libliquid blob read/write path |
 | `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
 | `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: reads the root on a worker, loads nested trees on expansion, and exposes entries, open latency, or an error |
@@ -95,6 +100,8 @@ its page there in the same change; this file is only the front door. The most us
   native constants, IBM Plex assets, and token gate.
 - [`docs/ui/app-shell.md`](docs/ui/app-shell.md): the persisted editor layout, themes, native
   macOS conventions, and light/dark screenshot matrix.
+- [`docs/ui/accessibility.md`](docs/ui/accessibility.md): text composition, rich/plain clipboard,
+  file drops, keyboard focus order, platform labels, high contrast, and reduced motion.
 - [`docs/ui/first-run.md`](docs/ui/first-run.md): first run, repository switching, lake clone,
   identity session, recovery states, multiple windows, and status signals.
 - [`docs/ui/panels.md`](docs/ui/panels.md): the panel registry, docking, layout persistence,

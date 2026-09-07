@@ -35,9 +35,10 @@ ordering, visibility, focus, last dock, and floating bounds are saved with the e
 and split values in `<repository>/.liquid/liquify-state.json`.
 
 State version 2 stores a `panels` object. Loading version 1 maps its selected sidebar and bottom
-panel into the registry, so an existing repository does not lose its selected surfaces. Unknown or
-missing panel entries receive current defaults. `Panels: Reset layout` restores dimensions,
-visibility, and every panel placement while preserving the theme preference.
+panel into the registry, so an existing repository does not lose its selected surfaces. Version 3
+adds the high-contrast preference. Unknown or missing panel entries receive current defaults.
+`Panels: Reset layout` restores dimensions, visibility, and every panel placement while preserving
+the theme and high-contrast preferences.
 
 ## Status, empty states, and errors
 
@@ -57,7 +58,7 @@ repository directory future do not expose cancellation.
 
 `PanelRegistry.*` tests cover descriptor metadata, focus, hiding, movement, floating bounds,
 re-docking, default restoration, progress, and supported cancellation. `AppShellState.*` tests
-cover version 2 round trips, version 1 migration, invalid state, and layout reset. The deterministic
+cover version 3 round trips, version 1 migration, invalid state, and layout reset. The deterministic
 `panels-light` and `panels-dark` states show an editor-tab Build panel, floating Assistant, docked
 Diagnostics, and shared build progress.
 

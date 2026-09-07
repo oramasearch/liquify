@@ -36,6 +36,8 @@ states=(
     panels-dark
     settings-light
     settings-dark
+    accessibility-light
+    accessibility-dark
 )
 
 if [[ ! -x $binary ]]; then
@@ -49,4 +51,4 @@ for state in "${states[@]}"; do
     "$binary" --screenshot "$state" --out "$output_dir/$state.png"
 done
 
-printf 'screenshots: ok — 14 screens × 2 themes at 1280x800\n'
+printf 'screenshots: ok — 15 states × 2 themes at 1280x800\n'
