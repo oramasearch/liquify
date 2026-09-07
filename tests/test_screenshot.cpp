@@ -61,7 +61,9 @@ TEST(Screenshot, EditorViewShowsSearchGutterAndBothThemes) {
 TEST(Screenshot, RegistryIncludesPanelSystemInBothThemes) {
     EXPECT_NE(find_screenshot_state("panels-light"), nullptr);
     EXPECT_NE(find_screenshot_state("panels-dark"), nullptr);
-    EXPECT_EQ(screenshot_states().size(), 24U);
+    EXPECT_NE(find_screenshot_state("settings-light"), nullptr);
+    EXPECT_NE(find_screenshot_state("settings-dark"), nullptr);
+    EXPECT_EQ(screenshot_states().size(), 26U);
 }
 
 TEST(Screenshot, NavigationRendersQuickOpenAndAnnotatedTree) {
@@ -70,6 +72,17 @@ TEST(Screenshot, NavigationRendersQuickOpenAndAnnotatedTree) {
         test::region_contains_color(image, {320, 365, 650, 30}, {237, 245, 255, 255}, 1, 10'000));
     EXPECT_TRUE(
         test::region_contains_color(image, {88, 92, 224, 24}, {225, 230, 237, 255}, 1, 1'000));
+}
+
+TEST(Screenshot, SettingsRenderGroupedControlsInBothThemes) {
+    const auto light = render_state("settings-light");
+    const auto dark = render_state("settings-dark");
+
+    EXPECT_EQ(light.width, screenshot_width);
+    EXPECT_EQ(dark.height, screenshot_height);
+    EXPECT_TRUE(
+        test::region_contains_color(light, {190, 70, 900, 650}, {255, 255, 255, 255}, 3, 100));
+    EXPECT_TRUE(test::region_contains_color(dark, {190, 70, 900, 650}, {18, 18, 22, 255}, 4, 100));
 }
 
 } // namespace

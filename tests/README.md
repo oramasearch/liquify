@@ -26,6 +26,8 @@ shell regions, and requires both panel-system themes; the complete visual matrix
 
 `test_editor_model.cpp` covers configuration-driven indentation, every selection shape, literal
 and regular-expression replacement, bracket matching, syntax roles, wrapping and folding.
+`test_settings.cpp` covers `.liquid` settings parsing, precedence, validation, reset, search, safe
+defaults and credential-free serialization.
 `test_editor_buffer.cpp` covers line, selection and multi-cursor edits, UTF-8 cursor movement,
 absolute cursor byte offsets, and a save that retains the pending-drip count and reopens the result through
 `liquid::repository`. `test_text_layout.cpp` proves cached layouts are reused, an edit invalidates
@@ -78,7 +80,7 @@ It also proves a proposed replacement leaves repository content unchanged until 
 creates exactly one drip and a local assisted-edit record without recording the prompt.
 
 `test_screenshot.cpp` renders the deterministic C++ editor, complete editor view, diagnostics,
-panel-system, and navigation states through SDL's dummy video driver and software renderer,
+panel-system, navigation and settings states through SDL's dummy video driver and software renderer,
 decodes their PNG output and uses `ui_pixel_assert.hpp` to prove that a highlighted line, themed
-gutter, panel title, count badge, annotated tree, and Quick Open selection occupy their expected
-regions.
+gutter, panel title, count badge, annotated tree, Quick Open selection, and grouped settings controls
+occupy their expected regions.

@@ -36,6 +36,8 @@ constexpr auto states = std::to_array<ScreenshotState>({
     {"panels-dark", ScreenshotView::panels, ScreenshotTheme::dark},
     {"navigation-light", ScreenshotView::navigation, ScreenshotTheme::light},
     {"navigation-dark", ScreenshotView::navigation, ScreenshotTheme::dark},
+    {"settings-light", ScreenshotView::settings, ScreenshotTheme::light},
+    {"settings-dark", ScreenshotView::settings, ScreenshotTheme::dark},
 });
 
 constexpr std::array<std::uint8_t, 8> png_signature{

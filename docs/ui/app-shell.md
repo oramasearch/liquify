@@ -25,17 +25,20 @@ sync, repository hydration, and assistant progress.
 
 For an open repository, `.liquid/liquify-state.json` stores sidebar width and visibility, bottom
 panel height and visibility, editor split ratio and visibility, panel placements, visibility,
-order, focus, floating bounds and prior dock, plus the theme preference. Version 1 selection
-fields migrate into version 2 panel state. Invalid state reports an editor status message and uses
-bounded defaults. Reset layout restores the shell and panel defaults without changing the theme
-preference.
+order, focus, floating bounds and prior dock, plus a compatibility copy of the theme preference.
+The `.liquid` settings files described in [`settings.md`](settings.md) are authoritative. Version 1
+selection fields migrate into version 2 panel state. Invalid state reports an editor status message
+and uses bounded defaults. Reset layout restores the shell and panel defaults without changing the
+theme preference.
 
 ## Design, fonts, and themes
 
 `src/app.cpp` maps the ImGui style colors and metrics from
 [`design_tokens.generated.hpp`](../../include/liquify/design_tokens.generated.hpp). Light and dark
 palettes come from the upstream token modes. The preference cycles system → light → dark; system
-mode reads `SDL_GetSystemTheme()` every frame, so an OS change is reflected at runtime.
+mode reads `SDL_GetSystemTheme()` every frame, so an OS change is reflected at runtime. The
+searchable settings surface applies theme, supported font sizes, editor behavior, command bindings,
+assistant configuration, lake accounts, and telemetry without reopening the repository.
 
 IBM Plex Sans is loaded at 11, 12, 14, 16, 20, 24, and 32 logical pixels. IBM Plex Mono is loaded
 at 12, 14, and 16 logical pixels and backs both retained editor geometry and the secondary split.
@@ -86,10 +89,12 @@ The committed evidence is:
 | Structural editing | [light](screenshots/structural-editing-light.png) | [dark](screenshots/structural-editing-dark.png) |
 | Panel system | [light](screenshots/panels-light.png) | [dark](screenshots/panels-dark.png) |
 | Navigation | [light](screenshots/navigation-light.png) | [dark](screenshots/navigation-dark.png) |
+| Settings | [light](screenshots/settings-light.png) | [dark](screenshots/settings-dark.png) |
 
 `Screenshot.EditorRendersSelectedSource`, `Screenshot.EditorViewShowsSearchGutterAndBothThemes`
 `Screenshot.PanelRendersDiagnostics`, and
-`Screenshot.NavigationRendersQuickOpenAndAnnotatedTree` read the generated PNG files and check
+`Screenshot.NavigationRendersQuickOpenAndAnnotatedTree` and
+`Screenshot.SettingsRenderGroupedControlsInBothThemes` read the generated PNG files and check
 stable shell pixels; `PanelRegistry` and `AppShellState` tests cover registry behavior,
 repository-local round trips, version 1 migration, reset, and invalid state. The screenshot script
 checks the complete matrix and each capture command reports its dimensions.
