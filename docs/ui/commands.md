@@ -53,6 +53,7 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | Selection | Add Cursor Below | `selection.add-cursor-down` | `Cmd+Option+Down` | `Ctrl+Alt+Down` | `Ctrl+Alt+Down` | Add a cursor below the active editor cursor. |
 | Review | Refresh Review | `review.refresh` | `—` | `—` | `—` | Refresh the open review. |
 | View | Reset Panel Layout | `panel.reset-layout` | `—` | `—` | `—` | Restore the default panel layout. |
+| Preferences | Open Settings | `settings.open` | `Cmd+Comma` | `Ctrl+Comma` | `Ctrl+Comma` | Open the live settings surface. |
 | Build, test and deploy | Build | `build.start` | `—` | `—` | `—` | Start the configured build from the build panel. |
 | Build, test and deploy | Run All Tests | `build.test` | `—` | `—` | `—` | Run all configured test actions from the build panel. |
 | Build, test and deploy | Deploy | `build.deploy` | `—` | `—` | `—` | Push saved drips from the build panel. |
