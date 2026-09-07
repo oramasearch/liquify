@@ -8,7 +8,7 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
+**Accessible retained GPU editor with graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
 `./build/liquify` opens a repository front door with local open, lake clone, recent repositories,
 local TAAP identity and additional-window actions. Repositories switch without restarting.
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
@@ -30,13 +30,23 @@ light/dark shell arranges the activity bar, contextual sidebar, split editor, bo
 floating panels and status bar from those roles. One plain-C++ registry owns every panel's
 metadata, commands, placement, focus, state and notifications; panels move among dock areas, float
 and re-dock, repository-local state persists the complete layout, and reset restores defaults. One
+status channel reports build, saved-drip sync, repository hydration and assistant progress. macOS
+exposes the command groups and Cmd bindings through the native menu bar. The searchable settings
+surface reads user and repository `.liquid` files, applies appearance, editor, keymap, AI and lake
+changes live, keeps telemetry off by default, and never places credential values in its model or
+UI. SDL composition supports
+CJK input methods and dead keys; rich and plain clipboard forms, file drops, visible keyboard
+focus, macOS accessibility labels, high contrast and the OS reduced-motion preference cover the
+shell. C and C++ stubs
 status channel reports daemon, sync, hydration, build, presence, current change, branch,
 notifications and identity session. macOS exposes the command groups and Cmd bindings through the
 native menu bar. The same registry provides a fuzzy palette with recent commands and resolved
 bindings, typed `.liquid` keymap overrides with conflict reporting, plugin commands, and headless
 `--command` invocation. The searchable settings surface reads user and repository `.liquid` files,
 applies appearance, editor, keymap, AI and lake changes live, keeps telemetry off by default, and
-never places credential values in its model or UI. C and C++ stubs
+never places credential values in its model or UI. SDL composition supports CJK input methods and
+dead keys; rich and plain clipboard forms, file drops, visible keyboard focus, macOS accessibility
+labels, high contrast and the OS reduced-motion preference cover the shell. C and C++ stubs
 are graph query values that resolve
 declarations from closed files without retaining full parse trees. Graph-backed editor queries run
 over error-tolerant incremental trees for open overlays, resolve through closed-file

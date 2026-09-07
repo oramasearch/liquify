@@ -34,12 +34,14 @@ enum class ScreenshotView : std::uint8_t {
   structural_editing,
   panels,
   settings,
+  accessibility,
 };
 
 struct ScreenshotState {
   std::string_view name;
   ScreenshotView view;
   ScreenshotTheme theme;
+  bool high_contrast{};
 };
 
 struct ScreenshotImage {

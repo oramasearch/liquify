@@ -17,6 +17,9 @@ platform primary modifiers, typed `.liquid` keymap parsing, overrides, unbinding
 reporting, and generated command/default-keymap files. `test_command_cli.cmake` runs a registered
 headless command, rejects an unknown name, and checks both committed generated files.
 
+`test_input.cpp` covers the plain-C++ input state model: UTF-8 composition, drop routing,
+clipboard forms, motion preference, and named accessibility controls.
+
 `test_app_state.cpp` round-trips divider sizes, visibility, active shell surfaces, editor split and
 `test_panel.cpp` covers descriptors and commands, placement, focus, hiding, float and re-dock,
 default restoration, shared progress, and supported cancellation. `test_app_state.cpp` round-trips

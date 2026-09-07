@@ -8,6 +8,7 @@ libliquid's public API.
 |---|---|
 | `include/liquify/app.hpp`, `src/app.cpp` | the token-derived application shell: window, native macOS menus, renderer, ImGui context, persisted panel layout, frame loop, and screenshot renderer. **The one TU that includes SDL3 or ImGui.** |
 | `include/liquify/app_state.hpp`, `src/app_state.cpp` | bounded repository-local shell layout, active surfaces, and theme persistence |
+| `include/liquify/input.hpp`, `src/input.cpp` | plain-C++ composition, drop routing, clipboard conversion, motion preference and accessibility metadata |
 | `include/liquify/command.hpp`, `src/command.cpp` | command registry, platform key chords, fuzzy search, recency, typed keymap overrides, conflicts, and generated reference/default-keymap text |
 | `include/liquify/panel.hpp`, `src/panel.cpp` | plain-C++ panel descriptors, commands, placement, focus, runtime state and shared operation notifications |
 | `include/liquify/settings.hpp`, `src/settings.cpp` | typed `.liquid` user settings, repository overlays, validation, serialization, search and group reset |

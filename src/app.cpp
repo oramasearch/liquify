@@ -1194,6 +1194,10 @@ App::App(AppOptions options) : options_(std::move(options)) {
     text_layer_ = std::make_unique<RetainedTextLayer>();
     text_layer_->reset(editor_->line_count());
     editor_focused_ = true;
+    if (screenshot->view == ScreenshotView::accessibility) {
+      editor_->set_cursor({5, 9});
+      input_.update_composition("日本語", 2, 1);
+    }
     if (screenshot->view == ScreenshotView::review) {
       panels_.focus(PanelId::review);
     } else if (screenshot->view == ScreenshotView::editor_view) {
@@ -2909,6 +2913,17 @@ void App::handle_text(std::string_view text) {
   }
 }
 
+void App::handle_composition(std::string_view text, int selection_start,
+                             int selection_length) {
+  if (!editor_ || !editor_focused_ || review_diff_open_ ||
+      editor_->mode() == EditingMode::modal_command) {
+    input_.cancel_composition();
+    return;
+  }
+  input_.update_composition(std::string(text), selection_start,
+                            selection_length);
+}
+
 void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
   if (command_palette_visible_) {
     return;
@@ -4472,6 +4487,19 @@ void App::draw_editor() {
                            packed_color(palette.surface));
   draw_list->AddRect(position, ImVec2(position.x + size.x, position.y + size.y),
                      packed_color(palette.border_subtle));
+  const auto *screenshot =
+      options_.screenshot_state
+          ? find_screenshot_state(*options_.screenshot_state)
+          : nullptr;
+  if (screenshot != nullptr &&
+      screenshot->view == ScreenshotView::accessibility) {
+    const auto focus = screenshot->theme == ScreenshotTheme::dark
+                           ? IM_COL32(107, 152, 255, 255)
+                           : IM_COL32(15, 98, 254, 255);
+    draw_list->AddRect(position,
+                       ImVec2(position.x + size.x, position.y + size.y), focus,
+                       0.0F, 0, 3.0F);
+  }
 
   editor_x_ = position.x;
   editor_y_ = position.y;
@@ -4557,7 +4585,53 @@ void App::draw_editor() {
       }
     }
   }
+  draw_composition();
   ImGui::PopFont();
+}
+
+void App::draw_composition() {
+  const auto &composition = input_.composition();
+  if (!composition.active() || !editor_) {
+    return;
+  }
+  const auto cursor = editor_->cursor();
+  if (cursor.line < scroll_line_ ||
+      cursor.line >= scroll_line_ + visible_lines_) {
+    return;
+  }
+  const auto x = editor_x_ + editor_gutter_width + editor_padding +
+                 static_cast<float>(cursor.byte) * cell_width_ -
+                 horizontal_scroll_;
+  const auto y =
+      editor_y_ + static_cast<float>(cursor.line - scroll_line_) * line_height_;
+  const auto selection_start =
+      utf8_byte_offset(composition.text, composition.selection_start);
+  const auto selection_end =
+      utf8_byte_offset(composition.text, composition.selection_start +
+                                             composition.selection_length);
+  const auto prefix_width =
+      ImGui::CalcTextSize(composition.text.data(),
+                          composition.text.data() + selection_start)
+          .x;
+  const auto selection_width =
+      ImGui::CalcTextSize(composition.text.data() + selection_start,
+                          composition.text.data() + selection_end)
+          .x;
+  const auto text_size = ImGui::CalcTextSize(composition.text.c_str());
+  const auto &palette =
+      applied_dark_theme_ ? design::dark_palette : design::light_palette;
+  auto *draw_list = ImGui::GetWindowDrawList();
+  draw_list->AddRectFilled(
+      ImVec2(x, y), ImVec2(x + text_size.x + design::space1, y + line_height_),
+      packed_color(palette.overlay));
+  if (selection_width > 0.0F) {
+    draw_list->AddRectFilled(
+        ImVec2(x + prefix_width, y),
+        ImVec2(x + prefix_width + selection_width, y + line_height_),
+        packed_color(palette.selected));
+  }
+  draw_list->AddText(ImVec2(x, y + 2.0F), packed_color(palette.text_primary),
+                     composition.text.c_str());
 }
 
 void App::draw_diagnostics_panel(const EditorGraphSnapshot &graph_snapshot) {
@@ -5734,8 +5808,12 @@ int App::run() {
           ImGui_ImplSDLRenderer3_CreateFontsTexture();
         }
       }
+      if (event.type == SDL_EVENT_TEXT_EDITING) {
+        handle_composition(event.edit.text, event.edit.start,
+                           event.edit.length);
+      }
       if (event.type == SDL_EVENT_TEXT_INPUT) {
-        handle_text(event.text.text);
+        handle_text(input_.commit_text(event.text.text));
       }
       if (event.type == SDL_EVENT_KEY_DOWN) {
         handle_key(event.key.key, static_cast<std::uint16_t>(event.key.mod));

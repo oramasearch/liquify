@@ -13,6 +13,7 @@
 #include "liquify/app_state.hpp"
 #include "liquify/editor_model.hpp"
 #include "liquify/first_run.hpp"
+#include "liquify/input.hpp"
 #include "liquify/multiplayer.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
@@ -139,6 +140,9 @@ private:
                     std::size_t inserted_lines);
   void handle_key(std::uint32_t key, std::uint16_t modifiers);
   void handle_text(std::string_view text);
+  void handle_composition(std::string_view text, int selection_start,
+                          int selection_length);
+  void draw_composition();
   void position_cursor(float x, float y, bool extend_selection);
   void ensure_cursor_visible();
   void prepare_smoke_frame(int frame);
@@ -185,6 +189,7 @@ private:
   std::unique_ptr<TextLayoutCache> layouts_;
   std::unique_ptr<RetainedTextLayer> text_layer_;
   AppShellState shell_state_;
+  InputState input_;
   PanelRegistry panels_;
   Settings settings_;
   SettingsScope settings_scope_{SettingsScope::user};

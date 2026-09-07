@@ -60,7 +60,7 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects fifteen seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects sixteen seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -91,6 +91,7 @@ The committed evidence is:
 | Structural editing | [light](screenshots/structural-editing-light.png) | [dark](screenshots/structural-editing-dark.png) |
 | Panel system | [light](screenshots/panels-light.png) | [dark](screenshots/panels-dark.png) |
 | Settings | [light](screenshots/settings-light.png) | [dark](screenshots/settings-dark.png) |
+| Accessibility | [light](screenshots/accessibility-light.png) | [dark](screenshots/accessibility-dark.png) |
 
 `Screenshot.EditorRendersSelectedSource`, `Screenshot.EditorViewShowsSearchGutterAndBothThemes`
 and `Screenshot.PanelRendersDiagnostics` read the

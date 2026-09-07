@@ -77,7 +77,9 @@ TEST(Screenshot, RegistryIncludesPanelSystemInBothThemes) {
   EXPECT_NE(find_screenshot_state("lake-offline-dark"), nullptr);
   EXPECT_NE(find_screenshot_state("settings-light"), nullptr);
   EXPECT_NE(find_screenshot_state("settings-dark"), nullptr);
-  EXPECT_EQ(screenshot_states().size(), 30U);
+  EXPECT_NE(find_screenshot_state("accessibility-light"), nullptr);
+  EXPECT_NE(find_screenshot_state("accessibility-dark"), nullptr);
+  EXPECT_EQ(screenshot_states().size(), 32U);
 }
 
 TEST(Screenshot, SettingsRenderGroupedControlsInBothThemes) {
@@ -89,6 +91,15 @@ TEST(Screenshot, SettingsRenderGroupedControlsInBothThemes) {
                                           {255, 255, 255, 255}, 3, 100));
   EXPECT_TRUE(test::region_contains_color(dark, {190, 70, 900, 650},
                                           {18, 18, 22, 255}, 4, 100));
+}
+
+TEST(Screenshot, AccessibilityStateShowsHighContrastFocusInBothThemes) {
+  const auto light = render_state("accessibility-light");
+  const auto dark = render_state("accessibility-dark");
+  EXPECT_TRUE(test::region_contains_color(light, {320, 100, 950, 660},
+                                          {15, 98, 254, 255}, 1, 1'000));
+  EXPECT_TRUE(test::region_contains_color(dark, {320, 100, 950, 660},
+                                          {107, 152, 255, 255}, 1, 1'000));
 }
 
 } // namespace

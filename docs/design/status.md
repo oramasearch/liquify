@@ -26,6 +26,10 @@ liquid's error and make `--print-tree` exit non-zero. The standard input mode is
 modal command/insert mode is available.
 `--smoke` scrolls and edits a 50,000-line buffer, reports frame and typing latency, and exits 0
 ([`../app-shell/README.md`](../app-shell/README.md), [`../editor/README.md`](../editor/README.md)).
+SDL composition handles CJK input methods and dead keys without editing until commit. Rich and
+plain clipboard forms, file drops through libliquid, complete keyboard traversal with visible
+focus, macOS accessibility labels, high contrast, and the OS reduced-motion preference are
+recorded in [`../ui/accessibility.md`](../ui/accessibility.md).
 The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
 its gate verifies source hashes and rejects stale generated output. Those roles drive the system,
 light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom

@@ -26,6 +26,7 @@ Every screen has light and dark variants:
 | Structural editing | Multi-file edit preview | [`structural-editing-light.png`](screenshots/structural-editing-light.png) | [`structural-editing-dark.png`](screenshots/structural-editing-dark.png) |
 | Panel system | Docked, editor-tab and floating panels with shared progress | [`panels-light.png`](screenshots/panels-light.png) | [`panels-dark.png`](screenshots/panels-dark.png) |
 | Settings | Searchable groups, repository scope, masked credentials and privacy defaults | [`settings-light.png`](screenshots/settings-light.png) | [`settings-dark.png`](screenshots/settings-dark.png) |
+| Accessibility | Keyboard focus, text composition and high-contrast presentation | [`accessibility-light.png`](screenshots/accessibility-light.png) | [`accessibility-dark.png`](screenshots/accessibility-dark.png) |
 
 The names in the table are the command-line registry. An unknown name exits 2 and prints every
 valid name. `--screenshot` and `--out` are required together and cannot be combined with a
@@ -56,8 +57,8 @@ landmarks rather than whole-image hashes so harmless rasterizer differences do n
 intended signal. The editor-view assertion separately proves its themed gutter and syntax roles;
 [`editor.md`](editor.md) records the interaction and liquid data paths.
 
-`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at fifteen screens
-and thirty named states. The panel behavior and layout model are documented in
+`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at sixteen screens
+and thirty-two named states. The panel behavior and layout model are documented in
 [`panels.md`](panels.md).
 
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced
