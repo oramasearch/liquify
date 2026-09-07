@@ -66,3 +66,9 @@ and thirty-four named states. The panel behavior and layout model are documented
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced
 format. PNG chunks, CRC checks and scanline validation are implemented in-tree; the existing zlib
 dependency compresses and expands image data.
+
+## Native rendering coverage
+
+The [coordinate contract and native window regression](app-shell.md#logical-coordinates-and-native-pixels)
+cover drawable scaling, retained composition and logical hit testing with a real GPU window.
+Headless fixture success alone does not establish native rendering correctness.

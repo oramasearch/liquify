@@ -66,7 +66,9 @@ public:
   int run();
 
 private:
-  void frame();
+  friend class NativeWindowTest;
+  bool init_window(bool high_pixel_density);
+  void frame(bool present = true);
   void draw_contents();
   void draw_activity_bar();
   void draw_sidebar();
@@ -90,7 +92,7 @@ private:
   void draw_review_comment_popup();
   void draw_editor();
   void draw_build_panel(const EditorGraphSnapshot &snapshot);
-  void render_editor();
+  void render_editor(InputRectangle clip);
   void open_editor(std::string path, std::string blob_id,
                    bool record_history = true);
   void open_navigation_location(const NavigationLocation &location,
@@ -171,6 +173,8 @@ private:
   void toggle_high_contrast();
   void apply_theme();
   void load_font_atlas(float scale);
+  bool upload_font_atlas();
+  bool fail_rendering(std::string message);
   void update_window_title();
   void begin_open_repository(std::filesystem::path path);
   void begin_clone_repository(std::string remote, std::filesystem::path path);
@@ -307,6 +311,7 @@ private:
   bool reduced_motion_{};
   bool screenshot_written_{};
   bool screenshot_failed_{};
+  bool rendering_failed_{};
   bool fonts_rebuild_requested_{};
   int screenshot_frames_rendered_{};
   bool initialized_ = false;
