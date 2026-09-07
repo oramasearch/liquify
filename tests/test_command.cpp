@@ -29,8 +29,11 @@ TEST(CommandRegistry, ContainsUniqueCommandsFromEverySurface) {
   EXPECT_NE(registry.find("go.definition"), nullptr);
   EXPECT_NE(registry.find("refactor.rename"), nullptr);
   EXPECT_NE(registry.find("run.build"), nullptr);
+  EXPECT_NE(registry.find("build.start"), nullptr);
   EXPECT_NE(registry.find("review.approve"), nullptr);
   EXPECT_NE(registry.find("assistant.ask"), nullptr);
+  EXPECT_NE(registry.find("assistant.explain"), nullptr);
+  EXPECT_NE(registry.find("structural.expand"), nullptr);
   EXPECT_NE(registry.find("help.version"), nullptr);
   EXPECT_TRUE(registry.conflicts().empty());
 }

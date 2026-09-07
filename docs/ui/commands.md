@@ -11,7 +11,7 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | Selection | Expand Syntax Selection | `selection.expand` | `Cmd+Shift+Right` | `Ctrl+Shift+Right` | `Ctrl+Shift+Right` | Expand selection to the next syntax ancestor. |
 | Selection | Shrink Syntax Selection | `selection.shrink` | `Cmd+Shift+Left` | `Ctrl+Shift+Left` | `Ctrl+Shift+Left` | Return to the previous syntax selection. |
 | Selection | Select Enclosing Definition | `selection.enclosing-definition` | `Cmd+Shift+D` | `Ctrl+Shift+D` | `Ctrl+Shift+D` | Select the enclosing definition from the analysis graph. |
-| Selection | Select Symbol References | `selection.symbol-references` | `Cmd+Shift+F` | `Ctrl+Shift+F` | `Ctrl+Shift+F` | Find references to the selected symbol. |
+| Selection | Select Symbol References | `selection.symbol-references` | `Cmd+Option+F` | `Ctrl+Alt+F` | `Ctrl+Alt+F` | Find references to the selected symbol. |
 | View | Toggle Sidebar | `view.toggle-sidebar` | `Cmd+B` | `Ctrl+B` | `Ctrl+B` | Show or hide the contextual sidebar. |
 | View | Toggle Bottom Panel | `view.toggle-bottom-panel` | `Cmd+J` | `Ctrl+J` | `Ctrl+J` | Show or hide the bottom panel. |
 | View | Toggle Editor Split | `view.toggle-editor-split` | `Cmd+\` | `Ctrl+\` | `Ctrl+\` | Show or hide the secondary editor overview. |
@@ -44,6 +44,29 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | Assistant | Accept Edit | `assistant.accept-edit` | `Cmd+Enter` | `Ctrl+Enter` | `Ctrl+Enter` | Accept the current assistant edit preview. |
 | Assistant | Reject Edit | `assistant.reject-edit` | `Cmd+Backspace` | `Ctrl+Backspace` | `Ctrl+Backspace` | Reject the current assistant edit preview. |
 | Assistant | Toggle Assistant | `assistant.toggle` | `Cmd+Shift+L` | `Ctrl+Shift+L` | `Ctrl+Shift+L` | Turn the assistant on or off. |
+| Edit | Find | `edit.find` | `Cmd+F` | `Ctrl+F` | `Ctrl+F` | Find text in the active editor. |
+| Edit | Focus Search | `edit.focus-search` | `Cmd+Shift+F` | `Ctrl+Shift+F` | `Ctrl+Shift+F` | Focus the repository search panel. |
+| Edit | Undo | `edit.undo` | `Cmd+Z` | `Ctrl+Z` | `Ctrl+Z` | Undo the latest editor operation. |
+| Edit | Redo | `edit.redo` | `Cmd+Shift+Z` | `Ctrl+Shift+Z` | `Ctrl+Shift+Z` | Redo the latest editor operation. |
+| Selection | Select Line | `selection.line` | `Cmd+L` | `Ctrl+L` | `Ctrl+L` | Select the active editor line. |
+| Selection | Add Cursor Above | `selection.add-cursor-up` | `Cmd+Option+Up` | `Ctrl+Alt+Up` | `Ctrl+Alt+Up` | Add a cursor above the active editor cursor. |
+| Selection | Add Cursor Below | `selection.add-cursor-down` | `Cmd+Option+Down` | `Ctrl+Alt+Down` | `Ctrl+Alt+Down` | Add a cursor below the active editor cursor. |
+| Review | Refresh Review | `review.refresh` | `—` | `—` | `—` | Refresh the open review. |
+| View | Reset Panel Layout | `panel.reset-layout` | `—` | `—` | `—` | Restore the default panel layout. |
+| Build, test and deploy | Build | `build.start` | `—` | `—` | `—` | Start the configured build from the build panel. |
+| Build, test and deploy | Run All Tests | `build.test` | `—` | `—` | `—` | Run all configured test actions from the build panel. |
+| Build, test and deploy | Deploy | `build.deploy` | `—` | `—` | `—` | Push saved drips from the build panel. |
+| Assistant | Explain Diagnostic | `assistant.explain` | `—` | `—` | `—` | Explain the active diagnostic from the assistant panel. |
+| Assistant | Propose Edit | `assistant.propose` | `—` | `—` | `—` | Request an edit preview from the assistant panel. |
+| Assistant | Accept Edit | `assistant.accept` | `—` | `—` | `—` | Accept the assistant edit preview from the assistant panel. |
+| Assistant | Reject Edit | `assistant.reject` | `—` | `—` | `—` | Reject the assistant edit preview from the assistant panel. |
+| Assistant | Preview Assistant Context | `assistant.context` | `—` | `—` | `—` | Show the assistant context from the assistant panel. |
+| Structural editing | Expand Syntax Selection | `structural.expand` | `—` | `—` | `—` | Expand selection from the structural editing panel. |
+| Structural editing | Shrink Syntax Selection | `structural.shrink` | `—` | `—` | `—` | Shrink selection from the structural editing panel. |
+| Structural editing | Select Enclosing Definition | `structural.definition` | `—` | `—` | `—` | Select the enclosing definition from the structural editing panel. |
+| Structural editing | Select Symbol References | `structural.references` | `—` | `—` | `—` | Find symbol references from the structural editing panel. |
+| Structural editing | Rename Symbol | `structural.rename` | `—` | `—` | `—` | Preview a symbol rename from the structural editing panel. |
+| Structural editing | Extract Function | `structural.extract` | `—` | `—` | `—` | Preview function extraction from the structural editing panel. |
 | Assistant | Preview Assistant Context | `assistant.preview-context` | `Cmd+Shift+C` | `Ctrl+Shift+C` | `Ctrl+Shift+C` | Show exactly what will be sent before a request. |
 | Help | Show Version | `help.version` | `—` | `—` | `—` | Print the liquify and libliquid versions. |
 | Help | Command Reference | `help.command-reference` | `—` | `—` | `—` | Generate the command registry reference. |

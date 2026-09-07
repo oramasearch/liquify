@@ -1,5 +1,9 @@
 # The editor surface
 
+[`../ui/editor.md`](../ui/editor.md) records the editor view's multi-cursor and selection model,
+syntax colors and folds, line and collaboration gutters, search/replace, operation-log history and
+light/dark screenshot states.
+
 [`ai.md`](ai.md) records the optional assistant, its offline switch guarantee, graph-derived
 inspectable context, provider contract, keyboard commands, and accept-only edit path.
 [`review.md`](review.md) records the lake review panel, retained inline text diff, cursor anchors,
@@ -24,6 +28,10 @@ libliquid's drip path. The UI never writes repository files directly. The reposi
 stay attached to the buffer; a generated smoke buffer deliberately has no save target.
 The save result retains the repository's pending-drip count before the repository handle closes,
 so the editor status does not reopen and checkpoint the journal merely to display it.
+
+[`../multiplayer.md`](../multiplayer.md) records the presence, attribution, and lease controls that
+surround the buffer. Editor saves reopen liquid with the active multiplayer session, preserving
+liquid's authorization boundary for a held lease.
 
 The default mode is standard, non-modal editing. Arrow, Home, End, Page Up, Page Down, selection,
 Backspace, Delete, Return and text input edit directly. The mode button or primary-modifier+M

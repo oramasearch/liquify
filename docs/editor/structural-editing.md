@@ -62,9 +62,9 @@ liquify --apply-edits request.cbor /path/to/repository > result.cbor
 ```
 
 Accepted edits are ordered from the end of each file toward the beginning. Overlapping edits are
-refused. All accepted mutations for a file pass through `EditorBuffer`, followed by one
-`liquid::repository::write`; therefore each changed file creates one drip regardless of its edit
-count.
+refused. `StructuralEditor` adapts the accepted nodes to liquid's `tree_edit_request`, then calls
+`repository::preview_edit` and `repository::apply_edit`. Each changed file creates one drip, while
+liquid groups the complete multi-file result into one `structural_edit` operation for undo.
 
 ## Rename
 
@@ -99,13 +99,9 @@ signature rewriting are left for a semantic refactoring layer.
 ## Agent surface and ownership
 
 Bridge decision 30 places the permanent agent edit operation in libliquid so it can be used without
-the IDE. Until that liquid companion leaf lands, `StructuralEditor` is a local adapter that mirrors
-the intended request and result records. It compiles the pinned liquid canonical CBOR codec into
-`liquify-core` so both static and shared libliquid configurations use identical bytes without
-depending on hidden library symbols. The editor, tests and headless command all use this one
-node-level entry point; there is no whole-file agent mutation path.
-
-The stable plugin ABI is not available yet. `structural_edit.hpp` and `--apply-edits` are the plain
-C++ and script surfaces for this phase. The companion liquid leaf must add the same
-`structural_edit` operation to the daemon's local endpoint and MCP rendering, with closed-file trees
-provided by liquid's frontend fallback parser.
+the IDE. The pinned liquid now owns fingerprinted edit preview, atomic multi-file application,
+attribution and the grouped operation record. `StructuralEditor` remains the UI/headless adapter:
+it validates the selected syntax nodes, translates them to liquid's public edit records, refreshes
+open analysis overlays after application, and preserves the canonical liquify request/result
+envelopes. The editor, tests and headless command all use this node-level entry point; there is no
+whole-file agent mutation path.

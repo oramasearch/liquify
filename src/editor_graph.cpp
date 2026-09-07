@@ -12,15 +12,18 @@
 #include <mutex>
 #include <numeric>
 #include <ranges>
+#include <set>
 #include <span>
 #include <thread>
 #include <utility>
 
 #include "liquid/build.hpp"
+#include "liquid/drive.hpp"
 #include "liquid/frontend.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
 #include "liquid/sync.hpp"
+#include "liquify/editor_model.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/stub_tree.hpp"
 
@@ -44,6 +47,14 @@ auto short_digest(const liquid::digest &value) -> std::string {
     text.resize(12);
   }
   return text;
+}
+
+auto language_name(StubLanguage language) -> std::string_view {
+    return language == StubLanguage::c ? "c" : "c++";
+}
+
+auto source_bytes(std::string_view source) -> std::span<const std::byte> {
+    return std::as_bytes(std::span(source.data(), source.size()));
 }
 
 auto action_identity(const std::optional<liquid::digest> &action,
@@ -344,10 +355,10 @@ struct EditorGraph::Impl {
   };
 
   explicit Impl(std::filesystem::path path,
-                std::shared_ptr<PluginHost> configured_plugins)
-      : repository_path(std::move(path)),
-        plugins(std::move(configured_plugins)),
-        worker([this] { run(); }) {}
+                std::shared_ptr<PluginHost> configured_plugins,
+                std::filesystem::path configured_syntax_frontend)
+      : repository_path(std::move(path)), plugins(std::move(configured_plugins)),
+        syntax_frontend_path(std::move(configured_syntax_frontend)), worker([this] { run(); }) {}
 
   ~Impl() {
     wait_until_idle();
@@ -391,6 +402,11 @@ struct EditorGraph::Impl {
         repository_path / ".liquid" / "liquify-graph", plugins);
     auto opened_stubs =
         StubTrees::open(repository_path / ".liquid" / "liquify-stub-graph");
+    auto loaded_frontend = liquid::result<liquid::frontend_module>{std::unexpected(
+        liquid::error{liquid::errc::not_found, "tree-sitter frontend is unavailable"})};
+    if (!syntax_frontend_path.empty()) {
+        loaded_frontend = liquid::frontend_module::load(syntax_frontend_path);
+    }
     auto lock = std::lock_guard(mutex);
     if (!opened) {
       current.error = error_message(opened.error());
@@ -403,6 +419,11 @@ struct EditorGraph::Impl {
       stubs.emplace(std::move(*opened_stubs));
       current.ready = true;
       current.graph = analysis->statistics();
+    }
+    if (loaded_frontend) {
+        syntax_frontend.emplace(std::move(*loaded_frontend));
+    } else {
+        current.syntax_error = error_message(loaded_frontend.error());
     }
     initialized = true;
     idle.notify_all();
@@ -742,6 +763,221 @@ struct EditorGraph::Impl {
     current.tests = std::move(*targets);
   }
 
+  void refresh_editor_view(const std::filesystem::path& path,
+                           StubLanguage language,
+                           const std::string& source,
+                           std::uint64_t request) {
+      auto spans = std::vector<SyntaxSpan>{};
+      auto folds = std::vector<FoldRange>{};
+      auto syntax_error = std::string{};
+      if (syntax_frontend) {
+          auto tree = syntax_frontend->syntax(language_name(language), source_bytes(source));
+          if (tree) {
+              spans = syntax_spans(*tree, source);
+              folds = fold_ranges(*tree);
+          } else {
+              syntax_error = error_message(tree.error());
+          }
+      } else {
+          syntax_error = "tree-sitter frontend is unavailable";
+      }
+
+      auto attribution = std::vector<AttributionSnapshot>{};
+      auto presence = std::vector<PresenceSnapshot>{};
+      auto drive = std::optional<liquid::drive_path_status>{};
+      auto opened = liquid::runtime::block_on(liquid::repository::open(repository_path));
+      if (opened) {
+          auto head = liquid::runtime::block_on(opened->head());
+          if (head) {
+              auto lines =
+                  liquid::runtime::block_on(opened->attribution(path.generic_string(), *head));
+              if (lines) {
+                  attribution.reserve(lines->size());
+                  for (const auto& line : *lines) {
+                      attribution.push_back({static_cast<std::size_t>(line.line - 1),
+                                             line.by.taap_id,
+                                             short_digest(line.change.value),
+                                             line.agent});
+                  }
+              }
+          }
+          auto active = liquid::runtime::block_on(opened->presence());
+          if (active) {
+              presence.reserve(active->size());
+              for (const auto& value : *active) {
+                  auto range = std::optional<SourceRange>{};
+                  if (value.range) {
+                      range = source_range(*value.range);
+                  }
+                  presence.push_back({value.actor.taap_id, value.path, range, value.activity});
+              }
+          }
+      }
+      auto drive_client = liquid::runtime::block_on(liquid::drive_client::open(repository_path));
+      if (drive_client) {
+          auto status = liquid::runtime::block_on(drive_client->path_status(path.generic_string()));
+          if (status) {
+              drive = std::move(*status);
+          }
+      }
+      auto lock = std::lock_guard(mutex);
+      if (request != editor_view_request) {
+          return;
+      }
+      current.syntax = std::move(spans);
+      current.folds = std::move(folds);
+      current.syntax_error = std::move(syntax_error);
+      current.attribution = std::move(attribution);
+      current.presence = std::move(presence);
+      current.drive = std::move(drive);
+      current.syntax_generation = request;
+      current.collaboration_generation = request;
+  }
+
+  void search_repository(std::string query, std::uint64_t request) {
+      auto opened = liquid::runtime::block_on(liquid::repository::open(repository_path));
+      if (!opened) {
+          auto lock = std::lock_guard(mutex);
+          current.search.error = error_message(opened.error());
+          current.search_generation = request;
+          return;
+      }
+      auto hits =
+          liquid::runtime::block_on(opened->search(query, liquid::search_options{.limit = 500}));
+      auto lock = std::lock_guard(mutex);
+      if (request != search_request) {
+          return;
+      }
+      current.search.query = std::move(query);
+      current.search.hits.clear();
+      current.search.error.clear();
+      if (hits) {
+          current.search.hits = std::move(*hits);
+      } else {
+          current.search.error = error_message(hits.error());
+      }
+      current.search_generation = request;
+  }
+
+  void replace_repository(std::string query,
+                          std::string replacement,
+                          bool regular_expression,
+                          std::uint64_t request) {
+      auto opened = liquid::runtime::block_on(liquid::repository::open(repository_path));
+      if (!opened) {
+          auto lock = std::lock_guard(mutex);
+          current.search.error = error_message(opened.error());
+          current.search_generation = request;
+          return;
+      }
+      const auto liquid_query = regular_expression ? "/" + query + "/" : "\"" + query + "\"";
+      auto hits = liquid::runtime::block_on(
+          opened->search(liquid_query, liquid::search_options{.limit = 500}));
+      if (!hits) {
+          auto lock = std::lock_guard(mutex);
+          current.search.error = error_message(hits.error());
+          current.search_generation = request;
+          return;
+      }
+      auto paths = std::set<std::string>{};
+      for (const auto& hit : *hits) {
+          paths.insert(hit.path);
+      }
+      auto replacements = std::uint64_t{};
+      for (const auto& path : paths) {
+          auto contents = liquid::runtime::block_on(opened->read(path));
+          if (!contents) {
+              continue;
+          }
+          const auto before =
+              std::string(reinterpret_cast<const char*>(contents->data()), contents->size());
+          const auto matches = find_text(before, query, {regular_expression, true});
+          const auto after = replace_text(before, query, replacement, {regular_expression, true});
+          if (before == after) {
+              continue;
+          }
+          auto written = liquid::runtime::block_on(opened->write(
+              path,
+              std::vector<std::byte>(source_bytes(after).begin(), source_bytes(after).end())));
+          if (!written) {
+              auto lock = std::lock_guard(mutex);
+              current.search.error = error_message(written.error());
+              current.search_generation = request;
+              return;
+          }
+          replacements += matches.size();
+      }
+      auto lock = std::lock_guard(mutex);
+      current.search.query = std::move(query);
+      current.search.hits = std::move(*hits);
+      current.search.replacements = replacements;
+      current.search.error.clear();
+      current.search_generation = request;
+      redo_operation.reset();
+  }
+
+  void undo_latest(std::uint64_t request) {
+      auto opened = liquid::runtime::block_on(liquid::repository::open(repository_path));
+      if (!opened) {
+          record_history_error(opened.error(), request);
+          return;
+      }
+      auto operations = liquid::runtime::block_on(opened->operations());
+      if (!operations) {
+          record_history_error(operations.error(), request);
+          return;
+      }
+      for (const auto& operation : *operations) {
+          if (operation.kind == "undo") {
+              continue;
+          }
+          auto undone = liquid::runtime::block_on(opened->undo(operation.id));
+          if (!undone) {
+              if (undone.error().code == liquid::errc::unsupported) {
+                  continue;
+              }
+              record_history_error(undone.error(), request);
+              return;
+          }
+          auto refreshed = liquid::runtime::block_on(opened->operations());
+          auto lock = std::lock_guard(mutex);
+          if (refreshed && !refreshed->empty() && refreshed->front().kind == "undo") {
+              redo_operation = refreshed->front().id;
+          }
+          current.history_error.clear();
+          current.history_generation = request;
+          return;
+      }
+      record_history_error({liquid::errc::not_found, "no undoable operation"}, request);
+  }
+
+  void redo_latest(std::uint64_t request) {
+      if (!redo_operation) {
+          record_history_error({liquid::errc::not_found, "no operation to redo"}, request);
+          return;
+      }
+      auto opened = liquid::runtime::block_on(liquid::repository::open(repository_path));
+      if (!opened) {
+          record_history_error(opened.error(), request);
+          return;
+      }
+      auto redone = liquid::runtime::block_on(opened->undo(*redo_operation));
+      if (!redone) {
+          record_history_error(redone.error(), request);
+          return;
+      }
+      auto lock = std::lock_guard(mutex);
+      redo_operation.reset();
+      current.history_error.clear();
+      current.history_generation = request;
+  }
+
+  void record_history_error(const liquid::error& error, std::uint64_t request) {
+      auto lock = std::lock_guard(mutex);
+      current.history_error = error_message(error);
+      current.history_generation = request;
+  }
+
   void deploy() {
     {
       auto lock = std::lock_guard(mutex);
@@ -784,6 +1020,8 @@ struct EditorGraph::Impl {
   std::deque<Task> tasks;
   std::shared_ptr<InteractiveAnalysis> analysis;
   std::shared_ptr<PluginHost> plugins;
+  std::filesystem::path syntax_frontend_path;
+  std::optional<liquid::frontend_module> syntax_frontend;
   std::unique_ptr<StructuralEditor> structural;
   std::optional<StubTrees> stubs;
   std::optional<liquid::daemon> daemon;
@@ -800,6 +1038,10 @@ struct EditorGraph::Impl {
   std::uint64_t structural_references_request{};
   std::uint64_t structural_preview_request{};
   std::uint64_t structural_result_request{};
+  std::uint64_t editor_view_request{};
+  std::uint64_t search_request{};
+  std::uint64_t history_request{};
+  std::optional<liquid::op_id> redo_operation;
   std::chrono::steady_clock::time_point last_edit{};
   std::chrono::steady_clock::time_point build_requested_at{};
   bool initialized{};
@@ -808,9 +1050,10 @@ struct EditorGraph::Impl {
 };
 
 EditorGraph::EditorGraph(std::filesystem::path repository_path,
-                         std::shared_ptr<PluginHost> plugins)
-    : impl_(std::make_unique<Impl>(std::move(repository_path),
-                                   std::move(plugins))) {}
+                         std::shared_ptr<PluginHost> plugins,
+                         std::filesystem::path syntax_frontend)
+    : impl_(std::make_unique<Impl>(
+          std::move(repository_path), std::move(plugins), std::move(syntax_frontend))) {}
 
 EditorGraph::~EditorGraph() = default;
 
@@ -1043,6 +1286,73 @@ void EditorGraph::request_definition(std::filesystem::path path,
          }
        },
        true});
+}
+
+void EditorGraph::request_editor_view(std::filesystem::path path,
+                                      StubLanguage language,
+                                      std::string source) {
+    auto request = std::uint64_t{};
+    {
+        auto lock = std::lock_guard(impl_->mutex);
+        request = ++impl_->editor_view_request;
+    }
+    impl_->enqueue({[implementation = impl_.get(),
+                     path = std::move(path),
+                     language,
+                     source = std::move(source),
+                     request]() mutable {
+        implementation->refresh_editor_view(path, language, source, request);
+    }});
+}
+
+void EditorGraph::request_search(std::string query) {
+    auto request = std::uint64_t{};
+    {
+        auto lock = std::lock_guard(impl_->mutex);
+        request = ++impl_->search_request;
+        impl_->current.search.replacements = 0;
+    }
+    impl_->enqueue({[implementation = impl_.get(), query = std::move(query), request]() mutable {
+        implementation->search_repository(std::move(query), request);
+    }});
+}
+
+void EditorGraph::request_replace(std::string query,
+                                  std::string replacement,
+                                  bool regular_expression) {
+    auto request = std::uint64_t{};
+    {
+        auto lock = std::lock_guard(impl_->mutex);
+        request = ++impl_->search_request;
+    }
+    impl_->enqueue({[implementation = impl_.get(),
+                     query = std::move(query),
+                     replacement = std::move(replacement),
+                     regular_expression,
+                     request]() mutable {
+        implementation->replace_repository(
+            std::move(query), std::move(replacement), regular_expression, request);
+    }});
+}
+
+void EditorGraph::request_undo() {
+    auto request = std::uint64_t{};
+    {
+        auto lock = std::lock_guard(impl_->mutex);
+        request = ++impl_->history_request;
+    }
+    impl_->enqueue(
+        {[implementation = impl_.get(), request] { implementation->undo_latest(request); }});
+}
+
+void EditorGraph::request_redo() {
+    auto request = std::uint64_t{};
+    {
+        auto lock = std::lock_guard(impl_->mutex);
+        request = ++impl_->history_request;
+    }
+    impl_->enqueue(
+        {[implementation = impl_.get(), request] { implementation->redo_latest(request); }});
 }
 
 void EditorGraph::request_structural_selection(
@@ -1322,6 +1632,7 @@ void EditorGraph::publish_deploy_report(liquid::sync_report report) {
 void EditorGraph::note_saved_drip(std::uint64_t repository_pending_drips) {
   auto lock = std::lock_guard(impl_->mutex);
   impl_->current.repository_pending_drips = repository_pending_drips;
+  impl_->redo_operation.reset();
 }
 
 void EditorGraph::refresh_status() {

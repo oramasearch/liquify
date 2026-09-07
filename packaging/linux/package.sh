@@ -32,6 +32,7 @@ app_directory="$work_directory/Liquify.AppDir"
 artifact="$output_directory/liquify-${version}-x86_64.AppImage"
 mkdir -p "$app_directory/usr/bin"
 install -m 755 "$binary_path" "$app_directory/usr/bin/liquify"
+cp -R "$(dirname "$binary_path")/frontends" "$app_directory/usr/bin/frontends"
 install -m 755 "$script_directory/AppRun" "$app_directory/AppRun"
 install -m 644 \
     "$script_directory/com.oramasearch.Liquify.desktop" \

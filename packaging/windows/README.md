@@ -1,7 +1,7 @@
 # Windows packaging inputs
 
 `AppxManifest.xml` defines the desktop MSIX identity, executable, tiles, and full-trust capability.
-`package.ps1` stages the release executable, recursively copies non-system DLLs reported by
+`package.ps1` stages the release executable and its `frontends` directory, recursively copies non-system DLLs reported by
 `llvm-objdump`, generates the required tile images, and records the unsigned digest. It signs with
 SHA-256 and an RFC 3161 timestamp, verifies the signature, installs the package, and runs the
 installed `liquify version` with a system-only `PATH` so runner tool directories cannot hide a

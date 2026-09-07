@@ -155,6 +155,10 @@ try {
     New-Item -ItemType Directory -Path $layoutDirectory, $assetsDirectory, $resolvedOutput -Force |
         Out-Null
     Copy-Item -Path $resolvedBinary -Destination (Join-Path $layoutDirectory 'liquify.exe')
+    Copy-Item `
+        -Path (Join-Path (Split-Path -Parent $resolvedBinary) 'frontends') `
+        -Destination (Join-Path $layoutDirectory 'frontends') `
+        -Recurse
 
     $objdump = (Get-Command 'llvm-objdump.exe').Source
     $dependencySearchDirectories = @((Split-Path -Parent $resolvedBinary))
@@ -166,6 +170,9 @@ try {
         (Join-Path $layoutDirectory 'liquify.exe') `
         $objdump `
         $dependencySearchDirectories
+    Get-ChildItem (Join-Path $layoutDirectory 'frontends') -Filter '*.dll' | ForEach-Object {
+        Copy-RuntimeDependencies $_.FullName $objdump $dependencySearchDirectories
+    }
 
     [xml]$manifest = Get-Content -Raw (Join-Path $scriptDirectory 'AppxManifest.xml')
     $manifest.Package.Identity.SetAttribute('Publisher', $Publisher)

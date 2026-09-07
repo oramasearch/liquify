@@ -1,7 +1,7 @@
 # Self-contained macOS bundles
 
 `Liquify.app` must launch on a compatible macOS machine without Homebrew or another package
-manager. This rule covers the executable and every Mach-O copied into the bundle, including
+manager. This rule covers the executable, `Contents/MacOS/frontends` syntax modules and every Mach-O copied into the bundle, including
 dependencies reached through libliquid and its submodules.
 
 ## Dependency rule
@@ -9,7 +9,8 @@ dependencies reached through libliquid and its submodules.
 An absolute dynamic-library reference is allowed only when it starts with `/usr/lib/` or
 `/System/Library/`. Every other dynamic library is copied into `Contents/Frameworks`, receives an
 `@rpath/<name>` install ID, and has its consumers rewritten to that ID. The executable carries an
-`LC_RPATH` value of `@executable_path/../Frameworks`.
+`LC_RPATH` value of `@executable_path/../Frameworks`; the tree-sitter frontend uses its
+loader-relative equivalent.
 
 `packaging/macos/package.sh` follows each load command recursively. It resolves absolute,
 `@rpath`, `@loader_path`, and `@executable_path` source references, rejects unresolved libraries

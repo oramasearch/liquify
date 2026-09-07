@@ -1,5 +1,6 @@
 #include "repository_view.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <future>
@@ -68,6 +69,20 @@ auto RepositoryView::directory_loading(std::string_view directory) const -> bool
 auto RepositoryView::directory_loaded(std::string_view directory) const -> bool {
     const auto found = directories_.find(directory);
     return found != directories_.end() && found->second.loaded;
+}
+
+auto RepositoryView::loading_directory_count() const -> std::size_t {
+    return std::ranges::count_if(directories_,
+                                 [](const auto& item) { return item.second.pending.has_value(); });
+}
+
+auto RepositoryView::loaded_directory_count() const -> std::size_t {
+    return std::ranges::count_if(directories_, [](const auto& item) { return item.second.loaded; });
+}
+
+auto RepositoryView::directory_error_count() const -> std::size_t {
+    return std::ranges::count_if(directories_,
+                                 [](const auto& item) { return !item.second.error.empty(); });
 }
 
 auto RepositoryView::open_time() const -> std::chrono::duration<double, std::milli> {

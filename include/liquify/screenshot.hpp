@@ -22,6 +22,7 @@ enum class ScreenshotView : std::uint8_t {
   welcome,
   repository,
   editor_cpp,
+  editor_view,
   diagnostics,
   build,
   review,
@@ -29,6 +30,7 @@ enum class ScreenshotView : std::uint8_t {
   plugins,
   command_palette,
   structural_editing,
+  panels,
 };
 
 struct ScreenshotState {

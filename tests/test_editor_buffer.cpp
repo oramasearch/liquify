@@ -111,4 +111,31 @@ TEST(EditorBuffer, SaveWritesThroughLiquid) {
     EXPECT_EQ(text(*contents), "before after");
 }
 
+TEST(EditorBuffer, AppliesMultiCursorAndColumnEditsAsOneRevision) {
+    auto buffer = liquify::EditorBuffer::from_text("blob-multi", "main.cpp", "one\ntwo\nthree");
+    buffer.set_cursor({0, 0});
+    buffer.add_cursor({1, 0});
+    buffer.add_cursor({2, 0});
+    ASSERT_TRUE(buffer.insert_text("> "));
+    EXPECT_EQ(buffer.text(), "> one\n> two\n> three");
+    EXPECT_EQ(buffer.revision(), 1U);
+    EXPECT_EQ(buffer.cursors().size(), 3U);
+
+    buffer.select_column({0, 2}, {2, 5});
+    ASSERT_EQ(buffer.selections().size(), 3U);
+    ASSERT_TRUE(buffer.insert_text("item"));
+    EXPECT_EQ(buffer.text(), "> item\n> item\n> itemee");
+    EXPECT_EQ(buffer.revision(), 2U);
+}
+
+TEST(EditorBuffer, FindsAndReplacesAcrossTheBuffer) {
+    auto buffer =
+        liquify::EditorBuffer::from_text("blob-find", "main.cpp", "value = 12;\nvalue = 34;\n");
+    const auto matches =
+        buffer.find("value = [0-9]+", {.regular_expression = true, .case_sensitive = true});
+    ASSERT_EQ(matches.size(), 2U);
+    ASSERT_TRUE(buffer.replace_all("value", "answer", {.case_sensitive = true}));
+    EXPECT_EQ(buffer.text(), "answer = 12;\nanswer = 34;\n");
+}
+
 } // namespace

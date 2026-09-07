@@ -22,9 +22,12 @@ state. The standard input mode is non-modal and a modal command/insert mode is a
 The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
 its gate verifies source hashes and rejects stale generated output. Those roles drive the system,
 light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom
-panel and status bar. Divider sizes, visibility and selected surfaces persist per repository;
-macOS installs native command menus and Cmd bindings
-([`../ui/design-system.md`](../ui/design-system.md), [`../ui/app-shell.md`](../ui/app-shell.md)).
+panel, floating panels and status bar. One registry supplies panel metadata, commands, placement,
+focus, state and notifications; each surface moves among dock areas, floats and re-docks. Divider
+sizes and complete panel layouts persist per repository and can be reset; one status channel
+reports build, saved-drip sync, repository hydration and assistant progress. macOS installs native
+command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.md),
+[`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
 The shell, editor, panels, and plugins register into one command model used by the fuzzy palette,
 recent-command list, resolved keyboard dispatch, conflict reporting, native macOS menus,
 `--command`, and generated command documentation. Global and repository `settings.liquid` files
@@ -32,6 +35,12 @@ layer typed keymap overrides ([`../ui/commands.md`](../ui/commands.md)).
 `--screenshot` renders the fixed welcome, repository, C++ editor and panel registry in light and
 dark through a headless software renderer; the committed image set and pixel tests are described
 in [`../ui/README.md`](../ui/README.md).
+
+The editor supports multi-cursor and rectangular edits, repository-configured indentation,
+soft-wrap and fold row models, liquid tree-sitter syntax, bracket matching, line/diagnostic/
+attribution/presence/Drive gutters, buffer and repository search/replace, and repository operation
+history. Its interaction, worker and screenshot contracts are in
+[`../ui/editor.md`](../ui/editor.md).
 
 ## The liquid pin
 
@@ -57,9 +66,9 @@ validation backlog in its status line
 ## Structural editing
 
 Syntax-node selection, cross-file rename and C/C++ extract-function are serialized on the editor
-worker and preview fingerprinted node edits before applying one drip per changed file. The same
-canonical CBOR records are accepted by the headless `--apply-edits` command. This is the local
-adapter for bridge decision 30 until libliquid owns the permanent structural edit operation
+worker and preview fingerprinted node edits before applying one drip per changed file and one
+grouped liquid operation. The same canonical CBOR records are accepted by the headless
+`--apply-edits` command and translated to liquid's public edit API
 ([`../editor/structural-editing.md`](../editor/structural-editing.md)).
 
 ## Review in place

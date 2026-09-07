@@ -8,34 +8,40 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed interactive C/C++ analysis, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
+**Retained GPU editor with graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
 libliquid and produces a drip.
-The standard input mode is non-modal and a modal command/insert mode is available. Unreadable
+The standard input mode is non-modal and a modal command/insert mode is available. Multi-cursor
+and column edits, repository indentation, liquid syntax/folds, collaboration gutters,
+search/replace and operation-log history are part of the editor view. Unreadable
 repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
 reports frame and typing latency, and exits 0. `liquify --screenshot` renders the fixed welcome,
 repository, C++ editor and panel registry in light and dark through a headless software renderer,
 with committed PNG proof and pixel-region tests. liquid is pinned at `modules/liquid` through its
-persisted demand-driven query graph, text-anchor mapping, and coroutine-native forge review client.
+persisted demand-driven query graph, text-anchor mapping, syntax modules, attribution, presence,
+operation history, and coroutine-native forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
 embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The
-light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel and
-status bar from those roles; repository-local state persists its dividers and selected surfaces,
-and macOS exposes the command groups and Cmd bindings through the native menu bar. The shell,
-editor, panels, and plugins share one command registry; the fuzzy palette shows recent commands
-and resolved bindings, typed `settings.liquid` files provide global and repository keymap
-overrides with conflict reporting, and `--command` invokes registered headless commands. C and C++
-stubs are graph query values that resolve
+light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel,
+floating panels and status bar from those roles. One plain-C++ registry owns every panel's
+metadata, commands, placement, focus, state and notifications; panels move among dock areas, float
+and re-dock, repository-local state persists the complete layout, and reset restores defaults. One
+status channel reports build, saved-drip sync, repository hydration and assistant progress. macOS
+exposes the command groups and Cmd bindings through the native menu bar. The shell, editor,
+panels, and plugins share one command registry; the fuzzy palette shows recent commands and
+resolved bindings, typed `settings.liquid` files provide global and repository keymap overrides
+with conflict reporting, and `--command` invokes registered headless commands. C and C++ stubs
+are graph query values that resolve
 declarations from closed files without retaining full parse trees. Graph-backed editor queries run
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor
 surface renders those diagnostics inline and in a panel, exposes definition, hover and completion
 demands, and reports daemon drip triggers and the validation backlog. Syntax-node selection,
 cross-file rename and C/C++ extract-function are serialized on the editor worker and applied as
-fingerprinted node edits with one drip per changed file. The headless `--apply-edits` command uses
-the same canonical CBOR records as the editor. This is the local adapter for bridge decision 30
-until libliquid owns the permanent structural edit operation. The `--lake` review panel pulls
+fingerprinted node edits with one drip per changed file and one liquid operation for the complete
+multi-file application. The headless `--apply-edits` command uses the same canonical CBOR records
+as the editor and applies them through liquid's public edit API. The `--lake` review panel pulls
 changes through liquid, renders retained inline text hunks and conflict values, creates
 cursor-anchored comments, advances them across revised heads, and updates review state. The
 default-off assistant
@@ -66,8 +72,8 @@ platform-signing targets land.
 3. **C++26**, CMake ≥ 3.28 + Ninja, Clang 17+ auto-selected the way liquid and Zetta do,
    GoogleTest. Dependencies via FetchContent; SDL linked static; one binary.
 4. **Starting UI stack: SDL3 3.2 + Dear ImGui 1.91 with the SDL_Renderer backend**, the stack
-   Zetta's headed mode proves on all three desktop platforms. Whether an immediate-mode UI is
-   the right long-term *editor buffer* is the first real liquify decision (see Open decisions).
+   Zetta's headed mode proves on all three desktop platforms. The retained editor decision is
+   recorded below.
 5. **liquify is a client of libliquid.** liquid is a submodule at `modules/liquid`, built
    library-only and linked as `liquid::liquid`. Everything liquify knows about repositories,
    drips, builds and search comes through that API; liquify never reimplements it. Bump the pin

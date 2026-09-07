@@ -5,21 +5,28 @@ activity bar, a contextual sidebar, a tabbed editor area, a tabbed bottom panel,
 The editor tab can split into a primary retained text surface and a secondary overview. Every
 divider is interactive.
 
-## Layout and existing panels
+## Layout and registered panels
 
 The activity bar switches among Repository, Search, Review, Build, and Multiplayer. Repository
 continues to render `RepositoryView`; Review continues to render `ReviewController`; Build invokes
-the existing editor-graph build, test, and deploy requests. Search and Multiplayer hold their
-places for their graph-backed leaves without inventing local data paths.
+the existing editor-graph build, test, and deploy requests. Search runs liquid repository queries
+and opens results at their source locations. Multiplayer displays the presence records used by the
+editor gutter.
 
-The bottom panel selects Diagnostics, Build output, Assistant, or Plugins. It hosts the existing
-diagnostic/completion list, build/test/deploy event stream, default-off assistant, and data-only
-plugin panels. Structural selection and edit-preview windows remain attached to the editor area.
-Moving a panel changes only where its existing controller is drawn.
+The bottom area hosts Diagnostics, Build output, Assistant, or Plugins. Search inputs and results
+share the registered Search panel, which defaults to the sidebar and can move into the bottom area.
+Structural selections and edit previews open in their registered editor tab.
+Moving a panel changes only where its existing controller is drawn. Every surface now enters the
+plain-C++ registry described in [`panels.md`](panels.md). Its panel menu moves surfaces among all
+three dock areas, floats and re-docks them, while one status channel presents build, saved-drip
+sync, repository hydration, and assistant progress.
 
 For an open repository, `.liquid/liquify-state.json` stores sidebar width and visibility, bottom
-panel height and visibility, editor split ratio and visibility, active sidebar and panel, and the
-theme preference. Invalid state reports an editor status message and uses bounded defaults.
+panel height and visibility, editor split ratio and visibility, panel placements, visibility,
+order, focus, floating bounds and prior dock, plus the theme preference. Version 1 selection
+fields migrate into version 2 panel state. Invalid state reports an editor status message and uses
+bounded defaults. Reset layout restores the shell and panel defaults without changing the theme
+preference.
 
 ## Design, fonts, and themes
 
@@ -49,7 +56,7 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects ten seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects twelve seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -68,6 +75,7 @@ The committed evidence is:
 | Welcome | [light](screenshots/welcome-light.png) | [dark](screenshots/welcome-dark.png) |
 | Repository | [light](screenshots/repository-light.png) | [dark](screenshots/repository-dark.png) |
 | Editor tabs and split | [light](screenshots/editor-cpp-light.png) | [dark](screenshots/editor-cpp-dark.png) |
+| Editor view | [light](screenshots/editor-view-light.png) | [dark](screenshots/editor-view-dark.png) |
 | Diagnostics | [light](screenshots/diagnostics-light.png) | [dark](screenshots/diagnostics-dark.png) |
 | Build/test/deploy | [light](screenshots/build-light.png) | [dark](screenshots/build-dark.png) |
 | Assistant | [light](screenshots/assistant-light.png) | [dark](screenshots/assistant-dark.png) |
@@ -75,9 +83,12 @@ The committed evidence is:
 | Plugins | [light](screenshots/plugins-light.png) | [dark](screenshots/plugins-dark.png) |
 | Command palette | [light](screenshots/command-palette-light.png) | [dark](screenshots/command-palette-dark.png) |
 | Structural editing | [light](screenshots/structural-editing-light.png) | [dark](screenshots/structural-editing-dark.png) |
+| Panel system | [light](screenshots/panels-light.png) | [dark](screenshots/panels-dark.png) |
 
 `Screenshot.EditorRendersSelectedSource`, `Screenshot.PanelRendersDiagnostics`, and
-`Screenshot.CommandPaletteShowsSearchAndRecentCommands` read the
-generated PNG files and check stable shell pixels; `AppShellState` tests cover repository-local
-round trips and invalid state. The screenshot script checks the complete matrix and each capture
-command reports its dimensions.
+`Screenshot.EditorViewShowsSearchGutterAndBothThemes`,
+`Screenshot.CommandPaletteShowsSearchAndRecentCommands`, and
+`Screenshot.RegistryIncludesPanelSystemInBothThemes` read the
+generated PNG files and check stable shell pixels; `PanelRegistry` and `AppShellState` tests cover
+registry behavior, repository-local round trips, version 1 migration, reset, and invalid state. The
+screenshot script checks the complete matrix and each capture command reports its dimensions.

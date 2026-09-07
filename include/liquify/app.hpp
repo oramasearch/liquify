@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -10,6 +11,8 @@
 #include <vector>
 
 #include "liquify/app_state.hpp"
+#include "liquify/editor_model.hpp"
+#include "liquify/multiplayer.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
 #include "liquify/structural_edit.hpp"
@@ -64,6 +67,10 @@ private:
   void draw_sidebar();
   void draw_editor_area();
   void draw_bottom_panel();
+  void draw_floating_panels();
+  void draw_panel(PanelId id);
+  void draw_panel_header(PanelId id);
+  void draw_panel_menu(PanelId id);
   void draw_diagnostics_panel(const EditorGraphSnapshot &snapshot);
   void draw_status_bar();
   void draw_split_editor();
@@ -110,8 +117,17 @@ private:
   bool invoke_run_command(std::string_view name);
   bool invoke_assistant_command(std::string_view name);
   void draw_plugin_panels();
+  void draw_structural_panel();
   void invoke_plugin_command(std::string_view name);
+  void execute_panel_command(std::string_view command);
   void poll_plugins();
+  void sync_panel_system();
+  void reset_panel_layout();
+  void poll_multiplayer();
+  void refresh_multiplayer();
+  void take_editor_lease();
+  void release_editor_lease();
+  [[nodiscard]] bool editor_mutation_allowed() const;
   void poll_editor_graph();
   void apply_change(std::size_t first_line, std::size_t erased_lines,
                     std::size_t inserted_lines);
@@ -139,9 +155,13 @@ private:
   std::unique_ptr<Assistant> assistant_;
   std::unique_ptr<CommandRegistry> commands_;
   std::shared_ptr<PluginHost> plugin_host_;
+  std::optional<MultiplayerSnapshot> multiplayer_;
+  std::future<liquid::result<MultiplayerSnapshot>> multiplayer_refresh_;
+  liquid::session_id multiplayer_session_;
   std::unique_ptr<TextLayoutCache> layouts_;
   std::unique_ptr<RetainedTextLayer> text_layer_;
   AppShellState shell_state_;
+  PanelRegistry panels_;
   SDL_Window *window_ = nullptr;
   SDL_Renderer *renderer_ = nullptr;
   float editor_x_{};
@@ -160,6 +180,12 @@ private:
   std::string editor_status_;
   std::string assistant_prompt_;
   std::string sidebar_search_;
+  std::string find_query_;
+  std::string replace_query_;
+  FindOptions find_options_;
+  std::vector<TextMatch> buffer_matches_;
+  std::size_t find_match_index_{};
+  std::optional<TextPosition> column_selection_anchor_;
   std::string window_title_;
   std::optional<AssistantAction> pending_assistant_action_;
   std::string pending_assistant_prompt_;
@@ -179,7 +205,9 @@ private:
   std::chrono::steady_clock::time_point next_status_refresh_{};
   std::chrono::steady_clock::time_point next_review_refresh_{};
   std::chrono::steady_clock::time_point next_plugin_refresh_{};
+  std::chrono::steady_clock::time_point next_multiplayer_refresh_{};
   std::uint64_t definition_generation_{};
+  std::uint64_t history_generation_{};
   std::uint64_t ai_context_generation_{};
   std::uint64_t review_generation_{};
   std::uint64_t structural_selection_generation_{};
@@ -209,12 +237,17 @@ private:
   bool initialized_ = false;
   bool command_palette_open_{};
   bool command_palette_visible_{};
+  bool find_open_{};
   bool context_preview_open_{};
   bool review_diff_open_{};
   bool review_comment_popup_open_{};
   bool rename_open_{};
   bool extract_function_open_{};
   bool structural_preview_open_{};
+  bool build_was_running_{};
+  bool sync_was_running_{};
+  bool hydration_was_running_{};
+  bool assistant_was_running_{};
   bool quit_ = false;
 };
 
