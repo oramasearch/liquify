@@ -79,12 +79,23 @@ TEST(Screenshot, RegistryIncludesPanelSystemInBothThemes) {
   EXPECT_NE(find_screenshot_state("settings-dark"), nullptr);
   EXPECT_NE(find_screenshot_state("accessibility-light"), nullptr);
   EXPECT_NE(find_screenshot_state("accessibility-dark"), nullptr);
-  EXPECT_EQ(screenshot_states().size(), 32U);
+  EXPECT_NE(find_screenshot_state("command-palette-light"), nullptr);
+  EXPECT_NE(find_screenshot_state("command-palette-dark"), nullptr);
+  EXPECT_EQ(screenshot_states().size(), 34U);
+}
+
+TEST(Screenshot, NavigationRendersQuickOpenAndAnnotatedTree) {
+  const auto image = render_state("navigation-light");
+  EXPECT_TRUE(test::region_contains_color(image, {320, 365, 650, 30},
+                                          {237, 245, 255, 255}, 1, 10'000));
+  EXPECT_TRUE(test::region_contains_color(image, {88, 92, 224, 24},
+                                          {225, 230, 237, 255}, 1, 1'000));
 }
 
 TEST(Screenshot, SettingsRenderGroupedControlsInBothThemes) {
   const auto light = render_state("settings-light");
   const auto dark = render_state("settings-dark");
+
   EXPECT_EQ(light.width, screenshot_width);
   EXPECT_EQ(dark.height, screenshot_height);
   EXPECT_TRUE(test::region_contains_color(light, {190, 70, 900, 650},
@@ -96,6 +107,7 @@ TEST(Screenshot, SettingsRenderGroupedControlsInBothThemes) {
 TEST(Screenshot, AccessibilityStateShowsHighContrastFocusInBothThemes) {
   const auto light = render_state("accessibility-light");
   const auto dark = render_state("accessibility-dark");
+
   EXPECT_TRUE(test::region_contains_color(light, {320, 100, 950, 660},
                                           {15, 98, 254, 255}, 1, 1'000));
   EXPECT_TRUE(test::region_contains_color(dark, {320, 100, 950, 660},

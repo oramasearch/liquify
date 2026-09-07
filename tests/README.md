@@ -3,8 +3,13 @@
 `test_repository_view.cpp` creates its readable repository through the pinned `liquid::repository`
 API, writes root and nested entries, and proves that `RepositoryView` reads the same on-disk format
 it links while leaving nested trees unloaded until requested. It also creates a corrupt
-`LIQUID_REPO` marker, checks repository summary metadata, and verifies that clone target validation
-leaves existing contents unchanged.
+`LIQUID_REPO` marker, checks repository summary metadata, verifies that clone target validation
+leaves existing contents unchanged, and checks path and symbol indexes, change annotations, and
+context move and new-file refresh.
+
+`test_navigation.cpp` covers file-kind labels, deterministic fuzzy path and definition ordering,
+identifier lookup, definition-first references, caller and callee relationships, breadcrumbs,
+location history, and unique default bindings for every navigation action.
 
 `test_print_tree_error.cmake` runs the built `liquify --print-tree` command against a corrupt
 repository created in the build tree. It requires a non-zero exit and the same liquid error on

@@ -47,6 +47,8 @@ constexpr auto states = std::to_array<ScreenshotState>({
      ScreenshotTheme::dark},
     {"panels-light", ScreenshotView::panels, ScreenshotTheme::light},
     {"panels-dark", ScreenshotView::panels, ScreenshotTheme::dark},
+    {"navigation-light", ScreenshotView::navigation, ScreenshotTheme::light},
+    {"navigation-dark", ScreenshotView::navigation, ScreenshotTheme::dark},
     {"settings-light", ScreenshotView::settings, ScreenshotTheme::light},
     {"settings-dark", ScreenshotView::settings, ScreenshotTheme::dark},
     {"accessibility-light", ScreenshotView::accessibility,

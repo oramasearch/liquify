@@ -40,11 +40,11 @@ ctest --test-dir build --output-on-failure
 ```
 
 CTest holds the GoogleTest cases discovered from `liquify-tests` (buffer, text layout, repository
-view, app-shell state, screenshot capture, stub trees, interactive analysis, editor graph,
-structural edits, review, assistant, plugins, command registry, typed keymaps and version), the
-design-token gate, plus `liquify-command-cli` and `liquify-print-tree-unreadable`, which prove
-registered headless invocation, generated-file checks, and that an unreadable repository makes
-`--print-tree` exit non-zero with liquid's error. Screenshot cases render the editor and a
+view, navigation, app-shell state, screenshot capture, stub trees, interactive analysis, editor
+graph, structural edits, review, assistant, plugins, command registry, typed keymaps and version),
+the design-token gate, plus `liquify-command-cli` and `liquify-print-tree-unreadable`, which prove
+registered headless invocation, generated-file checks, and that an unreadable repository
+makes `--print-tree` exit non-zero with liquid's error. Screenshot cases render the editor and a
 panel through SDL's dummy video driver and software renderer and inspect stable pixel regions.
 `version`, the unit tests and `--screenshot` run without a display; `--smoke` needs one.
 
@@ -56,9 +56,6 @@ panel through SDL's dummy video driver and software renderer and inspect stable 
 ./build/liquify --lake <repository-url> <path> # add lake reviews; bearer is LIQUID_TOKEN
 ./build/liquify --print-tree <path>
 ./build/liquify --apply-edits request.cbor <path> > result.cbor
-./build/liquify --command help.version
-./build/liquify docs commands --check docs/ui/commands.md
-./build/liquify docs keymap --check docs/ui/default-keymap.liquid
 LIQUIFY_BINARY=./build/liquify ./tools/ui/screenshot.sh
 ./build/liquify --smoke    # scroll/edit 50,000 lines for 30 frames, report latency, exit 0
 ./build/liquify --smoke 300
@@ -70,8 +67,9 @@ The commands are described in [`../app-shell/README.md`](../app-shell/README.md)
 in [`../editor/structural-editing.md`](../editor/structural-editing.md), `--lake` in
 [`../editor/review.md`](../editor/review.md), and the `--smoke` measurements in
 [`../editor/README.md`](../editor/README.md). The screenshot registry and full refresh command are
-in [`../ui/README.md`](../ui/README.md). The generated command reference, default keymap, override
-locations, conflict behavior, and headless rules are in [`../ui/commands.md`](../ui/commands.md).
+in [`../ui/README.md`](../ui/README.md); command generation, overrides, and conflict reporting are
+in [`../ui/commands.md`](../ui/commands.md); navigation commands and bindings are in
+[`../ui/navigation.md`](../ui/navigation.md).
 
 ## The full local proof
 

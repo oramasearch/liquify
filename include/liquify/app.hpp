@@ -11,10 +11,12 @@
 #include <vector>
 
 #include "liquify/app_state.hpp"
+#include "liquify/command.hpp"
 #include "liquify/editor_model.hpp"
 #include "liquify/first_run.hpp"
 #include "liquify/input.hpp"
 #include "liquify/multiplayer.hpp"
+#include "liquify/navigation.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
 #include "liquify/settings.hpp"
@@ -30,7 +32,6 @@ namespace liquify {
 
 class Assistant;
 enum class AssistantAction : std::uint8_t;
-class CommandRegistry;
 class RepositoryView;
 class EditorBuffer;
 class EditorGraph;
@@ -82,12 +83,27 @@ private:
   void draw_split_editor();
   void draw_repository_tree();
   void draw_repository_entries(std::string_view directory);
+  void draw_navigation_popups();
+  void draw_repository_action_popup();
+  void draw_navigation_results();
   void draw_review_panel();
   void draw_review_comment_popup();
   void draw_editor();
   void draw_build_panel(const EditorGraphSnapshot &snapshot);
   void render_editor();
-  void open_editor(std::string path, std::string blob_id);
+  void open_editor(std::string path, std::string blob_id,
+                   bool record_history = true);
+  void open_navigation_location(const NavigationLocation &location,
+                                bool record_history = true);
+  void navigate_history(bool forward);
+  void invoke_navigation_action(NavigationAction action);
+  void show_symbol_references();
+  void show_call_hierarchy();
+  void reveal_repository_path();
+  [[nodiscard]] auto current_navigation_location() const
+      -> std::optional<NavigationLocation>;
+  [[nodiscard]] auto navigation_symbol_at_cursor() const
+      -> const NavigationSymbol *;
   void open_review(std::string id);
   void show_review_diff(const ReviewSnapshot &review);
   void navigate_hunk(bool forward);
@@ -119,10 +135,6 @@ private:
   void draw_settings();
   void configure_commands();
   bool invoke_command(std::string_view name);
-  bool invoke_shell_command(std::string_view name);
-  bool invoke_editor_command(std::string_view name);
-  bool invoke_run_command(std::string_view name);
-  bool invoke_assistant_command(std::string_view name);
   void draw_plugin_panels();
   void draw_structural_panel();
   void invoke_plugin_command(std::string_view name);
@@ -142,7 +154,11 @@ private:
   void handle_text(std::string_view text);
   void handle_composition(std::string_view text, int selection_start,
                           int selection_length);
+  void copy_editor_selection(bool cut);
+  void paste_editor_clipboard();
+  void handle_file_drop(const std::filesystem::path &source, InputPoint point);
   void draw_composition();
+  void update_text_input_area();
   void position_cursor(float x, float y, bool extend_selection);
   void ensure_cursor_visible();
   void prepare_smoke_frame(int frame);
@@ -152,6 +168,7 @@ private:
   void apply_settings_live(bool rebuild_fonts = false);
   void reset_settings(SettingsGroup group);
   void cycle_theme();
+  void toggle_high_contrast();
   void apply_theme();
   void load_font_atlas(float scale);
   void update_window_title();
@@ -167,6 +184,7 @@ private:
   [[nodiscard]] auto repository_summary() const -> RepositorySummary;
   void capture_screenshot();
   [[nodiscard]] auto dark_theme_active() const -> bool;
+  [[nodiscard]] auto high_contrast_active() const -> bool;
   [[nodiscard]] auto screenshot_mode() const -> bool;
   void shutdown();
 
@@ -202,6 +220,8 @@ private:
   float editor_height_{};
   float line_height_{};
   float cell_width_{};
+  InputRectangle repository_drop_rectangle_;
+  InputRectangle editor_drop_rectangle_;
   std::size_t scroll_line_{};
   float horizontal_scroll_{};
   std::size_t visible_lines_{};
@@ -223,6 +243,13 @@ private:
   std::vector<TextMatch> buffer_matches_;
   std::size_t find_match_index_{};
   std::optional<TextPosition> column_selection_anchor_;
+  std::string quick_open_query_;
+  std::string symbol_search_query_;
+  std::string repository_selection_;
+  std::string repository_selection_blob_;
+  std::string repository_action_source_;
+  std::string repository_action_target_;
+  std::string navigation_results_title_;
   std::string window_title_;
   std::string clone_remote_;
   std::string clone_path_;
@@ -241,6 +268,10 @@ private:
   std::vector<PluginPanelSnapshot> plugin_panels_;
   std::vector<std::string> command_diagnostics_;
   std::vector<std::string> native_menu_commands_;
+  std::vector<NavigationSymbol> navigation_results_;
+  CallHierarchy navigation_hierarchy_;
+  NavigationHistory navigation_history_;
+  std::optional<NavigationLocation> pending_definition_origin_;
   std::optional<std::chrono::steady_clock::time_point> typing_started_;
   std::chrono::steady_clock::time_point next_status_refresh_{};
   std::chrono::steady_clock::time_point next_review_refresh_{};
@@ -272,6 +303,8 @@ private:
   int editor_font_index_ = -1;
   int heading_font_index_ = -1;
   bool applied_dark_theme_{};
+  bool applied_high_contrast_{};
+  bool reduced_motion_{};
   bool screenshot_written_{};
   bool screenshot_failed_{};
   bool fonts_rebuild_requested_{};
@@ -282,6 +315,14 @@ private:
   bool settings_open_{};
   bool settings_popup_visible_{};
   bool find_open_{};
+  bool quick_open_open_{};
+  bool symbol_search_open_{};
+  bool open_recent_open_{};
+  bool navigation_results_open_{};
+  bool repository_move_open_{};
+  bool repository_new_file_open_{};
+  bool breadcrumb_focus_requested_{};
+  bool repository_focused_{};
   bool context_preview_open_{};
   bool review_diff_open_{};
   bool review_comment_popup_open_{};

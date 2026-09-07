@@ -10,9 +10,7 @@
 #include <cstdlib>
 #include <future>
 #include <initializer_list>
-#include <iterator>
 #include <limits>
-#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -30,6 +28,7 @@
 
 #include "editor_buffer.hpp"
 #include "liquid/hash.hpp"
+#include "liquid/identity.hpp"
 #include "liquid/liquid.hpp"
 #include "liquify/ai_config.hpp"
 #include "liquify/assistant.hpp"
@@ -52,6 +51,10 @@ enum NativeMenuCommand : std::int32_t {
   menu_panel,
   menu_split,
   menu_theme,
+  menu_contrast,
+  menu_copy,
+  menu_cut,
+  menu_paste,
   menu_definition,
   menu_hover,
   menu_build,
@@ -62,6 +65,13 @@ enum NativeMenuCommand : std::int32_t {
   menu_next_comment,
   menu_expand_selection,
   menu_shrink_selection,
+  menu_quick_open,
+  menu_symbol_search,
+  menu_references,
+  menu_call_hierarchy,
+  menu_open_recent,
+  menu_back,
+  menu_forward,
 };
 
 @interface LiquifyMenuTarget : NSObject
@@ -85,6 +95,7 @@ struct NativeMenuEntry {
 };
 
 static LiquifyMenuTarget *native_menu_target = nullptr;
+static NSMutableArray *native_accessibility_elements = nullptr;
 
 static void add_native_menu(NSMenu *main_menu, NSString *title,
                             std::initializer_list<NativeMenuEntry> entries) {
@@ -130,17 +141,29 @@ static void install_native_menu() {
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
   add_native_menu(main_menu, @"File", {{@"Save", @"s", command, menu_save}});
   add_native_menu(main_menu, @"Edit",
-                  {{@"Command Palette", @"p", command_shift, menu_palette}});
+                  {{@"Copy", @"c", command, menu_copy},
+                   {@"Cut", @"x", command, menu_cut},
+                   {@"Paste", @"v", command, menu_paste},
+                   {@"Command Palette", @"p", command_shift, menu_palette}});
   add_native_menu(main_menu, @"Selection",
                   {{@"Expand Selection", @"", 0, menu_expand_selection},
                    {@"Shrink Selection", @"", 0, menu_shrink_selection}});
-  add_native_menu(main_menu, @"View",
-                  {{@"Toggle Sidebar", @"b", command, menu_sidebar},
-                   {@"Toggle Bottom Panel", @"j", command, menu_panel},
-                   {@"Toggle Editor Split", @"\\", command, menu_split},
-                   {@"Cycle Color Theme", @"t", command_shift, menu_theme}});
+  add_native_menu(
+      main_menu, @"View",
+      {{@"Toggle Sidebar", @"b", command, menu_sidebar},
+       {@"Toggle Bottom Panel", @"j", command, menu_panel},
+       {@"Toggle Editor Split", @"\\", command, menu_split},
+       {@"Cycle Color Theme", @"t", command_shift, menu_theme},
+       {@"Toggle High Contrast", @"h", command_shift, menu_contrast}});
   add_native_menu(main_menu, @"Go",
-                  {{@"Go to Definition", @"", 0, menu_definition},
+                  {{@"Quick Open", @"p", command, menu_quick_open},
+                   {@"Symbol Search", @"t", command, menu_symbol_search},
+                   {@"Go to Definition", @"", 0, menu_definition},
+                   {@"Find References", @"", 0, menu_references},
+                   {@"Call Hierarchy", @"", 0, menu_call_hierarchy},
+                   {@"Open Recent", @"r", command, menu_open_recent},
+                   {@"Back", @"", 0, menu_back},
+                   {@"Forward", @"", 0, menu_forward},
                    {@"Show Hover", @"", 0, menu_hover}});
   add_native_menu(main_menu, @"Run",
                   {{@"Build", @"", 0, menu_build},
@@ -153,134 +176,64 @@ static void install_native_menu() {
   [NSApp setMainMenu:main_menu];
 }
 
-struct RegistryMenuEntry {
-  std::string group;
-  std::string title;
-  std::string key;
-  std::uint8_t modifiers{};
-  std::int32_t command{};
-};
-
-static auto registry_key_equivalent(std::string_view key) -> NSString * {
-  if (key.size() == 1) {
-    const auto character =
-        static_cast<char>(std::tolower(static_cast<unsigned char>(key[0])));
-    return [NSString stringWithFormat:@"%c", character];
+static NSString *accessibility_role(liquify::AccessibilityRole role) {
+  switch (role) {
+  case liquify::AccessibilityRole::group:
+    return NSAccessibilityGroupRole;
+  case liquify::AccessibilityRole::button:
+    return NSAccessibilityButtonRole;
+  case liquify::AccessibilityRole::text_area:
+    return NSAccessibilityTextAreaRole;
   }
-  if (key == "Backslash") {
-    return @"\\";
-  }
-  if (key == "Space") {
-    return @" ";
-  }
-  if (key == "Enter") {
-    return @"\r";
-  }
-  auto function = unichar{};
-  if (key == "Up") {
-    function = NSUpArrowFunctionKey;
-  } else if (key == "Down") {
-    function = NSDownArrowFunctionKey;
-  } else if (key == "Left") {
-    function = NSLeftArrowFunctionKey;
-  } else if (key == "Right") {
-    function = NSRightArrowFunctionKey;
-  } else if (key == "Home") {
-    function = NSHomeFunctionKey;
-  } else if (key == "End") {
-    function = NSEndFunctionKey;
-  } else if (key == "PageUp") {
-    function = NSPageUpFunctionKey;
-  } else if (key == "PageDown") {
-    function = NSPageDownFunctionKey;
-  } else if (key == "Delete" || key == "Backspace") {
-    function = NSDeleteFunctionKey;
-  } else if (key.starts_with("F")) {
-    const auto number = std::stoi(std::string(key.substr(1)));
-    if (number >= 1 && number <= 24) {
-      function = static_cast<unichar>(NSF1FunctionKey + number - 1);
-    }
-  }
-  return function == 0 ? @""
-                       : [NSString stringWithCharacters:&function length:1];
+  return NSAccessibilityGroupRole;
 }
 
-static auto registry_native_modifiers(std::uint8_t modifiers)
-    -> NSEventModifierFlags {
-  auto output = NSEventModifierFlags{};
-  if ((modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::primary)) !=
-      0) {
-    output |= NSEventModifierFlagCommand;
+static void install_native_accessibility(SDL_Window *window) {
+  const auto properties = SDL_GetWindowProperties(window);
+  auto *native_window = static_cast<NSWindow *>(SDL_GetPointerProperty(
+      properties, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr));
+  if (native_window == nullptr || native_window.contentView == nullptr) {
+    return;
   }
-  if ((modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::control)) !=
-      0) {
-    output |= NSEventModifierFlagControl;
+  auto *content = native_window.contentView;
+  content.accessibilityElement = YES;
+  content.accessibilityRole = NSAccessibilityGroupRole;
+  content.accessibilityLabel = @"liquify editor";
+  native_accessibility_elements = [[NSMutableArray alloc] init];
+  auto y = content.bounds.size.height - 36.0;
+  for (const auto &node : liquify::accessibility_nodes()) {
+    auto *label = [[NSString alloc] initWithBytes:node.label.data()
+                                           length:node.label.size()
+                                         encoding:NSUTF8StringEncoding];
+    auto *identifier = [[NSString alloc] initWithBytes:node.id.data()
+                                                length:node.id.size()
+                                              encoding:NSUTF8StringEncoding];
+    auto *help = [[NSString alloc] initWithBytes:node.help.data()
+                                          length:node.help.size()
+                                        encoding:NSUTF8StringEncoding];
+    NSAccessibilityElement *element = [NSAccessibilityElement
+        accessibilityElementWithRole:accessibility_role(node.role)
+                               frame:NSZeroRect
+                               label:label
+                              parent:content];
+    element.accessibilityIdentifier = identifier;
+    element.accessibilityHelp = help;
+    element.accessibilityFrameInParentSpace =
+        NSMakeRect(0.0, y, content.bounds.size.width, 32.0);
+    [native_accessibility_elements addObject:element];
+    y = std::max(y - 34.0, 0.0);
   }
-  if ((modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::alt)) != 0) {
-    output |= NSEventModifierFlagOption;
-  }
-  if ((modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::shift)) !=
-      0) {
-    output |= NSEventModifierFlagShift;
-  }
-  return output;
+  content.accessibilityChildren = native_accessibility_elements;
+  content.accessibilityChildrenInNavigationOrder =
+      (NSArray<id<NSAccessibilityElement>> *)native_accessibility_elements;
 }
 
-static void add_registry_menu(NSMenu *main_menu, std::string_view title,
-                              std::span<const RegistryMenuEntry> entries) {
-  auto *native_title =
-      [NSString stringWithUTF8String:std::string(title).c_str()];
-  auto *root = [[NSMenuItem alloc] initWithTitle:native_title
-                                          action:nil
-                                   keyEquivalent:@""];
-  auto *menu = [[NSMenu alloc] initWithTitle:native_title];
-  for (const auto &entry : entries) {
-    auto *item = [[NSMenuItem alloc]
-        initWithTitle:[NSString stringWithUTF8String:entry.title.c_str()]
-               action:@selector(performLiquifyCommand:)
-        keyEquivalent:registry_key_equivalent(entry.key)];
-    [item setKeyEquivalentModifierMask:registry_native_modifiers(
-                                           entry.modifiers)];
-    [item setTag:entry.command];
-    [item setTarget:native_menu_target];
-    [menu addItem:item];
-  }
-  [root setSubmenu:menu];
-  [main_menu addItem:root];
+static bool system_high_contrast() {
+  return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldIncreaseContrast;
 }
 
-static void
-install_registry_native_menu(std::span<const RegistryMenuEntry> entries) {
-  native_menu_target = [[LiquifyMenuTarget alloc] init];
-  auto *main_menu = [[NSMenu alloc] initWithTitle:@"liquify"];
-  auto *application_root = [[NSMenuItem alloc] initWithTitle:@"liquify"
-                                                      action:nil
-                                               keyEquivalent:@""];
-  auto *application_menu = [[NSMenu alloc] initWithTitle:@"liquify"];
-  auto *about =
-      [[NSMenuItem alloc] initWithTitle:@"About liquify"
-                                 action:@selector(orderFrontStandardAboutPanel:)
-                          keyEquivalent:@""];
-  [application_menu addItem:about];
-  [application_menu addItem:[NSMenuItem separatorItem]];
-  auto *quit = [[NSMenuItem alloc] initWithTitle:@"Quit liquify"
-                                          action:@selector(terminate:)
-                                   keyEquivalent:@"q"];
-  [application_menu addItem:quit];
-  [application_root setSubmenu:application_menu];
-  [main_menu addItem:application_root];
-  auto first = std::size_t{};
-  while (first < entries.size()) {
-    auto last = first + 1;
-    while (last < entries.size() &&
-           entries[last].group == entries[first].group) {
-      ++last;
-    }
-    add_registry_menu(main_menu, entries[first].group,
-                      entries.subspan(first, last - first));
-    first = last;
-  }
-  [NSApp setMainMenu:main_menu];
+static bool system_reduced_motion() {
+  return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
 }
 
 #endif
@@ -294,79 +247,47 @@ constexpr float activity_bar_width = design::control_lg;
 constexpr float divider_size = design::space1;
 constexpr float status_bar_height = design::space6;
 
-auto key_name(std::uint32_t key) -> std::optional<std::string> {
-  if (key >= SDLK_A && key <= SDLK_Z) {
-    return std::string(1, static_cast<char>('A' + key - SDLK_A));
-  }
-  if (key >= SDLK_0 && key <= SDLK_9) {
-    return std::string(1, static_cast<char>('0' + key - SDLK_0));
-  }
-  if (key >= SDLK_F1 && key <= SDLK_F24) {
-    return "F" + std::to_string(key - SDLK_F1 + 1);
-  }
-  switch (key) {
-  case SDLK_BACKSLASH:
-    return "Backslash";
-  case SDLK_BACKSPACE:
-    return "Backspace";
-  case SDLK_DELETE:
-    return "Delete";
-  case SDLK_DOWN:
-    return "Down";
-  case SDLK_END:
-    return "End";
-  case SDLK_ESCAPE:
-    return "Escape";
-  case SDLK_HOME:
-    return "Home";
-  case SDLK_LEFT:
-    return "Left";
-  case SDLK_PAGEDOWN:
-    return "PageDown";
-  case SDLK_PAGEUP:
-    return "PageUp";
-  case SDLK_RETURN:
-  case SDLK_KP_ENTER:
-    return "Enter";
-  case SDLK_RIGHT:
-    return "Right";
-  case SDLK_SPACE:
-    return "Space";
-  case SDLK_TAB:
-    return "Tab";
-  case SDLK_UP:
-    return "Up";
-  default:
-    return std::nullopt;
-  }
-}
-
-auto key_chord(std::uint32_t key, std::uint16_t modifiers)
-    -> std::optional<KeyChord> {
-  auto name = key_name(key);
-  if (!name) {
-    return std::nullopt;
-  }
-  auto output = KeyChord{.key = std::move(*name)};
-#if defined(__APPLE__)
-  if ((modifiers & SDL_KMOD_GUI) != 0) {
-    output.modifiers |= static_cast<std::uint8_t>(KeyModifier::primary);
-  }
-  if ((modifiers & SDL_KMOD_CTRL) != 0) {
-    output.modifiers |= static_cast<std::uint8_t>(KeyModifier::control);
-  }
-#else
-  if ((modifiers & SDL_KMOD_CTRL) != 0) {
-    output.modifiers |= static_cast<std::uint8_t>(KeyModifier::primary);
-  }
-#endif
-  if ((modifiers & SDL_KMOD_ALT) != 0) {
-    output.modifiers |= static_cast<std::uint8_t>(KeyModifier::alt);
-  }
-  if ((modifiers & SDL_KMOD_SHIFT) != 0) {
-    output.modifiers |= static_cast<std::uint8_t>(KeyModifier::shift);
+auto normalized_binding(std::string_view binding) -> std::string {
+  auto output = std::string{};
+  for (const auto value : binding) {
+    if (value != ' ') {
+      output.push_back(
+          static_cast<char>(std::tolower(static_cast<unsigned char>(value))));
+    }
   }
   return output;
+}
+
+auto binding_matches(std::string_view binding, std::uint32_t key,
+                     std::uint16_t modifiers) -> bool {
+  const auto normalized = normalized_binding(binding);
+  const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
+  const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+  const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
+  const auto wants_primary = normalized.contains("cmd+") ||
+                             normalized.contains("ctrl+") ||
+                             normalized.contains("primary+");
+  const auto wants_shift = normalized.contains("shift+");
+  const auto wants_alt =
+      normalized.contains("alt+") || normalized.contains("option+");
+  if (primary != wants_primary || shift != wants_shift || alt != wants_alt) {
+    return false;
+  }
+  const auto separator = normalized.rfind('+');
+  const auto expected_key = separator == std::string::npos
+                                ? normalized
+                                : normalized.substr(separator + 1);
+  return expected_key == normalized_binding(SDL_GetKeyName(key));
+}
+
+auto command_matches(const Settings &settings, std::string_view command,
+                     std::string_view default_binding, std::uint32_t key,
+                     std::uint16_t modifiers) -> bool {
+  const auto found = settings.keymap.find(std::string(command));
+  const auto binding = found == settings.keymap.end()
+                           ? default_binding
+                           : std::string_view(found->second);
+  return binding_matches(binding, key, modifiers);
 }
 
 auto imgui_color(design::Rgba color) -> ImVec4 {
@@ -375,6 +296,78 @@ auto imgui_color(design::Rgba color) -> ImVec4 {
 
 auto packed_color(design::Rgba color) -> ImU32 {
   return ImGui::ColorConvertFloat4ToU32(imgui_color(color));
+}
+
+auto effective_palette(bool dark, bool high_contrast) -> design::Palette {
+  auto palette = dark ? design::dark_palette : design::light_palette;
+  if (!high_contrast) {
+    return palette;
+  }
+  palette.canvas =
+      dark ? design::dark_palette.canvas : design::light_palette.surface;
+  palette.surface = palette.canvas;
+  palette.layer =
+      dark ? design::dark_palette.surface : design::light_palette.canvas;
+  palette.layer_hover = palette.selected;
+  palette.border_subtle = palette.text_primary;
+  palette.border_strong = palette.text_primary;
+  palette.border_interactive = palette.focus;
+  palette.text_disabled = palette.text_primary;
+  palette.text_secondary = palette.text_primary;
+  palette.text_tertiary = palette.text_primary;
+  return palette;
+}
+
+#if !defined(__APPLE__) || !defined(__OBJC__)
+auto system_high_contrast() -> bool { return false; }
+
+auto system_reduced_motion() -> bool { return false; }
+#endif
+
+constexpr auto clipboard_plain_utf8 = "text/plain;charset=utf-8";
+constexpr auto clipboard_plain = "text/plain";
+constexpr auto clipboard_html = "text/html";
+
+const void *SDLCALL clipboard_data(void *userdata, const char *mime_type,
+                                   std::size_t *size) {
+  const auto *payload = static_cast<const ClipboardPayload *>(userdata);
+  const auto type = std::string_view{mime_type == nullptr ? "" : mime_type};
+  const auto *value =
+      type == clipboard_html ? &payload->html : &payload->plain_text;
+  *size = value->size();
+  return value->data();
+}
+
+void SDLCALL clipboard_cleanup(void *userdata) {
+  delete static_cast<ClipboardPayload *>(userdata);
+}
+
+auto clipboard_value(std::string_view mime_type) -> std::optional<std::string> {
+  auto size = std::size_t{};
+  auto *data = SDL_GetClipboardData(std::string(mime_type).c_str(), &size);
+  if (data == nullptr) {
+    return std::nullopt;
+  }
+  auto value = std::string(static_cast<const char *>(data), size);
+  SDL_free(data);
+  return value;
+}
+
+auto cjk_font_path() -> std::filesystem::path {
+#if defined(__APPLE__)
+  return "/System/Library/Fonts/PingFang.ttc";
+#elif defined(_WIN32)
+  return "C:/Windows/Fonts/msyh.ttc";
+#else
+  for (const auto *path :
+       {"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"}) {
+    if (std::filesystem::exists(path)) {
+      return path;
+    }
+  }
+  return {};
+#endif
 }
 
 auto smoke_text() -> std::string {
@@ -568,20 +561,20 @@ public:
     lines_.insert(insertion, change.inserted_lines, std::nullopt);
   }
 
-  auto render(SDL_Renderer *renderer, EditorBuffer &buffer,
-              TextLayoutCache &layouts, ImFont &font,
-              const design::Palette &palette,
-              std::span<const Diagnostic> diagnostics,
-              std::span<const SyntaxSpan> syntax,
-              std::span<const FoldRange> folds,
-              std::span<const AttributionSnapshot> attribution,
-              std::span<const PresenceSnapshot> presence,
-              const std::optional<liquid::drive_path_status> &drive,
-              std::uint64_t syntax_generation, float x, float y, float width,
-              float height, std::size_t first_line, float line_height,
-              float cell_width, float horizontal_scroll,
-              std::span<const ReviewDiffLine> review_lines,
-              std::span<const std::size_t> comment_lines) -> std::size_t {
+  auto
+  render(SDL_Renderer *renderer, EditorBuffer &buffer, TextLayoutCache &layouts,
+         ImFont &font, const design::Palette &palette,
+         std::span<const Diagnostic> diagnostics,
+         std::span<const SyntaxSpan> syntax, std::span<const FoldRange> folds,
+         std::span<const AttributionSnapshot> attribution,
+         std::span<const PresenceSnapshot> presence,
+         const std::optional<liquid::drive_path_status> &drive,
+         std::uint64_t syntax_generation, float x, float y, float width,
+         float height, std::size_t first_line, float line_height,
+         float cell_width, float horizontal_scroll,
+         std::span<const ReviewDiffLine> review_lines,
+         std::span<const std::size_t> comment_lines, bool show_whitespace)
+      -> std::size_t {
     const auto color_changed =
         text_color_.red != palette.text_primary.red ||
         text_color_.green != palette.text_primary.green ||
@@ -634,6 +627,10 @@ public:
                          static_cast<int>(frame_indices_.size()));
     }
 
+    if (show_whitespace) {
+      draw_whitespace(renderer, buffer, layouts, palette, x, y, first_line,
+                      last_line, line_height, cell_width, horizontal_scroll);
+    }
     draw_diagnostics(renderer, buffer, diagnostics, x, y, first_line, last_line,
                      line_height, cell_width, horizontal_scroll);
     draw_review_comments(renderer, comment_lines, x, y, first_line, last_line,
@@ -897,6 +894,38 @@ private:
     }
   }
 
+  static void draw_whitespace(SDL_Renderer *renderer, EditorBuffer &buffer,
+                              TextLayoutCache &layouts,
+                              const design::Palette &palette, float x, float y,
+                              std::size_t first_line, std::size_t last_line,
+                              float line_height, float cell_width,
+                              float horizontal_scroll) {
+    SDL_SetRenderDrawColorFloat(
+        renderer, palette.text_disabled.red, palette.text_disabled.green,
+        palette.text_disabled.blue, palette.text_disabled.alpha);
+    for (auto line = first_line; line < last_line; ++line) {
+      const auto text = buffer.line(line);
+      const auto &layout = layouts.line(line, text);
+      for (std::size_t byte = 0; byte < text.size(); ++byte) {
+        if (text[byte] != ' ' && text[byte] != '\t') {
+          continue;
+        }
+        const auto column = layout.column_for_byte(byte);
+        const auto marker_x = x + editor_gutter_width + editor_padding +
+                              (column + 0.5F) * cell_width - horizontal_scroll;
+        const auto marker_y =
+            y + static_cast<float>(line - first_line) * line_height +
+            line_height * 0.55F;
+        if (text[byte] == ' ') {
+          SDL_RenderPoint(renderer, marker_x, marker_y);
+        } else {
+          SDL_RenderLine(renderer, marker_x - 2.0F, marker_y, marker_x + 2.0F,
+                         marker_y);
+        }
+      }
+    }
+  }
+
   static void draw_bracket_match(SDL_Renderer *renderer, EditorBuffer &buffer,
                                  TextLayoutCache &layouts,
                                  const design::Palette &palette, float x,
@@ -1053,6 +1082,7 @@ App::App(AppOptions options) : options_(std::move(options)) {
   }
   settings_scope_ = options_.repository_path ? SettingsScope::repository
                                              : SettingsScope::user;
+  shell_state_.theme = settings_.theme;
   first_run_state_path_ = default_first_run_state_path();
   if (!options_.screenshot_state) {
     auto loaded = load_first_run_state(first_run_state_path_);
@@ -1061,82 +1091,22 @@ App::App(AppOptions options) : options_(std::move(options)) {
       editor_status_ = std::move(loaded.error);
     }
   }
-  if (options_.repository_path) {
-    auto loaded_state = load_app_shell_state(*options_.repository_path);
-    shell_state_ = loaded_state.state;
-    shell_state_.theme = settings_.theme;
-    if (!loaded_state.error.empty()) {
-      editor_status_ = std::move(loaded_state.error);
-    }
-    repository_ = std::make_unique<RepositoryView>(
-        RepositoryView::open(*options_.repository_path));
-    if (repository_->error().empty()) {
-      auto plugins = load_configured_plugins(*options_.repository_path);
-      if (!plugins) {
-        plugin_host_ = std::make_shared<PluginHost>();
-        auto message = plugins.error().message;
-        if (!plugins.error().context.empty()) {
-          message += ": " + plugins.error().context;
-        }
-        plugin_failures_.push_back({{}, std::move(message)});
-      } else {
-        plugin_host_ = std::move(plugins->host);
-        plugin_failures_ = std::move(plugins->failures);
-      }
-      editor_graph_ = std::make_unique<EditorGraph>(
-          *options_.repository_path, plugin_host_, syntax_frontend_path());
-      auto config = AiConfig{.enabled = settings_.ai.enabled,
-                             .context_bytes = settings_.ai.context_bytes,
-                             .model = settings_.ai.model,
-                             .max_tokens = settings_.ai.max_tokens};
-      ai_context_bytes_ = config.context_bytes;
-      auto key = ConfiguredSecret{};
-      if (config.enabled) {
-        key = anthropic_api_key();
-      }
-      const auto secret = key.value;
-      assistant_ =
-          std::make_unique<Assistant>(config, key.configured, [secret] {
-            return std::make_unique<AnthropicProvider>(secret);
-          });
-      if (options_.lake_url) {
-        try {
-          const auto *token = std::getenv("LIQUID_TOKEN");
-          review_ = std::make_unique<ReviewController>(
-              *options_.repository_path, *options_.lake_url,
-              token == nullptr ? std::string{} : std::string{token});
-          review_->request_list();
-        } catch (const std::exception &error) {
-          editor_status_ = std::string{"review configuration: "} + error.what();
-        }
-      }
-    }
-    if (repository_->error().empty()) {
+  const auto initial_repository = options_.repository_path;
+  options_.repository_path.reset();
+  if (initial_repository) {
+    auto repository = std::make_unique<RepositoryView>(
+        RepositoryView::open(*initial_repository));
+    if (repository->error().empty()) {
+      activate_repository(std::move(repository));
       first_run_.repository_opened(repository_summary());
       persist_first_run();
     } else {
-      first_run_.open_failed(*options_.repository_path,
-                             std::string(repository_->error()));
+      first_run_.open_failed(*initial_repository,
+                             std::string(repository->error()));
     }
+  } else {
+    panels_.restore(shell_state_.panel_layout);
   }
-  if (!plugin_host_ && !options_.screenshot_state && !options_.smoke) {
-    auto plugins = load_global_plugins();
-    if (!plugins) {
-      plugin_host_ = std::make_shared<PluginHost>();
-      auto message = plugins.error().message;
-      if (!plugins.error().context.empty()) {
-        message += ": " + plugins.error().context;
-      }
-      plugin_failures_.push_back({{}, std::move(message)});
-    } else {
-      plugin_host_ = std::move(plugins->host);
-      plugin_failures_.insert(
-          plugin_failures_.end(),
-          std::make_move_iterator(plugins->failures.begin()),
-          std::make_move_iterator(plugins->failures.end()));
-    }
-  }
-  panels_.restore(shell_state_.panel_layout);
   if (options_.smoke) {
     editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
         "smoke-50000", "smoke-50000.txt", smoke_text()));
@@ -1154,6 +1124,7 @@ App::App(AppOptions options) : options_(std::move(options)) {
     options_.forced_theme = screenshot->theme == ScreenshotTheme::dark
                                 ? ThemePreference::dark
                                 : ThemePreference::light;
+    shell_state_.high_contrast = screenshot->high_contrast;
     first_run_.restore(
         {{.path = "/Users/ora/projects/liquify",
           .name = "liquify",
@@ -1202,6 +1173,8 @@ App::App(AppOptions options) : options_(std::move(options)) {
       panels_.focus(PanelId::review);
     } else if (screenshot->view == ScreenshotView::editor_view) {
       panels_.focus(PanelId::search);
+    } else if (screenshot->view == ScreenshotView::accessibility) {
+      panels_.focus(PanelId::repository);
     } else {
       panels_.focus(PanelId::repository);
     }
@@ -1223,6 +1196,7 @@ App::App(AppOptions options) : options_(std::move(options)) {
       sidebar_search_ = "greeting";
       find_query_ = "repository";
       find_open_ = true;
+      settings_.editor.wrap = true;
       editor_->set_preferences({.indent_style = IndentStyle::spaces,
                                 .indent_size = 4,
                                 .soft_wrap = true});
@@ -1243,56 +1217,23 @@ App::App(AppOptions options) : options_(std::move(options)) {
     } else {
       panels_.clear_focus_request();
     }
+    if (screenshot->view == ScreenshotView::navigation) {
+      quick_open_query_ = "app";
+      quick_open_open_ = true;
+    }
+    if (screenshot->view == ScreenshotView::command_palette) {
+      command_palette_open_ = true;
+    }
     if (screenshot->view == ScreenshotView::settings) {
       settings_open_ = true;
       settings_.theme = screenshot->theme == ScreenshotTheme::dark
                             ? ThemePreference::dark
                             : ThemePreference::light;
       settings_.editor.wrap = true;
-      settings_.keymap["run.build"] = "F7";
+      settings_.keymap["build.run"] = "F7";
       settings_.lake_accounts.push_back(
           {"orama", "https://api.oramasearch.com/liquid"});
     }
-  }
-  configure_commands();
-  if (screenshot != nullptr &&
-      screenshot->view == ScreenshotView::command_palette) {
-    commands_->record_use("run.build");
-    commands_->record_use("file.save");
-    command_palette_open_ = true;
-  }
-}
-
-auto App::repository_summary() const -> RepositorySummary {
-  if (!repository_) {
-    return {};
-  }
-  return {
-      .path = repository_->path(),
-      .name = repository_->name(),
-      .last_change = repository_->last_change().empty()
-                         ? std::string{"No named change"}
-                         : std::string{repository_->last_change()},
-      .last_changed_at = std::string{repository_->last_changed_at()},
-      .branch = repository_->branch().empty()
-                    ? std::string{"No branch"}
-                    : std::string{repository_->branch()},
-      .current_change = std::string{repository_->current_change()},
-      .offline_reason = std::string{repository_->offline_reason()},
-      .remote_bytes = repository_->remote_bytes(),
-      .hydration_debt = repository_->hydration_debt(),
-      .pending_uploads = repository_->pending_uploads(),
-      .presence_count = repository_->presence_count(),
-  };
-}
-
-void App::persist_first_run() {
-  if (screenshot_mode()) {
-    return;
-  }
-  const auto error = save_first_run_state(first_run_state_path_, first_run_);
-  if (!error.empty()) {
-    editor_status_ = error;
   }
 }
 
@@ -1377,7 +1318,39 @@ void App::activate_repository(std::unique_ptr<RepositoryView> repository) {
     }
   }
   configure_commands();
-  update_window_title();
+}
+
+auto App::repository_summary() const -> RepositorySummary {
+  if (!repository_) {
+    return {};
+  }
+  return {
+      .path = repository_->path(),
+      .name = repository_->name(),
+      .last_change = repository_->last_change().empty()
+                         ? std::string{"No named change"}
+                         : std::string{repository_->last_change()},
+      .last_changed_at = std::string{repository_->last_changed_at()},
+      .branch = repository_->branch().empty()
+                    ? std::string{"No branch"}
+                    : std::string{repository_->branch()},
+      .current_change = std::string{repository_->current_change()},
+      .offline_reason = std::string{repository_->offline_reason()},
+      .remote_bytes = repository_->remote_bytes(),
+      .hydration_debt = repository_->hydration_debt(),
+      .pending_uploads = repository_->pending_uploads(),
+      .presence_count = repository_->presence_count(),
+  };
+}
+
+void App::persist_first_run() {
+  if (screenshot_mode()) {
+    return;
+  }
+  const auto error = save_first_run_state(first_run_state_path_, first_run_);
+  if (!error.empty()) {
+    editor_status_ = error;
+  }
 }
 
 void App::begin_open_repository(std::filesystem::path path) {
@@ -1470,9 +1443,11 @@ void App::open_new_window(std::optional<std::filesystem::path> repository) {
   }
   const auto repository_argument =
       repository ? repository->string() : std::string{};
-  const char *arguments[] = {executable.c_str(),
-                             repository ? repository_argument.c_str() : nullptr,
-                             nullptr};
+  const char *arguments[] = {
+      executable.c_str(),
+      repository ? repository_argument.c_str() : nullptr,
+      nullptr,
+  };
   auto *process = SDL_CreateProcess(arguments, false);
   if (process == nullptr) {
     editor_status_ =
@@ -1522,10 +1497,26 @@ App::~App() { shutdown(); }
 
 void App::configure_commands() {
   commands_ = std::make_unique<CommandRegistry>();
-  for (const auto &command : builtin_commands()) {
-    auto added = commands_->add(command);
+  command_diagnostics_.clear();
+  for (const auto &definition : builtin_commands()) {
+    auto added = commands_->add(definition);
     if (!added) {
       command_diagnostics_.push_back(added.error());
+    }
+  }
+  for (const auto &panel : standard_panel_descriptors()) {
+    for (const auto &command : panel.commands) {
+      if (commands_->find(command.id) != nullptr) {
+        continue;
+      }
+      auto added = commands_->add({std::string(command.id),
+                                   std::string(command.title),
+                                   std::string(panel.title),
+                                   "Command provided by a panel.",
+                                   {}});
+      if (!added) {
+        command_diagnostics_.push_back(added.error());
+      }
     }
   }
   if (plugin_host_) {
@@ -1543,290 +1534,73 @@ void App::configure_commands() {
       }
     }
   }
-  for (const auto &panel : standard_panel_descriptors()) {
-    for (const auto &panel_command : panel.commands) {
-      if (commands_->find(panel_command.id) != nullptr) {
-        continue;
-      }
-      auto added = commands_->add(
-          {std::string(panel_command.id),
-           std::string(panel_command.title),
-           std::string(panel.title),
-           "Command provided by the " + std::string(panel.title) + " panel.",
-           {}});
-      if (!added) {
-        command_diagnostics_.push_back(added.error());
-      }
-    }
-  }
-  if (screenshot_mode() || options_.smoke) {
-    return;
-  }
   const auto apply_file = [this](const std::filesystem::path &path) {
-    auto loaded = load_keymap(path);
+    const auto loaded = load_keymap(path);
     for (const auto &diagnostic : loaded.diagnostics) {
       command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
     }
-    auto diagnostics = commands_->apply_overrides(loaded.overrides);
-    for (const auto &diagnostic : diagnostics) {
+    for (const auto &diagnostic :
+         commands_->apply_overrides(loaded.overrides)) {
       command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
     }
   };
-  apply_file(global_settings_path());
-  if (options_.repository_path) {
-    apply_file(repository_settings_path(*options_.repository_path));
-  }
-  auto settings_overrides = std::vector<KeymapOverride>{};
-  settings_overrides.reserve(settings_.keymap.size());
-  for (const auto &[name, binding] : settings_.keymap) {
-    auto command_name = name;
-    if (name == "build.run") {
-      command_name = "run.build";
-    } else if (name == "tests.run") {
-      command_name = "run.tests";
-    } else if (name == "deploy.run") {
-      command_name = "run.deploy";
-    } else if (name == "palette.open") {
-      command_name = "edit.command-palette";
+  if (!screenshot_mode() && !options_.smoke) {
+    apply_file(global_settings_path());
+    if (options_.repository_path) {
+      apply_file(repository_settings_path(*options_.repository_path));
     }
-    settings_overrides.push_back(
-        {std::move(command_name), {binding}, {user_settings_path(), 1, 1}});
-  }
-  auto diagnostics = commands_->apply_overrides(settings_overrides);
-  for (const auto &diagnostic : diagnostics) {
-    command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
-  }
-  if (!command_diagnostics_.empty()) {
-    editor_status_ = command_diagnostics_.front();
-  } else if (!commands_->conflicts().empty()) {
-    editor_status_ = "keymap conflict " +
-                     commands_->conflicts().front().binding +
-                     ": open the command palette";
   }
 }
 
-bool App::invoke_shell_command(std::string_view name) {
+bool App::invoke_command(std::string_view name) {
+  const auto *definition = commands_ ? commands_->find(name) : nullptr;
+  if (definition == nullptr) {
+    return false;
+  }
+  commands_->record_use(name);
+  if (definition->plugin) {
+    invoke_plugin_command(name);
+    return true;
+  }
   if (name == "file.save") {
-    if (review_diff_open_) {
-      editor_status_ = "review diffs are read-only";
-    } else {
-      save_editor();
-    }
-    return true;
-  }
-  if (name == "edit.command-palette") {
+    save_editor();
+  } else if (name == "edit.command-palette") {
     command_palette_open_ = true;
-    return true;
-  }
-  if (name == "settings.open") {
+  } else if (name == "settings.open") {
     settings_open_ = true;
-    return true;
-  }
-  if (name == "view.toggle-sidebar") {
+  } else if (name == "view.toggle-sidebar") {
     shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
     persist_shell_state();
-    return true;
-  }
-  if (name == "view.toggle-bottom-panel") {
+  } else if (name == "view.toggle-bottom-panel") {
     shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
     persist_shell_state();
-    return true;
-  }
-  if (name == "view.toggle-editor-split") {
+  } else if (name == "view.toggle-editor-split") {
     shell_state_.editor_split = !shell_state_.editor_split;
     persist_shell_state();
-    return true;
-  }
-  if (name == "view.cycle-theme") {
+  } else if (name == "view.cycle-theme") {
     cycle_theme();
-    return true;
-  }
-  if (name == "panel.reset-layout") {
-    reset_panel_layout();
-    return true;
-  }
-  const auto show_panel = [this, name](std::string_view command, PanelId id) {
-    if (name != command) {
-      return false;
-    }
-    panels_.focus(id);
-    const auto placement = panels_.layout(id).placement;
-    if (placement == PanelPlacement::sidebar) {
-      shell_state_.sidebar_visible = true;
-    } else if (placement == PanelPlacement::bottom) {
-      shell_state_.bottom_panel_visible = true;
-    }
-    persist_shell_state();
-    return true;
-  };
-  return show_panel("view.repository", PanelId::repository) ||
-         show_panel("view.search", PanelId::search) ||
-         show_panel("view.review", PanelId::review) ||
-         show_panel("view.build", PanelId::build) ||
-         show_panel("view.multiplayer", PanelId::multiplayer) ||
-         show_panel("panel.diagnostics", PanelId::diagnostics) ||
-         show_panel("panel.build", PanelId::build) ||
-         show_panel("panel.assistant", PanelId::assistant) ||
-         show_panel("panel.plugins", PanelId::plugins);
-}
-
-bool App::invoke_editor_command(std::string_view name) {
-  if (name == "edit.select-all") {
-    if (editor_) {
-      editor_->select_all();
-    }
-    return true;
-  }
-  if (name == "edit.toggle-input-mode") {
-    if (editor_) {
-      const auto next = editor_->mode() == EditingMode::standard
-                            ? EditingMode::modal_command
-                            : EditingMode::standard;
-      editor_->set_mode(next);
-    }
-    return true;
-  }
-  if (name == "edit.find") {
-    if (editor_) {
-      find_open_ = true;
-      buffer_matches_ = editor_->find(find_query_, find_options_);
-    }
-  } else if (name == "edit.focus-search") {
-    panels_.focus(PanelId::search);
-    panels_.clear_focus_request();
-    shell_state_.sidebar_visible = true;
-    persist_shell_state();
-  } else if (name == "edit.undo") {
-    if (editor_graph_) {
-      editor_graph_->request_undo();
-    }
-  } else if (name == "edit.redo") {
-    if (editor_graph_) {
-      editor_graph_->request_redo();
-    }
-  } else if (name == "selection.line") {
-    if (editor_) {
-      editor_->select(SelectionKind::line);
-    }
-  } else if (name == "selection.add-cursor-up" ||
-             name == "selection.add-cursor-down") {
-    if (editor_) {
-      const auto cursor = editor_->cursor();
-      if (name == "selection.add-cursor-up" && cursor.line > 0) {
-        editor_->add_cursor({cursor.line - 1, cursor.byte});
-      } else if (name == "selection.add-cursor-down" &&
-                 cursor.line + 1 < editor_->line_count()) {
-        editor_->add_cursor({cursor.line + 1, cursor.byte});
-      }
-    }
-  } else if (name == "selection.expand") {
-    expand_structural_selection();
-  } else if (name == "selection.shrink") {
-    shrink_structural_selection();
-  } else if (name == "selection.enclosing-definition") {
-    select_enclosing_definition();
-  } else if (name == "selection.symbol-references") {
-    select_symbol_references();
   } else if (name == "go.definition") {
     request_definition();
   } else if (name == "go.hover") {
     request_hover();
   } else if (name == "go.completion") {
     request_completion();
-  } else if (name == "refactor.rename") {
-    open_rename();
-  } else if (name == "refactor.extract-function") {
-    open_extract_function();
-  } else {
-    return false;
-  }
-  return true;
-}
-
-bool App::invoke_run_command(std::string_view name) {
-  if (name == "run.build") {
+  } else if (name == "run.build") {
     request_build();
   } else if (name == "run.tests") {
     request_tests();
   } else if (name == "run.deploy") {
     request_deploy();
-  } else if (name == "review.refresh") {
-    execute_panel_command(name);
-  } else if (name == "review.next-hunk") {
-    navigate_hunk(true);
-  } else if (name == "review.previous-hunk") {
-    navigate_hunk(false);
-  } else if (name == "review.next-comment") {
-    navigate_comment();
-  } else if (name == "review.new-comment") {
-    begin_review_comment();
-  } else if (name == "review.approve") {
-    if (review_) {
-      review_->request_approve();
-    }
-  } else {
-    return false;
-  }
-  return true;
-}
-
-bool App::invoke_assistant_command(std::string_view name) {
-  if (name == "assistant.ask") {
-    request_assistant_context(AssistantAction::ask);
-  } else if (name == "assistant.explain-diagnostic") {
-    request_assistant_context(AssistantAction::explain_diagnostic);
-  } else if (name == "assistant.propose-edit") {
-    request_assistant_context(AssistantAction::propose_edit);
-  } else if (name == "assistant.accept-edit") {
-    accept_assistant_edit();
-  } else if (name == "assistant.reject-edit") {
-    if (assistant_) {
-      assistant_->reject();
-    }
   } else if (name == "assistant.toggle") {
     toggle_assistant();
-  } else if (name == "assistant.preview-context") {
-    request_assistant_context(std::nullopt);
+  } else if (name == "panel.reset-layout") {
+    reset_panel_layout();
+  } else if (name == "help.version") {
+    editor_status_ = "liquify " + std::string(version_string());
   } else {
-    return false;
+    execute_panel_command(name);
   }
   return true;
-}
-
-bool App::invoke_command(std::string_view name) {
-  const auto *command = commands_ ? commands_->find(name) : nullptr;
-  if (command == nullptr) {
-    return false;
-  }
-  commands_->record_use(name);
-  if (command->plugin) {
-    invoke_plugin_command(name);
-    return true;
-  }
-  if (invoke_shell_command(name) || invoke_editor_command(name) ||
-      invoke_run_command(name) || invoke_assistant_command(name)) {
-    return true;
-  }
-  if (name == "help.version") {
-    editor_status_ = "liquify " + std::string(version_string()) +
-                     " (libliquid " + std::string(liquid::version_string()) +
-                     ")";
-    return true;
-  }
-  if (name == "help.command-reference") {
-    editor_status_ =
-        "run liquify docs commands to generate the command reference";
-    return true;
-  }
-  for (const auto &panel : standard_panel_descriptors()) {
-    const auto found =
-        std::ranges::find(panel.commands, name, &PanelCommand::id);
-    if (found != panel.commands.end()) {
-      execute_panel_command(name);
-      return true;
-    }
-  }
-  return false;
 }
 
 bool App::init() {
@@ -1908,31 +1682,25 @@ bool App::init() {
     SDL_SetRenderScale(renderer_, 1.0F, 1.0F);
   }
   load_font_atlas(display_scale_);
+  reduced_motion_ = system_reduced_motion();
   apply_theme();
+  if (editor_) {
+    auto preferences = editor_->preferences();
+    preferences.soft_wrap = settings_.editor.wrap;
+    editor_->set_preferences(preferences);
+  }
   ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
   ImGui_ImplSDLRenderer3_Init(renderer_);
   SDL_StartTextInput(window_);
+  configure_commands();
+  if (screenshot != nullptr &&
+      screenshot->view == ScreenshotView::command_palette) {
+    commands_->record_use("view.repository");
+  }
 #if defined(__APPLE__) && defined(__OBJC__)
   if (!screenshot_mode()) {
-    auto entries = std::vector<RegistryMenuEntry>{};
-    native_menu_commands_.clear();
-    for (const auto &command : commands_->commands()) {
-      native_menu_commands_.push_back(command.name);
-      auto entry = RegistryMenuEntry{
-          command.group,
-          command.title,
-          {},
-          0,
-          static_cast<std::int32_t>(native_menu_commands_.size())};
-      const auto bindings = commands_->bindings(command.name);
-      if (!bindings.empty() &&
-          commands_->command_for(bindings.front()) != nullptr) {
-        entry.key = bindings.front().key;
-        entry.modifiers = bindings.front().modifiers;
-      }
-      entries.push_back(std::move(entry));
-    }
-    install_registry_native_menu(entries);
+    install_native_menu();
+    install_native_accessibility(window_);
   }
 #endif
   initialized_ = true;
@@ -1954,6 +1722,10 @@ bool App::dark_theme_active() const {
   return SDL_GetSystemTheme() == SDL_SYSTEM_THEME_DARK;
 }
 
+bool App::high_contrast_active() const {
+  return shell_state_.high_contrast || system_high_contrast();
+}
+
 void App::load_font_atlas(float scale) {
   auto &io = ImGui::GetIO();
   io.Fonts->Clear();
@@ -1967,7 +1739,11 @@ void App::load_font_atlas(float scale) {
         const_cast<std::uint8_t *>(bytes.data()),
         static_cast<int>(bytes.size()), size, &config);
   };
+  ui_font_index_ = -1;
+  editor_font_index_ = -1;
+  heading_font_index_ = -1;
   auto ui_distance = std::numeric_limits<float>::max();
+  auto editor_distance = std::numeric_limits<float>::max();
   for (const auto size :
        {design::text11, design::text12, design::text14, design::text16,
         design::text20, design::text24, design::text32}) {
@@ -1979,8 +1755,10 @@ void App::load_font_atlas(float scale) {
       ui_font_index_ = io.Fonts->Fonts.Size - 1;
       io.FontDefault = font;
     }
+    if (size == design::text24) {
+      heading_font_index_ = io.Fonts->Fonts.Size - 1;
+    }
   }
-  auto editor_distance = std::numeric_limits<float>::max();
   for (const auto size : {design::text12, design::text14, design::text16}) {
     add_font(design::ibm_plex_mono_regular, size, "IBM Plex Mono");
     const auto distance =
@@ -1990,11 +1768,13 @@ void App::load_font_atlas(float scale) {
       editor_font_index_ = io.Fonts->Fonts.Size - 1;
     }
   }
+  io.FontDefault = io.Fonts->Fonts[ui_font_index_];
 }
 
 void App::apply_theme() {
   const auto dark = dark_theme_active();
-  const auto &palette = dark ? design::dark_palette : design::light_palette;
+  const auto high_contrast = high_contrast_active();
+  const auto palette = effective_palette(dark, high_contrast);
   auto &style = ImGui::GetStyle();
   style = ImGuiStyle{};
   style.WindowPadding = {design::space3, design::space3};
@@ -2010,11 +1790,12 @@ void App::apply_theme() {
   style.FrameRounding = design::control_radius;
   style.GrabRounding = design::control_radius;
   style.TabRounding = design::control_radius;
-  style.WindowBorderSize = design::border_width;
-  style.ChildBorderSize = design::border_width;
-  style.PopupBorderSize = design::border_width;
-  style.FrameBorderSize = 0.0F;
-  style.TabBorderSize = 0.0F;
+  const auto border_width = high_contrast ? 2.0F : design::border_width;
+  style.WindowBorderSize = border_width;
+  style.ChildBorderSize = border_width;
+  style.PopupBorderSize = border_width;
+  style.FrameBorderSize = high_contrast ? border_width : 0.0F;
+  style.TabBorderSize = high_contrast ? border_width : 0.0F;
 
   auto *colors = style.Colors;
   colors[ImGuiCol_Text] = imgui_color(palette.text_primary);
@@ -2057,6 +1838,7 @@ void App::apply_theme() {
   colors[ImGuiCol_TextSelectedBg] = imgui_color(palette.selection);
   colors[ImGuiCol_NavCursor] = imgui_color(palette.focus);
   applied_dark_theme_ = dark;
+  applied_high_contrast_ = high_contrast;
 }
 
 void App::cycle_theme() {
@@ -2127,6 +1909,12 @@ void App::reset_settings(SettingsGroup group) {
   persist_settings();
 }
 
+void App::toggle_high_contrast() {
+  shell_state_.high_contrast = !shell_state_.high_contrast;
+  apply_theme();
+  persist_shell_state();
+}
+
 void App::persist_shell_state() {
   if (!options_.repository_path || screenshot_mode()) {
     return;
@@ -2148,7 +1936,8 @@ void App::reset_panel_layout() {
 
 void App::update_window_title() {
   auto repository_name = std::string{"Welcome"};
-  if (options_.repository_path) {
+  if (options_.repository_path &&
+      first_run_.phase() == RepositoryLifecyclePhase::open) {
     repository_name = options_.repository_path->filename().string();
     if (repository_name.empty()) {
       repository_name = options_.repository_path->string();
@@ -2220,7 +2009,17 @@ void App::capture_screenshot() {
               options_.screenshot_output->string().c_str());
 }
 
-void App::open_editor(std::string path, std::string blob_id) {
+void App::open_editor(std::string path, std::string blob_id,
+                      bool record_history) {
+  repository_focused_ = false;
+  if (record_history) {
+    if (const auto current = current_navigation_location()) {
+      navigation_history_.replace_current(*current);
+    }
+    navigation_history_.visit({path, 0, 0});
+  } else {
+    navigation_history_.replace_current({path, 0, 0});
+  }
   if (analysis_buffer_open_ && editor_graph_ && editor_) {
     editor_graph_->close_buffer(std::filesystem::path(editor_->display_path()));
   }
@@ -2231,6 +2030,9 @@ void App::open_editor(std::string path, std::string blob_id) {
   structural_references_.clear();
   editor_ = std::make_unique<EditorBuffer>(EditorBuffer::open(
       *options_.repository_path, std::move(path), std::move(blob_id)));
+  auto preferences = editor_->preferences();
+  preferences.soft_wrap = settings_.editor.wrap;
+  editor_->set_preferences(preferences);
   layouts_ = std::make_unique<TextLayoutCache>();
   layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
   text_layer_ = std::make_unique<RetainedTextLayer>();
@@ -2256,6 +2058,175 @@ void App::open_editor(std::string path, std::string blob_id) {
   editor_graph_->request_editor_view(
       std::filesystem::path(editor_->display_path()), *language,
       analysis_text_);
+}
+
+auto App::current_navigation_location() const
+    -> std::optional<NavigationLocation> {
+  if (!editor_) {
+    return std::nullopt;
+  }
+  const auto cursor = editor_->cursor();
+  return NavigationLocation{std::filesystem::path(editor_->display_path()),
+                            cursor.line, cursor.byte};
+}
+
+void App::open_navigation_location(const NavigationLocation &location,
+                                   bool record_history) {
+  auto blob = std::string{"navigation:"} + location.path.generic_string();
+  if (repository_) {
+    if (const auto *path =
+            repository_->metadata(location.path.generic_string());
+        path != nullptr && !path->blob_id.empty()) {
+      blob = path->blob_id;
+    }
+  }
+  open_editor(location.path.generic_string(), std::move(blob), record_history);
+  if (!editor_ || !editor_->error().empty()) {
+    return;
+  }
+  editor_->set_cursor({static_cast<std::size_t>(location.line),
+                       static_cast<std::size_t>(location.column)});
+  navigation_history_.replace_current(location);
+  ensure_cursor_visible();
+}
+
+void App::navigate_history(bool forward) {
+  if (const auto current = current_navigation_location()) {
+    navigation_history_.replace_current(*current);
+  }
+  auto location =
+      forward ? navigation_history_.forward() : navigation_history_.back();
+  if (location) {
+    open_navigation_location(*location, false);
+  }
+}
+
+auto App::navigation_symbol_at_cursor() const -> const NavigationSymbol * {
+  if (!repository_ || !editor_) {
+    return nullptr;
+  }
+  const auto byte = editor_->byte_offset(editor_->cursor());
+  const auto path = std::filesystem::path(editor_->display_path());
+  const auto symbols = repository_->navigation_symbols();
+  const auto occurrence =
+      std::ranges::find_if(symbols, [&](const auto &symbol) {
+        return symbol.path == path && symbol.range.start_byte <= byte &&
+               byte <= symbol.range.end_byte;
+      });
+  if (occurrence != symbols.end()) {
+    return &*occurrence;
+  }
+  if (const auto *enclosing = enclosing_symbol(symbols, path, byte)) {
+    return enclosing;
+  }
+  const auto name = identifier_at(editor_->text(), byte);
+  const auto named = std::ranges::find_if(symbols, [&](const auto &symbol) {
+    return symbol.name == name && symbol.definition;
+  });
+  return named == symbols.end() ? nullptr : &*named;
+}
+
+void App::show_symbol_references() {
+  const auto *symbol = navigation_symbol_at_cursor();
+  if (symbol == nullptr || !repository_) {
+    editor_status_ = "no indexed symbol at cursor";
+    return;
+  }
+  navigation_results_ = symbol_references(repository_->navigation_symbols(),
+                                          symbol->id, symbol->name);
+  navigation_results_title_ = "References — " + symbol->name;
+  navigation_results_open_ = true;
+}
+
+void App::show_call_hierarchy() {
+  const auto *symbol = navigation_symbol_at_cursor();
+  if (symbol == nullptr || !repository_) {
+    editor_status_ = "no indexed symbol at cursor";
+    return;
+  }
+  navigation_hierarchy_ = call_hierarchy(repository_->navigation_symbols(),
+                                         symbol->id, symbol->name);
+  navigation_results_title_ = "Call hierarchy — " + symbol->name;
+  navigation_results_.clear();
+  navigation_results_open_ = true;
+}
+
+void App::reveal_repository_path() {
+  if (!options_.repository_path || repository_action_source_.empty()) {
+    return;
+  }
+  auto target_path = std::filesystem::absolute(*options_.repository_path /
+                                               repository_action_source_)
+                         .lexically_normal();
+  if (!std::filesystem::exists(target_path)) {
+    target_path =
+        std::filesystem::absolute(*options_.repository_path).lexically_normal();
+  }
+  const auto target = target_path.generic_string();
+  const auto url = "file://" + target;
+  if (!SDL_OpenURL(url.c_str())) {
+    editor_status_ = std::string{"unable to reveal path: "} + SDL_GetError();
+  }
+}
+
+void App::invoke_navigation_action(NavigationAction action) {
+  switch (action) {
+  case NavigationAction::quick_open:
+    quick_open_open_ = true;
+    return;
+  case NavigationAction::symbol_search:
+    symbol_search_open_ = true;
+    return;
+  case NavigationAction::go_to_definition:
+    request_definition();
+    return;
+  case NavigationAction::find_references:
+    show_symbol_references();
+    return;
+  case NavigationAction::call_hierarchy:
+    show_call_hierarchy();
+    return;
+  case NavigationAction::focus_breadcrumbs:
+    breadcrumb_focus_requested_ = true;
+    editor_focused_ = false;
+    return;
+  case NavigationAction::open_recent:
+    open_recent_open_ = true;
+    return;
+  case NavigationAction::back:
+    navigate_history(false);
+    return;
+  case NavigationAction::forward:
+    navigate_history(true);
+    return;
+  case NavigationAction::open:
+    if (!repository_selection_.empty() && !repository_selection_blob_.empty()) {
+      open_editor(repository_selection_, repository_selection_blob_);
+    }
+    return;
+  case NavigationAction::rename:
+  case NavigationAction::move:
+    if (!repository_selection_.empty()) {
+      repository_action_source_ = repository_selection_;
+      repository_action_target_ = repository_selection_;
+      repository_move_open_ = true;
+    }
+    return;
+  case NavigationAction::new_file:
+    if (!repository_selection_.empty()) {
+      auto base = std::filesystem::path(repository_selection_);
+      if (!repository_selection_blob_.empty()) {
+        base = base.parent_path();
+      }
+      repository_action_target_ = (base / "new-file.txt").generic_string();
+      repository_new_file_open_ = true;
+    }
+    return;
+  case NavigationAction::reveal:
+    repository_action_source_ = repository_selection_;
+    reveal_repository_path();
+    return;
+  }
 }
 
 void App::show_review_diff(const ReviewSnapshot &review) {
@@ -2457,6 +2428,28 @@ void App::save_editor() {
   if (!editor_) {
     return;
   }
+  if (settings_.editor.format_on_save &&
+      std::filesystem::path(editor_->display_path()).extension() == ".liquid") {
+    auto document =
+        liquid::parse_configuration(editor_->text(), editor_->display_path());
+    if (!document) {
+      editor_status_ = document.error().message;
+      return;
+    }
+    auto formatted = liquid::format_configuration(*document);
+    if (!formatted) {
+      editor_status_ = formatted.error().message;
+      return;
+    }
+    if (*formatted != editor_->text()) {
+      editor_->select_all();
+      const auto change = editor_->insert_text(*formatted);
+      if (change) {
+        apply_change(change->first_line, change->erased_lines,
+                     change->inserted_lines);
+      }
+    }
+  }
   const auto build_running =
       editor_graph_ && editor_graph_->snapshot().build_running;
   auto saved = false;
@@ -2516,6 +2509,7 @@ void App::request_definition() {
   }
   const auto byte = editor_->byte_offset(editor_->cursor());
   if (byte <= std::numeric_limits<std::uint32_t>::max()) {
+    pending_definition_origin_ = current_navigation_location();
     editor_graph_->request_definition(
         std::filesystem::path(editor_->display_path()),
         static_cast<std::uint32_t>(byte));
@@ -2774,10 +2768,31 @@ void App::toggle_assistant() {
     return;
   }
   const auto enable = !assistant_->snapshot().enabled;
+  const auto saved =
+      set_repository_ai_enabled(*options_.repository_path, enable);
+  if (!saved) {
+    editor_status_ = saved.error().message;
+    return;
+  }
   settings_.ai.enabled = enable;
-  apply_settings_live();
-  persist_settings();
-  editor_status_ = enable ? "AI on" : "AI off";
+  if (!enable) {
+    assistant_->set_enabled(false);
+    editor_status_ = "AI off";
+    return;
+  }
+  auto config = load_ai_config(*options_.repository_path);
+  if (!config) {
+    editor_status_ = config.error().message;
+    return;
+  }
+  config->enabled = true;
+  ai_context_bytes_ = config->context_bytes;
+  auto key = anthropic_api_key();
+  const auto secret = key.value;
+  assistant_ = std::make_unique<Assistant>(*config, key.configured, [secret] {
+    return std::make_unique<AnthropicProvider>(secret);
+  });
+  editor_status_ = key.configured ? "AI on" : "AI on; key not configured";
 }
 
 void App::poll_editor_graph() {
@@ -2888,19 +2903,27 @@ void App::poll_editor_graph() {
     definition_generation_ = snapshot.definition_generation;
     if (snapshot.definition) {
       const auto target = snapshot.definition->path.generic_string();
-      if (!editor_ || editor_->display_path() != target) {
-        open_editor(target, "graph:" + target);
+      if (pending_definition_origin_) {
+        navigation_history_.replace_current(*pending_definition_origin_);
       }
       const auto &range = snapshot.definition->declaration.range;
+      const auto location = NavigationLocation{
+          snapshot.definition->path, range.start_line, range.start_column};
+      navigation_history_.visit(location);
+      if (!editor_ || editor_->display_path() != target) {
+        open_editor(target, "graph:" + target, false);
+      }
       editor_->set_cursor({range.start_line, range.start_column});
+      navigation_history_.replace_current(location);
       ensure_cursor_visible();
     }
+    pending_definition_origin_.reset();
   }
 }
 
 void App::handle_text(std::string_view text) {
-  if (command_palette_visible_ || !editor_ || !editor_focused_ ||
-      review_diff_open_ || editor_->mode() == EditingMode::modal_command) {
+  if (!editor_ || !editor_focused_ || review_diff_open_ ||
+      editor_->mode() == EditingMode::modal_command) {
     return;
   }
   if (!editor_mutation_allowed()) {
@@ -2924,19 +2947,121 @@ void App::handle_composition(std::string_view text, int selection_start,
                             selection_length);
 }
 
+void App::copy_editor_selection(bool cut) {
+  if (!editor_ || !editor_focused_) {
+    return;
+  }
+  const auto selection = editor_->selection();
+  if (!selection) {
+    return;
+  }
+  const auto source = editor_->text();
+  const auto first = editor_->byte_offset(selection->begin);
+  const auto last = editor_->byte_offset(selection->end);
+  const auto selected = source.substr(first, last - first);
+  auto *payload = new ClipboardPayload(
+      make_clipboard_payload(selected, std::string(editor_->display_path())));
+  const char *mime_types[] = {clipboard_plain_utf8, clipboard_plain,
+                              clipboard_html};
+  if (!SDL_SetClipboardData(clipboard_data, clipboard_cleanup, payload,
+                            mime_types, std::size(mime_types))) {
+    delete payload;
+    editor_status_ = std::string{"clipboard copy failed: "} + SDL_GetError();
+    return;
+  }
+  if (!cut || review_diff_open_ || !editor_mutation_allowed()) {
+    return;
+  }
+  const auto change = editor_->backspace();
+  if (change) {
+    apply_change(change->first_line, change->erased_lines,
+                 change->inserted_lines);
+  }
+}
+
+void App::paste_editor_clipboard() {
+  if (!editor_ || !editor_focused_ || review_diff_open_ ||
+      !editor_mutation_allowed()) {
+    return;
+  }
+  auto plain = std::optional<std::string>{};
+  if (SDL_HasClipboardData(clipboard_plain_utf8)) {
+    plain = clipboard_value(clipboard_plain_utf8);
+  } else if (SDL_HasClipboardData(clipboard_plain)) {
+    plain = clipboard_value(clipboard_plain);
+  } else if (SDL_HasClipboardText()) {
+    auto *value = SDL_GetClipboardText();
+    if (value != nullptr) {
+      plain = value;
+      SDL_free(value);
+    }
+  }
+  auto html = std::optional<std::string>{};
+  if (!plain && SDL_HasClipboardData(clipboard_html)) {
+    html = clipboard_value(clipboard_html);
+  }
+  const auto value = preferred_clipboard_text(
+      plain ? std::optional<std::string_view>{*plain} : std::nullopt,
+      html ? std::optional<std::string_view>{*html} : std::nullopt);
+  if (!value) {
+    editor_status_ = "clipboard does not contain supported text";
+    return;
+  }
+  handle_text(*value);
+}
+
+void App::handle_file_drop(const std::filesystem::path &source,
+                           InputPoint point) {
+  const auto target = input_.update_drop_target(
+      point, repository_drop_rectangle_, editor_drop_rectangle_);
+  if (!options_.repository_path || !repository_) {
+    editor_status_ = "open a repository before dropping files";
+    return;
+  }
+  std::error_code filesystem_error;
+  if (!std::filesystem::is_regular_file(source, filesystem_error)) {
+    editor_status_ = "only regular files can be dropped";
+    return;
+  }
+  if (target == DropTarget::none) {
+    editor_status_ = "drop the file on the repository tree or source editor";
+    return;
+  }
+  auto destination = source.filename();
+  if (target == DropTarget::editor && editor_) {
+    destination = std::filesystem::path(editor_->display_path()).parent_path() /
+                  destination;
+  }
+  auto opened = liquid::runtime::block_on(
+      liquid::repository::open(*options_.repository_path));
+  if (!opened) {
+    editor_status_ = opened.error().message;
+    return;
+  }
+  auto written = liquid::runtime::block_on(
+      opened->write_file(destination.generic_string(), source));
+  if (!written) {
+    editor_status_ = written.error().message;
+    return;
+  }
+  repository_ = std::make_unique<RepositoryView>(
+      RepositoryView::open(*options_.repository_path));
+  if (target == DropTarget::editor) {
+    const auto path = destination.generic_string();
+    open_editor(path, "drop:" + path);
+  }
+  editor_status_ = "imported " + destination.generic_string();
+}
+
 void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
-  if (command_palette_visible_) {
-    return;
-  }
-  const auto chord = key_chord(key, modifiers);
-  const auto *command =
-      chord && commands_ ? commands_->command_for(*chord) : nullptr;
-  if (command != nullptr) {
-    invoke_command(command->name);
-    return;
-  }
   const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
   const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
+  const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
+  if (command_matches(settings_, "settings.open", "Primary+,", key,
+                      modifiers)) {
+    settings_open_ = true;
+    return;
+  }
   if (primary && key == SDLK_B) {
     shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
     persist_shell_state();
@@ -2956,15 +3081,72 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     cycle_theme();
     return;
   }
-  if (key == SDLK_F7) {
+  if (command_matches(settings_, "palette.open", "Primary+Shift+P", key,
+                      modifiers)) {
+    command_palette_open_ = true;
+    return;
+  }
+  if (primary && key == SDLK_P) {
+    invoke_navigation_action(NavigationAction::quick_open);
+    return;
+  }
+  if (primary && key == SDLK_T) {
+    invoke_navigation_action(NavigationAction::symbol_search);
+    return;
+  }
+  if (primary && !alt && key == SDLK_R) {
+    invoke_navigation_action(NavigationAction::open_recent);
+    return;
+  }
+  if (alt && key == SDLK_LEFT) {
+    invoke_navigation_action(NavigationAction::back);
+    return;
+  }
+  if (alt && key == SDLK_RIGHT) {
+    invoke_navigation_action(NavigationAction::forward);
+    return;
+  }
+  if (primary && shift && key == SDLK_PERIOD) {
+    invoke_navigation_action(NavigationAction::focus_breadcrumbs);
+    return;
+  }
+  if (shift && key == SDLK_F12) {
+    invoke_navigation_action(NavigationAction::find_references);
+    return;
+  }
+  if (alt && key == SDLK_F12) {
+    invoke_navigation_action(NavigationAction::call_hierarchy);
+    return;
+  }
+  if (key == SDLK_F2) {
+    invoke_navigation_action(NavigationAction::rename);
+    return;
+  }
+  if (primary && shift && key == SDLK_M) {
+    invoke_navigation_action(NavigationAction::move);
+    return;
+  }
+  if (primary && key == SDLK_N) {
+    invoke_navigation_action(NavigationAction::new_file);
+    return;
+  }
+  if (primary && alt && key == SDLK_R) {
+    invoke_navigation_action(NavigationAction::reveal);
+    return;
+  }
+  if (repository_focused_ && (key == SDLK_RETURN || key == SDLK_KP_ENTER)) {
+    invoke_navigation_action(NavigationAction::open);
+    return;
+  }
+  if (command_matches(settings_, "build.run", "F7", key, modifiers)) {
     request_build();
     return;
   }
-  if (key == SDLK_F8) {
+  if (command_matches(settings_, "tests.run", "F8", key, modifiers)) {
     request_tests();
     return;
   }
-  if (key == SDLK_F9) {
+  if (command_matches(settings_, "deploy.run", "F9", key, modifiers)) {
     request_deploy();
     return;
   }
@@ -2974,7 +3156,6 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
   if (!editor_focused_) {
     return;
   }
-  const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
   if (primary && shift && key == SDLK_F) {
     panels_.focus(PanelId::search);
     panels_.clear_focus_request();
@@ -3091,7 +3272,7 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     }
     return;
   }
-  if (primary && key == SDLK_S) {
+  if (command_matches(settings_, "file.save", "Primary+S", key, modifiers)) {
     if (review_diff_open_) {
       editor_status_ = "review diffs are read-only";
       return;
@@ -3244,6 +3425,73 @@ void App::position_cursor(float x, float y, bool extend_selection) {
   editor_->set_cursor({line, byte}, extend_selection);
 }
 
+void App::update_text_input_area() {
+  if (!editor_ || !editor_visible_) {
+    return;
+  }
+  const auto cursor = editor_->cursor();
+  const auto row = cursor.line >= scroll_line_ ? cursor.line - scroll_line_ : 0;
+  const auto &layout = layouts_->line(cursor.line, editor_->line(cursor.line));
+  const auto column = layout.column_for_byte(cursor.byte);
+  const auto x = editor_x_ + editor_gutter_width + editor_padding +
+                 column * cell_width_ - horizontal_scroll_;
+  const auto y = editor_y_ + static_cast<float>(row) * line_height_;
+  const auto area = SDL_Rect{static_cast<int>(x), static_cast<int>(y),
+                             std::max(static_cast<int>(cell_width_), 1),
+                             std::max(static_cast<int>(line_height_), 1)};
+  SDL_SetTextInputArea(window_, &area, 0);
+}
+
+void App::draw_composition() {
+  const auto &composition = input_.composition();
+  if (!composition.active() || !editor_) {
+    return;
+  }
+  const auto cursor = editor_->cursor();
+  if (cursor.line < scroll_line_ ||
+      cursor.line >= scroll_line_ + visible_lines_) {
+    return;
+  }
+  const auto &layout = layouts_->line(cursor.line, editor_->line(cursor.line));
+  const auto column = layout.column_for_byte(cursor.byte);
+  const auto x = editor_x_ + editor_gutter_width + editor_padding +
+                 column * cell_width_ - horizontal_scroll_;
+  const auto y =
+      editor_y_ + static_cast<float>(cursor.line - scroll_line_) * line_height_;
+  const auto selection_start =
+      utf8_byte_offset(composition.text, composition.selection_start);
+  const auto selection_end =
+      utf8_byte_offset(composition.text, composition.selection_start +
+                                             composition.selection_length);
+  const auto prefix_width =
+      ImGui::CalcTextSize(composition.text.data(),
+                          composition.text.data() + selection_start)
+          .x;
+  const auto selection_width =
+      ImGui::CalcTextSize(composition.text.data() + selection_start,
+                          composition.text.data() + selection_end)
+          .x;
+  const auto text_size = ImGui::CalcTextSize(composition.text.c_str());
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  auto *draw_list = ImGui::GetWindowDrawList();
+  draw_list->AddRectFilled(
+      ImVec2(x, y), ImVec2(x + text_size.x + design::space1, y + line_height_),
+      packed_color(palette.overlay));
+  if (selection_width > 0.0F) {
+    draw_list->AddRectFilled(
+        ImVec2(x + prefix_width, y),
+        ImVec2(x + prefix_width + selection_width, y + line_height_),
+        packed_color(palette.selected));
+  }
+  draw_list->AddText(ImVec2(x, y + 2.0F), packed_color(palette.text_primary),
+                     composition.text.c_str());
+  draw_list->AddLine(ImVec2(x, y + line_height_ - 1.0F),
+                     ImVec2(x + text_size.x, y + line_height_ - 1.0F),
+                     packed_color(palette.focus),
+                     applied_high_contrast_ ? 3.0F : 2.0F);
+}
+
 void App::draw_repository_tree() {
   const auto path = options_.repository_path->string();
   ImGui::Text("Repository: %s", path.c_str());
@@ -3255,6 +3503,16 @@ void App::draw_repository_tree() {
     return;
   }
   repository_->poll();
+  if (repository_->navigation_loading()) {
+    ImGui::TextDisabled("Indexing paths and symbols...");
+  } else if (!repository_->navigation_error().empty()) {
+    ImGui::TextWrapped("Navigation index: %s",
+                       std::string(repository_->navigation_error()).c_str());
+  }
+  if (!repository_->mutation_status().empty()) {
+    ImGui::TextWrapped("%s",
+                       std::string(repository_->mutation_status()).c_str());
+  }
   if (repository_->entries().empty()) {
     ImGui::TextWrapped("This repository has no files.");
     return;
@@ -3373,15 +3631,43 @@ void App::draw_repository_entries(std::string_view directory) {
     const auto path = directory.empty()
                           ? entry.name
                           : std::string(directory) + "/" + entry.name;
+    const auto *metadata = repository_->metadata(path);
+    const auto kind =
+        metadata == nullptr
+            ? navigation_file_kind(path, entry.kind == liquid::node_kind::tree)
+            : metadata->kind;
+    auto label =
+        "[" + std::string(navigation_file_kind_name(kind)) + "] " + entry.name;
+    if (metadata != nullptr &&
+        metadata->change != NavigationChangeState::clean) {
+      label += "  [" +
+               std::string(navigation_change_state_name(metadata->change)) +
+               "]";
+    }
+    if (metadata != nullptr &&
+        metadata->drive != NavigationDriveState::unavailable) {
+      label += "  [" +
+               std::string(navigation_drive_state_name(metadata->drive)) + "]";
+    }
+    label += "##" + path;
     ImGui::PushID(path.c_str());
     if (entry.kind == liquid::node_kind::blob) {
-      if (ImGui::Selectable(entry.name.c_str(),
+      if (ImGui::Selectable(label.c_str(),
                             editor_ && editor_->display_path() == path)) {
+        repository_selection_ = path;
+        repository_selection_blob_ = liquid::to_string(entry.id);
+        repository_focused_ = true;
         open_editor(path, liquid::to_string(entry.id));
       }
     } else if (entry.kind == liquid::node_kind::tree) {
       const auto open =
-          ImGui::TreeNodeEx(entry.name.c_str(), ImGuiTreeNodeFlags_OpenOnArrow);
+          ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_OpenOnArrow);
+      if (ImGui::IsItemClicked()) {
+        repository_selection_ = path;
+        repository_selection_blob_.clear();
+        repository_focused_ = true;
+        editor_focused_ = false;
+      }
       if (open) {
         if (!repository_->directory_loaded(path) &&
             !repository_->directory_loading(path)) {
@@ -3402,7 +3688,250 @@ void App::draw_repository_entries(std::string_view directory) {
       ImGui::Text("%s (%s)", entry.name.c_str(),
                   std::string(node_kind_name(entry.kind)).c_str());
     }
+    if (ImGui::BeginPopupContextItem("repository-actions")) {
+      repository_selection_ = path;
+      repository_selection_blob_ = entry.kind == liquid::node_kind::blob
+                                       ? liquid::to_string(entry.id)
+                                       : std::string{};
+      repository_action_source_ = path;
+      if (entry.kind == liquid::node_kind::blob && ImGui::MenuItem("Open")) {
+        invoke_navigation_action(NavigationAction::open);
+      }
+      if (ImGui::MenuItem("Rename")) {
+        repository_action_target_ = path;
+        repository_move_open_ = true;
+      }
+      if (ImGui::MenuItem("Move")) {
+        repository_action_target_ = path;
+        repository_move_open_ = true;
+      }
+      if (ImGui::MenuItem("New file")) {
+        auto base = std::filesystem::path(path);
+        if (entry.kind == liquid::node_kind::blob) {
+          base = base.parent_path();
+        }
+        repository_action_target_ = (base / "new-file.txt").generic_string();
+        repository_new_file_open_ = true;
+      }
+      if (ImGui::MenuItem("Reveal")) {
+        reveal_repository_path();
+      }
+      ImGui::EndPopup();
+    }
     ImGui::PopID();
+  }
+}
+
+void App::draw_navigation_popups() {
+  const auto *screenshot =
+      options_.screenshot_state
+          ? find_screenshot_state(*options_.screenshot_state)
+          : nullptr;
+  const auto navigation_screenshot =
+      screenshot != nullptr && screenshot->view == ScreenshotView::navigation;
+  if (quick_open_open_) {
+    ImGui::OpenPopup("Quick open");
+    quick_open_open_ = false;
+  }
+  if (ImGui::BeginPopupModal("Quick open", nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    editor_visible_ = false;
+    ImGui::SetNextItemWidth(620.0F);
+    const auto quick_open_flags = navigation_screenshot
+                                      ? ImGuiInputTextFlags_ReadOnly
+                                      : ImGuiInputTextFlags_None;
+    ImGui::InputTextWithHint("##quick-open", "Type a path", &quick_open_query_,
+                             quick_open_flags);
+    if (navigation_screenshot) {
+      ImGui::Selectable("[C++] src/app.cpp", true);
+      ImGui::Selectable("[C++] src/app_state.cpp");
+      ImGui::Selectable("[md] docs/ui/app-shell.md");
+      ImGui::TextDisabled("3 path matches · Primary+P");
+    } else if (!repository_) {
+      ImGui::TextDisabled("Open a repository to search paths.");
+    } else if (repository_->navigation_loading()) {
+      ImGui::TextDisabled("Indexing repository paths...");
+    } else {
+      for (const auto &match :
+           rank_paths(repository_->navigation_paths(), quick_open_query_)) {
+        const auto &path = repository_->navigation_paths()[match.index];
+        const auto label = "[" +
+                           std::string(navigation_file_kind_name(path.kind)) +
+                           "] " + path.path.generic_string() + "##quick-" +
+                           std::to_string(match.index);
+        if (ImGui::Selectable(label.c_str())) {
+          open_editor(path.path.generic_string(), path.blob_id);
+          quick_open_query_.clear();
+          ImGui::CloseCurrentPopup();
+        }
+      }
+    }
+    if (ImGui::Button("Close")) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+
+  if (symbol_search_open_) {
+    ImGui::OpenPopup("Symbol search");
+    symbol_search_open_ = false;
+  }
+  if (ImGui::BeginPopupModal("Symbol search", nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    editor_visible_ = false;
+    ImGui::SetNextItemWidth(620.0F);
+    ImGui::InputTextWithHint("##symbol-search", "Type a symbol",
+                             &symbol_search_query_);
+    if (!repository_) {
+      ImGui::TextDisabled(
+          "Open a repository to search libliquid symbol records.");
+    } else if (repository_->navigation_loading()) {
+      ImGui::TextDisabled("Indexing symbol records...");
+    } else {
+      for (const auto &match : rank_symbols(repository_->navigation_symbols(),
+                                            symbol_search_query_)) {
+        const auto &symbol = repository_->navigation_symbols()[match.index];
+        const auto label = symbol.name + " — " + symbol.path.generic_string() +
+                           ":" + std::to_string(symbol.range.start_line + 1) +
+                           "##symbol-" + std::to_string(match.index);
+        if (ImGui::Selectable(label.c_str())) {
+          open_navigation_location({symbol.path, symbol.range.start_line,
+                                    symbol.range.start_column});
+          symbol_search_query_.clear();
+          ImGui::CloseCurrentPopup();
+        }
+      }
+    }
+    if (ImGui::Button("Close")) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+
+  if (open_recent_open_) {
+    ImGui::OpenPopup("Open recent");
+    open_recent_open_ = false;
+  }
+  if (ImGui::BeginPopupModal("Open recent", nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    editor_visible_ = false;
+    if (navigation_history_.recent().empty()) {
+      ImGui::TextDisabled("No recently opened paths.");
+    }
+    for (std::size_t index = 0; index < navigation_history_.recent().size();
+         ++index) {
+      const auto &location = navigation_history_.recent()[index];
+      const auto label = location.path.generic_string() + ":" +
+                         std::to_string(location.line + 1) + "##recent-" +
+                         std::to_string(index);
+      if (ImGui::Selectable(label.c_str())) {
+        open_navigation_location(location);
+        ImGui::CloseCurrentPopup();
+      }
+    }
+    if (ImGui::Button("Close")) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
+
+void App::draw_repository_action_popup() {
+  if (repository_move_open_) {
+    ImGui::OpenPopup("Move or rename path");
+    repository_move_open_ = false;
+  }
+  if (ImGui::BeginPopupModal("Move or rename path", nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    editor_visible_ = false;
+    ImGui::Text("Source: %s", repository_action_source_.c_str());
+    ImGui::SetNextItemWidth(520.0F);
+    ImGui::InputText("Destination", &repository_action_target_);
+    ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
+                         repository_->mutation_running());
+    if (ImGui::Button("Apply")) {
+      repository_->request_move(repository_action_source_,
+                                repository_action_target_);
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+
+  if (repository_new_file_open_) {
+    ImGui::OpenPopup("New file");
+    repository_new_file_open_ = false;
+  }
+  if (ImGui::BeginPopupModal("New file", nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    editor_visible_ = false;
+    ImGui::SetNextItemWidth(520.0F);
+    ImGui::InputText("Path", &repository_action_target_);
+    ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
+                         repository_->mutation_running());
+    if (ImGui::Button("Create")) {
+      repository_->request_new_file(repository_action_target_);
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
+
+void App::draw_navigation_results() {
+  if (!navigation_results_open_) {
+    return;
+  }
+  editor_visible_ = false;
+  auto open = true;
+  if (ImGui::Begin(navigation_results_title_.c_str(), &open)) {
+    const auto draw_symbol = [this](const NavigationSymbol &symbol,
+                                    std::string_view prefix) {
+      const auto label = std::string(prefix) + symbol.name + " — " +
+                         symbol.path.generic_string() + ":" +
+                         std::to_string(symbol.range.start_line + 1) +
+                         "##nav-result-" + symbol.id +
+                         symbol.path.generic_string() +
+                         std::to_string(symbol.range.start_byte);
+      if (ImGui::Selectable(label.c_str())) {
+        open_navigation_location(
+            {symbol.path, symbol.range.start_line, symbol.range.start_column});
+      }
+    };
+    if (!navigation_results_.empty()) {
+      for (const auto &symbol : navigation_results_) {
+        draw_symbol(symbol,
+                    symbol.definition ? "Definition  " : "Reference   ");
+      }
+    } else {
+      ImGui::TextUnformatted("Callers");
+      for (const auto &symbol : navigation_hierarchy_.callers) {
+        draw_symbol(symbol, "");
+      }
+      if (navigation_hierarchy_.callers.empty()) {
+        ImGui::TextDisabled("No indexed callers.");
+      }
+      ImGui::Separator();
+      ImGui::TextUnformatted("Callees");
+      for (const auto &symbol : navigation_hierarchy_.callees) {
+        draw_symbol(symbol, "");
+      }
+      if (navigation_hierarchy_.callees.empty()) {
+        ImGui::TextDisabled("No indexed callees.");
+      }
+    }
+  }
+  ImGui::End();
+  if (!open) {
+    navigation_results_open_ = false;
   }
 }
 
@@ -3538,156 +4067,6 @@ void App::execute_panel_command(std::string_view command) {
   }
 }
 
-void App::draw_settings() {
-  if (settings_open_) {
-    ImGui::OpenPopup("Settings");
-    settings_open_ = false;
-  }
-  const auto center = ImGui::GetMainViewport()->GetCenter();
-  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
-  ImGui::SetNextWindowSize(ImVec2(900.0F, 650.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Settings", nullptr,
-                              ImGuiWindowFlags_NoSavedSettings)) {
-    settings_popup_visible_ = false;
-    return;
-  }
-  settings_popup_visible_ = true;
-  ImGui::InputTextWithHint("##settings-search", "Search settings",
-                           &settings_query_);
-  ImGui::SameLine();
-  auto repository_scope = settings_scope_ == SettingsScope::repository;
-  if (!options_.repository_path) {
-    ImGui::BeginDisabled();
-  }
-  if (ImGui::Checkbox("Repository overrides", &repository_scope)) {
-    settings_scope_ =
-        repository_scope ? SettingsScope::repository : SettingsScope::user;
-  }
-  if (!options_.repository_path) {
-    ImGui::EndDisabled();
-  }
-  const auto path =
-      settings_scope_ == SettingsScope::repository && options_.repository_path
-          ? repository_settings_path(*options_.repository_path)
-          : user_settings_path();
-  ImGui::TextDisabled("Editing %s", path.string().c_str());
-  for (const auto &diagnostic : settings_diagnostics_) {
-    ImGui::TextColored(imgui_color((applied_dark_theme_ ? design::dark_palette
-                                                        : design::light_palette)
-                                       .warning),
-                       "%s", diagnostic.message.c_str());
-  }
-  ImGui::Separator();
-  ImGui::BeginChild("settings-scroll", ImVec2(0.0F, -36.0F),
-                    ImGuiChildFlags_Borders);
-  const auto begins = [this](SettingsGroup group) {
-    return settings_group_matches(group, settings_query_) &&
-           ImGui::CollapsingHeader(settings_group_name(group).data(),
-                                   ImGuiTreeNodeFlags_DefaultOpen);
-  };
-  if (begins(SettingsGroup::appearance)) {
-    if (ImGui::SmallButton("Reset appearance")) {
-      reset_settings(SettingsGroup::appearance);
-    }
-    auto theme = static_cast<int>(settings_.theme);
-    constexpr auto themes =
-        std::array{"Follow operating system", "Light", "Dark"};
-    if (ImGui::Combo("Theme", &theme, themes.data(),
-                     static_cast<int>(themes.size()))) {
-      settings_.theme = static_cast<ThemePreference>(theme);
-      apply_settings_live();
-      persist_settings();
-    }
-    auto ui_size = static_cast<int>(settings_.fonts.ui_size);
-    if (ImGui::SliderInt("UI size", &ui_size, 11, 32)) {
-      settings_.fonts.ui_size = static_cast<std::uint32_t>(ui_size);
-      apply_settings_live(true);
-      persist_settings();
-    }
-    auto editor_size = static_cast<int>(settings_.fonts.editor_size);
-    if (ImGui::SliderInt("Editor size", &editor_size, 12, 16)) {
-      settings_.fonts.editor_size = static_cast<std::uint32_t>(editor_size);
-      apply_settings_live(true);
-      persist_settings();
-    }
-  }
-  if (begins(SettingsGroup::editor)) {
-    if (ImGui::SmallButton("Reset editor")) {
-      reset_settings(SettingsGroup::editor);
-    }
-    auto changed = ImGui::Checkbox("Wrap long lines", &settings_.editor.wrap);
-    changed |= ImGui::Checkbox("Show whitespace", &settings_.editor.whitespace);
-    changed |= ImGui::Checkbox("Format .liquid files on save",
-                               &settings_.editor.format_on_save);
-    if (changed) {
-      apply_settings_live();
-      persist_settings();
-    }
-  }
-  if (begins(SettingsGroup::keymap)) {
-    if (ImGui::SmallButton("Reset keymap")) {
-      reset_settings(SettingsGroup::keymap);
-    }
-    ImGui::TextDisabled("Command registry bindings");
-    for (const auto name : {"settings.open", "run.build", "run.tests",
-                            "run.deploy", "edit.command-palette"}) {
-      auto &binding = settings_.keymap[name];
-      if (binding.empty() && commands_) {
-        binding = commands_->binding_label(name);
-      }
-      ImGui::PushID(name);
-      ImGui::SetNextItemWidth(180.0F);
-      if (ImGui::InputText(name, &binding)) {
-        auto override = KeymapOverride{name, {binding}, {path, 1, 1}};
-        auto diagnostics = commands_->apply_overrides({&override, 1});
-        command_diagnostics_.clear();
-        for (const auto &diagnostic : diagnostics) {
-          command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
-        }
-        persist_settings();
-      }
-      ImGui::PopID();
-    }
-  }
-  if (begins(SettingsGroup::ai)) {
-    if (ImGui::SmallButton("Reset AI")) {
-      reset_settings(SettingsGroup::ai);
-    }
-    if (ImGui::Checkbox("Enable AI surface", &settings_.ai.enabled)) {
-      apply_settings_live();
-      persist_settings();
-    }
-    if (ImGui::InputText("Model", &settings_.ai.model)) {
-      apply_settings_live();
-      persist_settings();
-    }
-    ImGui::TextDisabled("Credentials remain in the OS credential store.");
-  }
-  if (begins(SettingsGroup::lake)) {
-    if (ImGui::SmallButton("Reset lake")) {
-      reset_settings(SettingsGroup::lake);
-    }
-    for (const auto &account : settings_.lake_accounts) {
-      ImGui::BulletText("%s — %s", account.name.c_str(), account.url.c_str());
-    }
-    ImGui::TextDisabled("Lake credentials remain in the OS credential store.");
-  }
-  if (begins(SettingsGroup::telemetry)) {
-    if (ImGui::SmallButton("Reset telemetry")) {
-      reset_settings(SettingsGroup::telemetry);
-    }
-    if (ImGui::Checkbox("Enable telemetry", &settings_.telemetry)) {
-      persist_settings();
-    }
-    ImGui::TextDisabled("Off by default.");
-  }
-  ImGui::EndChild();
-  if (ImGui::Button("Close")) {
-    ImGui::CloseCurrentPopup();
-  }
-  ImGui::EndPopup();
-}
-
 void App::draw_command_palette() {
   command_palette_visible_ = false;
   if (command_palette_open_) {
@@ -3710,116 +4089,307 @@ void App::draw_command_palette() {
     command_palette_previous_query_ = command_palette_query_;
     command_palette_selection_ = 0;
   }
-  auto recent = std::vector<std::string>{};
-  if (command_palette_query_.empty()) {
-    recent.assign(commands_->recent().begin(), commands_->recent().end());
+  if (!commands_) {
+    ImGui::EndPopup();
+    return;
   }
-  auto matches = commands_->search(command_palette_query_);
-  if (command_palette_query_.empty()) {
-    matches.erase(std::remove_if(matches.begin(), matches.end(),
-                                 [&](const auto &match) {
-                                   return std::ranges::find(recent,
-                                                            match.name) !=
-                                          recent.end();
-                                 }),
-                  matches.end());
-  }
-  const auto result_count = recent.size() + matches.size();
-  auto selection_moved = false;
-  if (result_count > 0 && ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
-    command_palette_selection_ =
-        (command_palette_selection_ + 1) % result_count;
-    selection_moved = true;
-  }
-  if (result_count > 0 && ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
-    command_palette_selection_ = command_palette_selection_ == 0
-                                     ? result_count - 1
-                                     : command_palette_selection_ - 1;
-    selection_moved = true;
-  }
-  if (command_palette_selection_ >= result_count) {
-    command_palette_selection_ = 0;
-  }
-  auto pending_command = std::optional<std::string>{};
-  if (result_count > 0 && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
-    if (command_palette_selection_ < recent.size()) {
-      pending_command = recent[command_palette_selection_];
-    } else {
-      pending_command =
-          matches[command_palette_selection_ - recent.size()].name;
-    }
-  }
-  if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    ImGui::CloseCurrentPopup();
-  }
-  const auto &palette =
-      applied_dark_theme_ ? design::dark_palette : design::light_palette;
-  for (const auto &diagnostic : command_diagnostics_) {
-    ImGui::TextColored(imgui_color(palette.warning), "%s", diagnostic.c_str());
-  }
-  for (const auto &conflict : commands_->conflicts()) {
-    auto message = "Key conflict " + conflict.binding + ": ";
-    for (std::size_t index = 0; index < conflict.commands.size(); ++index) {
-      if (index != 0) {
-        message += ", ";
-      }
-      message += conflict.commands[index];
-    }
-    ImGui::TextColored(imgui_color(palette.warning), "%s", message.c_str());
-  }
-  ImGui::Separator();
-  auto row_index = std::size_t{};
-  const auto draw_command = [this, &pending_command, &row_index,
-                             selection_moved](std::string_view name) {
-    const auto *definition = commands_->find(name);
-    if (definition == nullptr) {
-      return;
-    }
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    const auto label = definition->title + "##" + definition->name;
-    const auto selected = row_index == command_palette_selection_;
-    if (ImGui::Selectable(label.c_str(), selected,
-                          ImGuiSelectableFlags_SpanAllColumns)) {
-      pending_command = std::string(name);
-    }
-    if (selected && selection_moved) {
-      ImGui::SetScrollHereY();
-    }
-    ImGui::TableSetColumnIndex(1);
-    ImGui::TextDisabled("%s", definition->group.c_str());
-    ImGui::TableSetColumnIndex(2);
-    const auto binding = commands_->binding_label(name);
-    ImGui::TextDisabled("%s", binding.c_str());
-    ++row_index;
-  };
+  const auto matches = commands_->search(command_palette_query_);
+  auto pending = std::optional<std::string>{};
   if (ImGui::BeginTable("command-results", 3,
                         ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
                             ImGuiTableFlags_SizingStretchProp,
                         ImVec2(0.0F, -1.0F))) {
     ImGui::TableSetupColumn("Command", ImGuiTableColumnFlags_WidthStretch,
-                            0.62F);
-    ImGui::TableSetupColumn("Group", ImGuiTableColumnFlags_WidthStretch, 0.18F);
+                            0.60F);
+    ImGui::TableSetupColumn("Group", ImGuiTableColumnFlags_WidthStretch, 0.20F);
     ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 0.20F);
     ImGui::TableHeadersRow();
-    if (!recent.empty()) {
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      ImGui::TextDisabled("Recently used");
-      for (const auto &name : recent) {
-        draw_command(name);
+    for (const auto &match : matches) {
+      const auto *definition = commands_->find(match.name);
+      if (definition == nullptr) {
+        continue;
       }
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
-      ImGui::SeparatorText("All commands");
-    }
-    for (const auto &match : matches) {
-      draw_command(match.name);
+      const auto label = definition->title + "##" + definition->name;
+      if (ImGui::Selectable(label.c_str(), false,
+                            ImGuiSelectableFlags_SpanAllColumns)) {
+        pending = definition->name;
+      }
+      ImGui::TableSetColumnIndex(1);
+      ImGui::TextDisabled("%s", definition->group.c_str());
+      ImGui::TableSetColumnIndex(2);
+      const auto binding = commands_->binding_label(definition->name);
+      ImGui::TextDisabled("%s", binding.c_str());
     }
     ImGui::EndTable();
   }
-  if (pending_command) {
-    invoke_command(*pending_command);
+  if (pending) {
+    invoke_command(*pending);
+    ImGui::CloseCurrentPopup();
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  if (command_palette_query_.empty()) {
+    ImGui::TextDisabled("Recent commands: %zu", commands_->recent().size());
+  }
+  for (const auto &diagnostic : command_diagnostics_) {
+    ImGui::TextDisabled("%s", diagnostic.c_str());
+  }
+  ImGui::EndPopup();
+}
+
+void App::draw_settings() {
+  if (settings_open_) {
+    ImGui::OpenPopup("Settings");
+    settings_open_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(900.0F, 650.0F), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Settings", nullptr,
+                              ImGuiWindowFlags_NoSavedSettings)) {
+    settings_popup_visible_ = false;
+    return;
+  }
+  settings_popup_visible_ = true;
+
+  ImGui::InputTextWithHint("##settings-search", "Search settings",
+                           &settings_query_);
+  ImGui::SameLine();
+  auto repository_scope = settings_scope_ == SettingsScope::repository;
+  if (!options_.repository_path) {
+    ImGui::BeginDisabled();
+  }
+  if (ImGui::Checkbox("Repository overrides", &repository_scope)) {
+    settings_scope_ =
+        repository_scope ? SettingsScope::repository : SettingsScope::user;
+  }
+  if (!options_.repository_path) {
+    ImGui::EndDisabled();
+  }
+  ImGui::TextDisabled(
+      "Editing %s",
+      settings_scope_ == SettingsScope::repository
+          ? repository_settings_path(*options_.repository_path).string().c_str()
+          : user_settings_path().string().c_str());
+  for (const auto &diagnostic : settings_diagnostics_) {
+    ImGui::PushStyleColor(ImGuiCol_Text,
+                          ImGui::GetStyleColorVec4(ImGuiCol_TextSelectedBg));
+    ImGui::TextWrapped("%s", diagnostic.message.c_str());
+    ImGui::PopStyleColor();
+  }
+  ImGui::Separator();
+  ImGui::BeginChild("settings-scroll", ImVec2(0.0F, -36.0F),
+                    ImGuiChildFlags_Borders);
+
+  const auto begin_group = [this](SettingsGroup group) {
+    ImGui::PushID(static_cast<int>(group));
+    if (!settings_group_matches(group, settings_query_)) {
+      return false;
+    }
+    const auto collapsed_for_proof =
+        screenshot_mode() &&
+        (group == SettingsGroup::appearance || group == SettingsGroup::editor ||
+         group == SettingsGroup::keymap);
+    const auto flags = collapsed_for_proof ? ImGuiTreeNodeFlags_None
+                                           : ImGuiTreeNodeFlags_DefaultOpen;
+    const auto open =
+        ImGui::CollapsingHeader(settings_group_name(group).data(), flags);
+    if (open) {
+      ImGui::SameLine(ImGui::GetContentRegionAvail().x - 52.0F);
+      if (ImGui::SmallButton("Reset")) {
+        reset_settings(group);
+      }
+    }
+    return open;
+  };
+  const auto end_group = [] {
+    ImGui::Spacing();
+    ImGui::PopID();
+  };
+
+  if (begin_group(SettingsGroup::appearance)) {
+    auto theme = static_cast<int>(settings_.theme);
+    constexpr auto themes =
+        std::array{"Follow operating system", "Light", "Dark"};
+    if (ImGui::Combo("Theme", &theme, themes.data(),
+                     static_cast<int>(themes.size()))) {
+      settings_.theme = static_cast<ThemePreference>(theme);
+      apply_settings_live();
+      persist_settings();
+    }
+    ImGui::TextDisabled("UI font");
+    ImGui::SameLine(150.0F);
+    ImGui::TextUnformatted(settings_.fonts.ui_family.c_str());
+    auto ui_size = static_cast<int>(settings_.fonts.ui_size);
+    if (ImGui::SliderInt("UI size", &ui_size, 11, 32)) {
+      settings_.fonts.ui_size = static_cast<std::uint32_t>(ui_size);
+      apply_settings_live(true);
+      persist_settings();
+    }
+    ImGui::TextDisabled("Editor font");
+    ImGui::SameLine(150.0F);
+    ImGui::TextUnformatted(settings_.fonts.editor_family.c_str());
+    auto editor_size = static_cast<int>(settings_.fonts.editor_size);
+    if (ImGui::SliderInt("Editor size", &editor_size, 12, 16)) {
+      settings_.fonts.editor_size = static_cast<std::uint32_t>(editor_size);
+      apply_settings_live(true);
+      persist_settings();
+    }
+  }
+  end_group();
+
+  if (begin_group(SettingsGroup::editor)) {
+    auto changed = false;
+    changed |= ImGui::Checkbox("Wrap long lines", &settings_.editor.wrap);
+    changed |= ImGui::Checkbox("Show whitespace", &settings_.editor.whitespace);
+    changed |= ImGui::Checkbox("Format .liquid files on save",
+                               &settings_.editor.format_on_save);
+    if (changed) {
+      apply_settings_live();
+      persist_settings();
+    }
+  }
+  end_group();
+
+  if (begin_group(SettingsGroup::keymap)) {
+    ImGui::TextDisabled("Command palette leaf overrides");
+    constexpr auto commands = std::array{
+        std::pair{"settings.open", "Cmd+,"},
+        std::pair{"build.run", "F7"},
+        std::pair{"tests.run", "F8"},
+        std::pair{"deploy.run", "F9"},
+    };
+    for (const auto &[command, default_binding] : commands) {
+      auto &binding = settings_.keymap[command];
+      if (binding.empty()) {
+        binding = default_binding;
+      }
+      ImGui::PushID(command);
+      ImGui::SetNextItemWidth(180.0F);
+      if (ImGui::InputText(command, &binding)) {
+        persist_settings();
+      }
+      ImGui::PopID();
+    }
+  }
+  end_group();
+
+  if (begin_group(SettingsGroup::ai)) {
+    if (ImGui::Checkbox("Enable AI surface", &settings_.ai.enabled)) {
+      apply_settings_live();
+      persist_settings();
+    }
+    ImGui::Text("Provider: %s", settings_.ai.provider.c_str());
+    if (ImGui::InputText("Model", &settings_.ai.model)) {
+      apply_settings_live();
+      persist_settings();
+    }
+    const auto key =
+        screenshot_mode() ? ConfiguredSecret{true, {}} : anthropic_api_key();
+    ImGui::Text("Provider token: %s",
+                key.configured ? "******** (configured)" : "not configured");
+    if (!screenshot_mode()) {
+      ImGui::SetNextItemWidth(280.0F);
+      ImGui::InputTextWithHint("##provider-token", "New provider token",
+                               &provider_token_input_,
+                               ImGuiInputTextFlags_Password);
+      ImGui::SameLine();
+      if (ImGui::Button("Store token") && !provider_token_input_.empty()) {
+        const auto stored = store_anthropic_api_key(provider_token_input_);
+        std::ranges::fill(provider_token_input_, '\0');
+        provider_token_input_.clear();
+        if (!stored) {
+          editor_status_ = stored.error().message;
+        } else {
+          editor_status_ = "provider credential stored";
+          apply_settings_live();
+        }
+      }
+      ImGui::TextDisabled(
+          "Tokens are read from the OS credential store or environment.");
+    }
+  }
+  end_group();
+
+  if (begin_group(SettingsGroup::lake)) {
+    auto remove = std::optional<std::size_t>{};
+    for (std::size_t index = 0; index < settings_.lake_accounts.size();
+         ++index) {
+      auto &account = settings_.lake_accounts[index];
+      ImGui::PushID(static_cast<int>(index));
+      ImGui::Text("%s", account.name.c_str());
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Remove")) {
+        remove = index;
+      }
+      if (screenshot_mode()) {
+        ImGui::TextDisabled("%s", account.url.c_str());
+      } else {
+        if (ImGui::InputText("URL", &account.url)) {
+          persist_settings();
+        }
+      }
+      const auto token = screenshot_mode() ? ConfiguredSecret{true, {}}
+                                           : lake_account_token(account.name);
+      ImGui::Text("Token: %s", token.configured ? "******** (configured)"
+                                                : "not configured");
+      if (!screenshot_mode()) {
+        ImGui::SetNextItemWidth(280.0F);
+        ImGui::InputTextWithHint("##lake-token", "New lake token",
+                                 &lake_token_input_,
+                                 ImGuiInputTextFlags_Password);
+        ImGui::SameLine();
+        if (ImGui::Button("Store token") && !lake_token_input_.empty()) {
+          const auto stored =
+              store_lake_account_token(account.name, lake_token_input_);
+          std::ranges::fill(lake_token_input_, '\0');
+          lake_token_input_.clear();
+          editor_status_ =
+              stored ? "lake credential stored" : stored.error().message;
+        }
+      }
+      ImGui::PopID();
+    }
+    if (remove) {
+      settings_.lake_accounts.erase(settings_.lake_accounts.begin() +
+                                    static_cast<std::ptrdiff_t>(*remove));
+      persist_settings();
+    }
+    if (!screenshot_mode()) {
+      ImGui::SetNextItemWidth(180.0F);
+      ImGui::InputTextWithHint("##lake-name", "Account name",
+                               &lake_account_name_);
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(360.0F);
+      ImGui::InputTextWithHint("##lake-url", "https://lake.example",
+                               &lake_account_url_);
+      ImGui::SameLine();
+      if (ImGui::Button("Add") && !lake_account_name_.empty() &&
+          !lake_account_url_.empty()) {
+        settings_.lake_accounts.push_back(
+            {lake_account_name_, lake_account_url_});
+        lake_account_name_.clear();
+        lake_account_url_.clear();
+        persist_settings();
+      }
+    }
+  }
+  end_group();
+
+  if (begin_group(SettingsGroup::telemetry)) {
+    if (ImGui::Checkbox("Enable telemetry", &settings_.telemetry)) {
+      persist_settings();
+    }
+    ImGui::TextDisabled(
+        "Off by default. There are no other telemetry switches.");
+  }
+  end_group();
+
+  ImGui::EndChild();
+  if (ImGui::Button("Close")) {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
@@ -4300,7 +4870,35 @@ void App::draw_editor() {
   const auto path = std::string(editor_->display_path());
   const auto graph_snapshot =
       editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
-  ImGui::Text("%s%s", path.c_str(), editor_->dirty() ? " *" : "");
+  auto symbol_name = std::optional<std::string_view>{};
+  if (const auto *symbol = navigation_symbol_at_cursor()) {
+    symbol_name = symbol->name;
+  } else if (screenshot_mode()) {
+    symbol_name = "greeting";
+  }
+  const auto path_breadcrumbs = breadcrumbs(path, symbol_name);
+  if (breadcrumb_focus_requested_) {
+    ImGui::SetKeyboardFocusHere();
+    breadcrumb_focus_requested_ = false;
+  }
+  for (std::size_t index = 0; index < path_breadcrumbs.size(); ++index) {
+    const auto &breadcrumb = path_breadcrumbs[index];
+    const auto label =
+        breadcrumb.label + "##breadcrumb-" + std::to_string(index);
+    if (ImGui::SmallButton(label.c_str()) && !breadcrumb.symbol &&
+        breadcrumb.path == std::filesystem::path(path)) {
+      editor_focused_ = true;
+    }
+    if (index + 1 < path_breadcrumbs.size()) {
+      ImGui::SameLine();
+      ImGui::TextDisabled(">");
+      ImGui::SameLine();
+    }
+  }
+  if (editor_->dirty()) {
+    ImGui::SameLine();
+    ImGui::TextUnformatted("*");
+  }
   ImGui::SameLine();
   if (review_diff_open_) {
     ImGui::TextDisabled("read-only text diff");
@@ -4480,31 +5078,19 @@ void App::draw_editor() {
                          ImGuiButtonFlags_MouseButtonLeft);
   const auto hovered = ImGui::IsItemHovered();
   auto *draw_list = ImGui::GetWindowDrawList();
-  const auto &palette =
-      applied_dark_theme_ ? design::dark_palette : design::light_palette;
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
   draw_list->AddRectFilled(position,
                            ImVec2(position.x + size.x, position.y + size.y),
                            packed_color(palette.surface));
   draw_list->AddRect(position, ImVec2(position.x + size.x, position.y + size.y),
                      packed_color(palette.border_subtle));
-  const auto *screenshot =
-      options_.screenshot_state
-          ? find_screenshot_state(*options_.screenshot_state)
-          : nullptr;
-  if (screenshot != nullptr &&
-      screenshot->view == ScreenshotView::accessibility) {
-    const auto focus = screenshot->theme == ScreenshotTheme::dark
-                           ? IM_COL32(107, 152, 255, 255)
-                           : IM_COL32(15, 98, 254, 255);
-    draw_list->AddRect(position,
-                       ImVec2(position.x + size.x, position.y + size.y), focus,
-                       0.0F, 0, 3.0F);
-  }
 
   editor_x_ = position.x;
   editor_y_ = position.y;
   editor_width_ = size.x;
   editor_height_ = size.y;
+  editor_drop_rectangle_ = {position.x, position.y, size.x, size.y};
   line_height_ = ImGui::GetFontSize() + 4.0F;
   const auto *glyph = ImGui::GetFont()->FindGlyph('M');
   cell_width_ =
@@ -4512,6 +5098,19 @@ void App::draw_editor() {
   visible_lines_ =
       std::max<std::size_t>(1, static_cast<std::size_t>(size.y / line_height_));
   editor_visible_ = true;
+  const auto item_focused = ImGui::IsItemFocused();
+  if (item_focused) {
+    editor_focused_ = true;
+  } else if (ImGui::IsAnyItemFocused()) {
+    editor_focused_ = false;
+  }
+  if (editor_focused_ || input_.drop_target() == DropTarget::editor) {
+    const auto thickness =
+        input_.drop_target() == DropTarget::editor ? 3.0F : 2.0F;
+    draw_list->AddRect(position,
+                       ImVec2(position.x + size.x, position.y + size.y),
+                       packed_color(palette.focus), 0.0F, 0, thickness);
+  }
 
   if (hovered) {
     const auto wheel = ImGui::GetIO().MouseWheel;
@@ -4585,59 +5184,15 @@ void App::draw_editor() {
       }
     }
   }
+  update_text_input_area();
   draw_composition();
   ImGui::PopFont();
 }
 
-void App::draw_composition() {
-  const auto &composition = input_.composition();
-  if (!composition.active() || !editor_) {
-    return;
-  }
-  const auto cursor = editor_->cursor();
-  if (cursor.line < scroll_line_ ||
-      cursor.line >= scroll_line_ + visible_lines_) {
-    return;
-  }
-  const auto x = editor_x_ + editor_gutter_width + editor_padding +
-                 static_cast<float>(cursor.byte) * cell_width_ -
-                 horizontal_scroll_;
-  const auto y =
-      editor_y_ + static_cast<float>(cursor.line - scroll_line_) * line_height_;
-  const auto selection_start =
-      utf8_byte_offset(composition.text, composition.selection_start);
-  const auto selection_end =
-      utf8_byte_offset(composition.text, composition.selection_start +
-                                             composition.selection_length);
-  const auto prefix_width =
-      ImGui::CalcTextSize(composition.text.data(),
-                          composition.text.data() + selection_start)
-          .x;
-  const auto selection_width =
-      ImGui::CalcTextSize(composition.text.data() + selection_start,
-                          composition.text.data() + selection_end)
-          .x;
-  const auto text_size = ImGui::CalcTextSize(composition.text.c_str());
-  const auto &palette =
-      applied_dark_theme_ ? design::dark_palette : design::light_palette;
-  auto *draw_list = ImGui::GetWindowDrawList();
-  draw_list->AddRectFilled(
-      ImVec2(x, y), ImVec2(x + text_size.x + design::space1, y + line_height_),
-      packed_color(palette.overlay));
-  if (selection_width > 0.0F) {
-    draw_list->AddRectFilled(
-        ImVec2(x + prefix_width, y),
-        ImVec2(x + prefix_width + selection_width, y + line_height_),
-        packed_color(palette.selected));
-  }
-  draw_list->AddText(ImVec2(x, y + 2.0F), packed_color(palette.text_primary),
-                     composition.text.c_str());
-}
-
 void App::draw_diagnostics_panel(const EditorGraphSnapshot &graph_snapshot) {
   if (screenshot_mode()) {
-    const auto &palette =
-        applied_dark_theme_ ? design::dark_palette : design::light_palette;
+    const auto palette =
+        effective_palette(applied_dark_theme_, applied_high_contrast_);
     ImGui::TextUnformatted("Diagnostics (3)");
     ImGui::TextColored(imgui_color(palette.danger),
                        "error: expected ';' after return statement");
@@ -4713,8 +5268,8 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
       ImGuiChildFlags_Border);
   ImGui::TextUnformatted("Build, test and deploy");
   if (screenshot_mode()) {
-    const auto &palette =
-        applied_dark_theme_ ? design::dark_palette : design::light_palette;
+    const auto palette =
+        effective_palette(applied_dark_theme_, applied_high_contrast_);
     ImGui::SameLine();
     ImGui::TextColored(imgui_color(palette.success), "passed");
     ImGui::TextUnformatted("configure: hit");
@@ -4938,19 +5493,19 @@ void App::draw_panel(PanelId id) {
     if (screenshot_mode()) {
       ImGui::TextDisabled("orama/liquify");
       ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-      if (ImGui::TreeNode("src")) {
-        ImGui::Selectable("app.cpp", true);
-        ImGui::Selectable("app_state.cpp");
-        ImGui::Selectable("editor_buffer.cpp");
+      if (ImGui::TreeNode("[dir] src  [offline]")) {
+        ImGui::Selectable("[C++] app.cpp  [modified]", true);
+        ImGui::Selectable("[C++] app_state.cpp  [in change]");
+        ImGui::Selectable("[C++] editor_buffer.cpp");
         ImGui::TreePop();
       }
       ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-      if (ImGui::TreeNode("docs")) {
-        ImGui::Selectable("ui");
+      if (ImGui::TreeNode("[dir] docs  [not here]")) {
+        ImGui::Selectable("[dir] ui  [conflicted]");
         ImGui::TreePop();
       }
-      ImGui::Selectable("CMakeLists.txt");
-      ImGui::Selectable("README.md");
+      ImGui::Selectable("[cmake] CMakeLists.txt  [online only]");
+      ImGui::Selectable("[md] README.md");
     } else if (repository_) {
       draw_repository_tree();
     } else {
@@ -4958,6 +5513,13 @@ void App::draw_panel(PanelId id) {
     }
     break;
   case PanelId::search:
+    if (ImGui::Button("Quick open", ImVec2(-1.0F, 0.0F))) {
+      invoke_navigation_action(NavigationAction::quick_open);
+    }
+    if (ImGui::Button("Symbol search", ImVec2(-1.0F, 0.0F))) {
+      invoke_navigation_action(NavigationAction::symbol_search);
+    }
+    ImGui::Separator();
     ImGui::InputTextWithHint("##repository-search", "Search this repository",
                              &sidebar_search_);
     ImGui::InputTextWithHint("##repository-replace", "Replace with",
@@ -5006,6 +5568,26 @@ void App::draw_panel(PanelId id) {
                                  : static_cast<std::size_t>(hit.column - 1)});
             ensure_cursor_visible();
           }
+        }
+      }
+    }
+    ImGui::Separator();
+    ImGui::TextUnformatted("Symbols");
+    ImGui::InputTextWithHint("##repository-symbol-filter", "Filter symbols",
+                             &symbol_search_query_);
+    if (!repository_) {
+      ImGui::TextDisabled("Open a repository to search symbols.");
+    } else if (repository_->navigation_loading()) {
+      ImGui::TextDisabled("Indexing libliquid symbol records...");
+    } else {
+      for (const auto &match : rank_symbols(repository_->navigation_symbols(),
+                                            symbol_search_query_, 12)) {
+        const auto &symbol = repository_->navigation_symbols()[match.index];
+        const auto label = symbol.name + "  " + symbol.path.generic_string() +
+                           "##side-" + std::to_string(match.index);
+        if (ImGui::Selectable(label.c_str())) {
+          open_navigation_location({symbol.path, symbol.range.start_line,
+                                    symbol.range.start_column});
         }
       }
     }
@@ -5108,7 +5690,7 @@ void App::draw_editor_area() {
     const auto available = ImGui::GetContentRegionAvail();
     ImGui::SetCursorPosY(std::max(available.y * 0.28F, design::space8));
     ImGui::SetCursorPosX(std::max(available.x * 0.16F, design::space8));
-    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[ui_font_index_ + 3]);
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[heading_font_index_]);
     ImGui::TextUnformatted("liquify");
     ImGui::PopFont();
     ImGui::TextDisabled("The IDE for liquid");
@@ -5273,8 +5855,9 @@ void App::draw_clone_dialog() {
                               ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
-  ImGui::TextWrapped("Clone a lake repository through liquid's drive client. "
-                     "Offline failures remain available for retry.");
+  ImGui::TextWrapped(
+      "Clone a lake repository through liquid's drive client. Offline failures "
+      "remain available for retry.");
   ImGui::Spacing();
   ImGui::InputTextWithHint("Lake repository", "https://lake.example/repository",
                            &clone_remote_);
@@ -5429,28 +6012,80 @@ void App::draw_welcome() {
 }
 
 void App::draw_status_bar() {
-  const auto repository =
-      screenshot_mode() ? std::string{"orama/liquify"}
-                        : (options_.repository_path
-                               ? options_.repository_path->filename().string()
-                               : std::string{"No repository"});
-  ImGui::TextUnformatted(repository.c_str());
-  ImGui::SameLine();
-  const auto *screenshot =
-      options_.screenshot_state
-          ? find_screenshot_state(*options_.screenshot_state)
-          : nullptr;
-  ImGui::TextDisabled(screenshot != nullptr &&
-                              screenshot->view == ScreenshotView::editor_view
-                          ? "Editor view #32"
-                      : screenshot_mode() ? "Change #31"
-                                          : "Working change");
+  const auto graph =
+      editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
+  auto input = StatusBarInput{
+      .repository_open = repository_ != nullptr,
+      .daemon_running = editor_graph_ != nullptr,
+      .daemon_available = editor_graph_ != nullptr,
+      .sync_running = sync_was_running_,
+      .hydration_running =
+          hydration_was_running_ ||
+          (repository_ && repository_->loading_directory_count() > 0),
+      .build_running = graph.build_running,
+      .offline = repository_ && repository_->offline(),
+      .pending_uploads = repository_ ? repository_->pending_uploads() : 0,
+      .hydration_debt = repository_ ? repository_->hydration_debt() : 0,
+      .remote_bytes = repository_ ? repository_->remote_bytes() : 0,
+      .presence_count = repository_ ? repository_->presence_count() : 0,
+      .notification_count = panels_.notifications().size(),
+      .build_result = graph.build_result,
+      .current_change = repository_ ? std::string{repository_->current_change()}
+                                    : std::string{},
+      .branch =
+          repository_ ? std::string{repository_->branch()} : std::string{},
+      .session =
+          first_run_.session() ? first_run_.session()->actor : std::string{},
+  };
+  if (screenshot_mode() && editor_) {
+    input.repository_open = true;
+    input.daemon_running = true;
+    input.daemon_available = true;
+    input.build_result = "passed";
+    input.presence_count = 3;
+    input.current_change = "blake3:7f2a921bf67e";
+    input.branch = "issue-36-first-run";
+    input.session = "taap:1:ed25519:7YQ2M4";
+  }
+
+  const auto repository_name =
+      repository_ ? repository_->name() : std::string{"liquify"};
+  if (repository_ && ImGui::SmallButton(repository_name.c_str())) {
+    first_run_.return_to_welcome();
+  } else if (!repository_) {
+    ImGui::TextUnformatted(repository_name.c_str());
+  }
+  const auto segments = status_bar_segments(input);
+  for (const auto &segment : segments) {
+    ImGui::SameLine();
+    if (segment.ends_with("notifications") &&
+        panels_.latest_notification() != nullptr) {
+      if (ImGui::SmallButton(segment.c_str())) {
+        const auto *notification = panels_.latest_notification();
+        panels_.focus(notification->panel);
+        const auto placement = panels_.layout(notification->panel).placement;
+        shell_state_.sidebar_visible = placement == PanelPlacement::sidebar
+                                           ? true
+                                           : shell_state_.sidebar_visible;
+        shell_state_.bottom_panel_visible =
+            placement == PanelPlacement::bottom
+                ? true
+                : shell_state_.bottom_panel_visible;
+      }
+    } else if (segment == "Sign in") {
+      if (ImGui::SmallButton(segment.c_str())) {
+        begin_sign_in();
+      }
+    } else {
+      ImGui::TextDisabled("%s", segment.c_str());
+    }
+  }
   if (editor_) {
     const auto cursor = editor_->cursor();
     ImGui::SameLine();
-    ImGui::TextDisabled("Ln %zu, Col %zu", cursor.line + 1, cursor.byte + 1);
+    ImGui::TextDisabled("Ln %zu:%zu", cursor.line + 1, cursor.byte + 1);
     ImGui::SameLine();
-    ImGui::TextDisabled("%zu cursors · %s: %zu · %s", editor_->cursors().size(),
+    ImGui::TextDisabled("%zu cursors | %s:%zu | %s", editor_->cursors().size(),
                         editor_->preferences().indent_style == IndentStyle::tabs
                             ? "Tabs"
                             : "Spaces",
@@ -5459,17 +6094,6 @@ void App::draw_status_bar() {
   }
   if (const auto *notification = panels_.latest_notification()) {
     ImGui::PushID(notification->id.c_str());
-    ImGui::SameLine();
-    if (ImGui::SmallButton(notification->message.c_str())) {
-      panels_.focus(notification->panel);
-      const auto placement = panels_.layout(notification->panel).placement;
-      if (placement == PanelPlacement::sidebar) {
-        shell_state_.sidebar_visible = true;
-      } else if (placement == PanelPlacement::bottom) {
-        shell_state_.bottom_panel_visible = true;
-      }
-      persist_shell_state();
-    }
     if (notification->active && notification->total > 0) {
       ImGui::SameLine();
       const auto fraction = static_cast<float>(notification->completed) /
@@ -5495,8 +6119,7 @@ void App::draw_status_bar() {
           ? "Theme: system"
           : (preference == ThemePreference::dark ? "Theme: dark"
                                                  : "Theme: light");
-  const auto width = ImGui::CalcTextSize(theme).x + design::space6;
-  ImGui::SameLine(std::max(ImGui::GetWindowWidth() - width, 0.0F));
+  ImGui::SameLine();
   if (ImGui::SmallButton(theme)) {
     cycle_theme();
   }
@@ -5601,6 +6224,9 @@ void App::draw_contents() {
 
   draw_floating_panels();
   draw_command_palette();
+  draw_navigation_popups();
+  draw_repository_action_popup();
+  draw_navigation_results();
   draw_settings();
   draw_review_comment_popup();
   draw_structural_editing();
@@ -5659,8 +6285,8 @@ void App::render_editor() {
                              graph_snapshot.build_diagnostics.begin(),
                              graph_snapshot.build_diagnostics.end());
   auto *editor_font = ImGui::GetIO().Fonts->Fonts[editor_font_index_];
-  const auto &palette =
-      applied_dark_theme_ ? design::dark_palette : design::light_palette;
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
   const auto demo_syntax = screenshot_mode()
                                ? screenshot_syntax(editor_->text())
                                : std::vector<SyntaxSpan>{};
@@ -5692,7 +6318,8 @@ void App::render_editor() {
       visible_presence, graph_snapshot.drive,
       screenshot_mode() ? 1 : graph_snapshot.syntax_generation, editor_x_,
       editor_y_, editor_width_, editor_height_, scroll_line_, line_height_,
-      cell_width_, horizontal_scroll_, review_lines, comment_lines);
+      cell_width_, horizontal_scroll_, review_lines, comment_lines,
+      settings_.editor.whitespace);
   SDL_SetRenderClipRect(renderer_, nullptr);
   SDL_SetRenderScale(renderer_, old_scale_x, old_scale_y);
 }
@@ -5704,7 +6331,13 @@ void App::frame() {
   poll_review();
   poll_plugins();
   sync_panel_system();
-  if (applied_dark_theme_ != dark_theme_active()) {
+  const auto next_reduced_motion = system_reduced_motion();
+  if (next_reduced_motion != reduced_motion_) {
+    reduced_motion_ = next_reduced_motion;
+    apply_theme();
+  }
+  if (applied_dark_theme_ != dark_theme_active() ||
+      applied_high_contrast_ != high_contrast_active()) {
     apply_theme();
   }
   update_window_title();
@@ -5712,11 +6345,13 @@ void App::frame() {
   if (fonts_rebuild_requested_) {
     ImGui_ImplSDLRenderer3_DestroyFontsTexture();
     load_font_atlas(display_scale_);
-    ImGui_ImplSDLRenderer3_CreateFontsTexture();
     fonts_rebuild_requested_ = false;
   }
   ImGui_ImplSDLRenderer3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
+  if (screenshot_mode()) {
+    ImGui::GetIO().DeltaTime = 1.0F;
+  }
   ImGui::NewFrame();
   editor_visible_ = false;
 
@@ -5730,8 +6365,8 @@ void App::frame() {
   ImGui::End();
 
   ImGui::Render();
-  const auto &palette =
-      applied_dark_theme_ ? design::dark_palette : design::light_palette;
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
   SDL_SetRenderDrawColor(
       renderer_, static_cast<std::uint8_t>(palette.canvas.red * 255.0F),
       static_cast<std::uint8_t>(palette.canvas.green * 255.0F),
@@ -5808,6 +6443,11 @@ int App::run() {
           ImGui_ImplSDLRenderer3_CreateFontsTexture();
         }
       }
+      if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
+          event.window.windowID == SDL_GetWindowID(window_)) {
+        input_.cancel_composition();
+        input_.clear_drop_target();
+      }
       if (event.type == SDL_EVENT_TEXT_EDITING) {
         handle_composition(event.edit.text, event.edit.start,
                            event.edit.length);
@@ -5818,11 +6458,107 @@ int App::run() {
       if (event.type == SDL_EVENT_KEY_DOWN) {
         handle_key(event.key.key, static_cast<std::uint16_t>(event.key.mod));
       }
+      if (event.type == SDL_EVENT_DROP_POSITION) {
+        static_cast<void>(input_.update_drop_target(
+            {event.drop.x, event.drop.y}, repository_drop_rectangle_,
+            editor_drop_rectangle_));
+      }
+      if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
+        handle_file_drop(event.drop.data, {event.drop.x, event.drop.y});
+      }
+      if (event.type == SDL_EVENT_DROP_COMPLETE) {
+        input_.clear_drop_target();
+      }
 #if defined(__APPLE__) && defined(__OBJC__)
       if (event.type == SDL_EVENT_USER) {
-        const auto index = static_cast<std::size_t>(event.user.code);
-        if (index > 0 && index <= native_menu_commands_.size()) {
-          invoke_command(native_menu_commands_[index - 1]);
+        switch (event.user.code) {
+        case menu_save:
+          save_editor();
+          break;
+        case menu_palette:
+          command_palette_open_ = true;
+          break;
+        case menu_sidebar:
+          shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
+          persist_shell_state();
+          break;
+        case menu_panel:
+          shell_state_.bottom_panel_visible =
+              !shell_state_.bottom_panel_visible;
+          persist_shell_state();
+          break;
+        case menu_split:
+          shell_state_.editor_split = !shell_state_.editor_split;
+          persist_shell_state();
+          break;
+        case menu_theme:
+          cycle_theme();
+          break;
+        case menu_contrast:
+          toggle_high_contrast();
+          break;
+        case menu_copy:
+          copy_editor_selection(false);
+          break;
+        case menu_cut:
+          copy_editor_selection(true);
+          break;
+        case menu_paste:
+          paste_editor_clipboard();
+          break;
+        case menu_definition:
+          request_definition();
+          break;
+        case menu_hover:
+          request_hover();
+          break;
+        case menu_build:
+          request_build();
+          break;
+        case menu_tests:
+          request_tests();
+          break;
+        case menu_deploy:
+          request_deploy();
+          break;
+        case menu_next_hunk:
+          navigate_hunk(true);
+          break;
+        case menu_previous_hunk:
+          navigate_hunk(false);
+          break;
+        case menu_next_comment:
+          navigate_comment();
+          break;
+        case menu_expand_selection:
+          expand_structural_selection();
+          break;
+        case menu_shrink_selection:
+          shrink_structural_selection();
+          break;
+        case menu_quick_open:
+          invoke_navigation_action(NavigationAction::quick_open);
+          break;
+        case menu_symbol_search:
+          invoke_navigation_action(NavigationAction::symbol_search);
+          break;
+        case menu_references:
+          invoke_navigation_action(NavigationAction::find_references);
+          break;
+        case menu_call_hierarchy:
+          invoke_navigation_action(NavigationAction::call_hierarchy);
+          break;
+        case menu_open_recent:
+          invoke_navigation_action(NavigationAction::open_recent);
+          break;
+        case menu_back:
+          invoke_navigation_action(NavigationAction::back);
+          break;
+        case menu_forward:
+          invoke_navigation_action(NavigationAction::forward);
+          break;
+        default:
+          break;
         }
       }
 #endif
