@@ -22,8 +22,12 @@ separate retry states; lake unavailability is normal offline operation
 `liquify <path>` opens a liquid repository through the public coroutine API, off the render
 thread, renders its root entries, loads nested trees on expansion, and opens blobs into an
 editable in-memory buffer; save writes through libliquid as a drip. Unreadable repositories show
-liquid's error and make `--print-tree` exit non-zero. The standard input mode is non-modal and a
-modal command/insert mode is available.
+liquid's error and make `--print-tree` exit non-zero. A background index classifies every path,
+adds libliquid drive and repository change annotations, and retains libliquid symbol records.
+Quick Open, Symbol Search, definitions, references, available call relationships, breadcrumbs,
+recent locations, history traversal, and repository context actions share one registered default-key
+command set ([`../ui/navigation.md`](../ui/navigation.md)). The standard input mode is non-modal and
+a modal command/insert mode is available.
 `--smoke` scrolls and edits a 50,000-line buffer, reports frame and typing latency, and exits 0
 ([`../app-shell/README.md`](../app-shell/README.md), [`../editor/README.md`](../editor/README.md)).
 SDL composition handles CJK input methods and dead keys without editing until commit. Rich and
@@ -44,8 +48,8 @@ The searchable settings surface reads a user `.liquid` file plus repository over
 theme, fonts, editor behavior, keymaps, optional AI, lake accounts and default-off telemetry live.
 Parser and typed validation errors remain inline, group reset is local, and credential values never
 enter the settings model ([`../ui/settings.md`](../ui/settings.md)).
-`--screenshot` renders the fixed welcome, recovery, repository, C++ editor, panel registry and
-settings states in light and
+`--screenshot` renders the fixed welcome, recovery, repository, navigation, C++ editor, panel
+registry and settings states in light and
 dark through a headless software renderer; the committed image set and pixel tests are described
 in [`../ui/README.md`](../ui/README.md).
 

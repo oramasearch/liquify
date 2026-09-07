@@ -40,7 +40,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 CTest holds the GoogleTest cases discovered from `liquify-tests` (buffer, text layout, repository
-view, app-shell state, screenshot capture, stub trees, interactive analysis, editor graph,
+view, navigation, app-shell state, screenshot capture, stub trees, interactive analysis,
+editor graph,
 structural edits, review, assistant, plugins and version), the design-token gate, plus
 `liquify-print-tree-unreadable`, which proves that an unreadable repository
 makes `--print-tree` exit non-zero with liquid's error. Screenshot cases render the editor and a
@@ -66,7 +67,8 @@ The commands are described in [`../app-shell/README.md`](../app-shell/README.md)
 in [`../editor/structural-editing.md`](../editor/structural-editing.md), `--lake` in
 [`../editor/review.md`](../editor/review.md), and the `--smoke` measurements in
 [`../editor/README.md`](../editor/README.md). The screenshot registry and full refresh command are
-in [`../ui/README.md`](../ui/README.md).
+in [`../ui/README.md`](../ui/README.md); navigation commands and bindings are in
+[`../ui/navigation.md`](../ui/navigation.md).
 
 ## The full local proof
 

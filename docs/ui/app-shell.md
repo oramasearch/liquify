@@ -8,10 +8,12 @@ divider is interactive.
 ## Layout and registered panels
 
 The activity bar switches among Repository, Search, Review, Build, and Multiplayer. Repository
-continues to render `RepositoryView`; Review continues to render `ReviewController`; Build invokes
-the existing editor-graph build, test, and deploy requests. Search runs liquid repository queries
-and opens results at their source locations. Multiplayer displays the presence records used by the
-editor gutter.
+renders the annotated `RepositoryView` tree and Search filters its libliquid symbol records;
+Review continues to render `ReviewController`; Build invokes the existing editor-graph build,
+test, and deploy requests. Search also runs liquid repository queries and opens results at their
+source locations. Multiplayer displays the presence records used by the editor gutter. Quick
+Open, Symbol Search, recent locations, references, and call hierarchy use modal or result windows
+over the same shell ([`navigation.md`](navigation.md)).
 
 The bottom area hosts Diagnostics, Build output, Assistant, or Plugins. Search inputs and results
 share the registered Search panel, which defaults to the sidebar and can move into the bottom area.
@@ -53,19 +55,17 @@ The source and token gate are described in [`design-system.md`](design-system.md
 On macOS, CMake compiles `src/app.cpp` as Objective-C++ so it remains the only SDL/ImGui
 translation unit while installing an AppKit menu bar. File, Edit, Selection, View, Go, Run, and
 Review are native top-level groups. Cmd-S saves, Cmd-Shift-P opens the palette, Cmd-B toggles the
-sidebar, Cmd-J toggles the bottom panel, Cmd-backslash toggles the editor split, Cmd-Shift-T cycles
-the theme, and Cmd-Shift-H toggles high contrast. Native Cut, Copy, and Paste use the editor's rich
-and plain clipboard path. F7, F8, F9, F12, and F1 retain their existing build, test, deploy,
-definition, and hover behavior. AppKit accessibility elements label the shell's activity, panel,
-editor and theme controls; [`accessibility.md`](accessibility.md) records keyboard order and OS
-preferences.
+sidebar, Cmd-J toggles the bottom panel, Cmd-backslash toggles the editor split, and Cmd-Shift-T
+cycles the theme. F7, F8, F9, F12, and F1 retain their existing build, test, deploy, definition,
+and hover behavior. Cmd-P opens paths, Cmd-T opens symbols, Cmd-R opens recent locations, and the
+complete cross-platform default-key table is in [`navigation.md`](navigation.md).
 
 The native window title is `<repository> — <current change> — liquify`; an open review replaces
 `Working change` with its change identifier.
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects fifteen seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects sixteen seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -94,12 +94,14 @@ The committed evidence is:
 | Plugins | [light](screenshots/plugins-light.png) | [dark](screenshots/plugins-dark.png) |
 | Structural editing | [light](screenshots/structural-editing-light.png) | [dark](screenshots/structural-editing-dark.png) |
 | Panel system | [light](screenshots/panels-light.png) | [dark](screenshots/panels-dark.png) |
+| Navigation | [light](screenshots/navigation-light.png) | [dark](screenshots/navigation-dark.png) |
 | Settings | [light](screenshots/settings-light.png) | [dark](screenshots/settings-dark.png) |
 | Accessibility | [light](screenshots/accessibility-light.png) | [dark](screenshots/accessibility-dark.png) |
 
 `Screenshot.EditorRendersSelectedSource`, `Screenshot.EditorViewShowsSearchGutterAndBothThemes`,
-`Screenshot.PanelRendersDiagnostics` and
-`Screenshot.AccessibilityStateShowsHighContrastFocusInBothThemes` read the
-generated PNG files and check stable shell pixels; `PanelRegistry` and `AppShellState` tests cover
-registry behavior, repository-local round trips, version 1 migration, reset, and invalid state. The
-screenshot script checks the complete matrix and each capture command reports its dimensions.
+`Screenshot.PanelRendersDiagnostics`, `Screenshot.NavigationRendersQuickOpenAndAnnotatedTree`,
+`Screenshot.SettingsRenderGroupedControlsInBothThemes`, and
+`Screenshot.AccessibilityStateShowsHighContrastFocusInBothThemes` read the generated PNG files and check
+stable shell pixels; `PanelRegistry` and `AppShellState` tests cover registry behavior,
+repository-local round trips, version 1 migration, reset, and invalid state. The screenshot script
+checks the complete matrix and each capture command reports its dimensions.

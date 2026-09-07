@@ -17,6 +17,8 @@ through libliquid as a drip; C and C++ buffers add graph-backed diagnostics, nav
 completion, structural editing, and F7, F8 and F9 build, test and deploy through the attached
 daemon. The editor adds multi-cursor and column editing, repository-configured indentation,
 liquid syntax and collaboration gutters, search/replace, and operation-log undo/redo.
+Quick Open, Symbol Search, definitions, references, call hierarchy, breadcrumbs, recent
+locations, history traversal, and repository context actions share registered default-key commands.
 `--lake` adds review in place with cursor-anchored comments. Multiplayer surfaces presence,
 per-line attribution and semantic lease controls, including lease events delivered to native
 plugins. Native plugins register queries, commands and panels, and the assistant is off by default

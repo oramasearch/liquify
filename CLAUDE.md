@@ -8,22 +8,26 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Accessible retained GPU editor with graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
+**Retained GPU editor with indexed repository and graph-symbol navigation, graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
 `./build/liquify` opens a repository front door with local open, lake clone, recent repositories,
 local TAAP identity and additional-window actions. Repositories switch without restarting.
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
-loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
-libliquid and produces a drip.
+loads nested trees when expanded, indexes all paths and libliquid symbol records, annotates file
+kind plus drive and change state, and opens blobs into an editable in-memory buffer; save calls
+libliquid and produces a drip. Quick Open, Symbol Search, definitions, references, call hierarchy,
+breadcrumbs, recent locations, and back/forward share one navigation action registry with default
+bindings; repository rows expose open, rename, move, new-file, and reveal actions.
 The standard input mode is non-modal and a modal command/insert mode is available. Multi-cursor
 and column edits, repository indentation, liquid syntax/folds, collaboration gutters,
 search/replace and operation-log history are part of the editor view. Unreadable
 repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
 reports frame and typing latency, and exits 0. Unreadable local repositories and unreachable lake
-clones have distinct retry states. `liquify --screenshot` renders the fixed welcome, recovery,
-repository, C++ editor and panel registry in light and dark through a headless software renderer,
-with committed PNG proof and pixel-region tests. liquid is pinned at `modules/liquid` through its
-persisted demand-driven query graph, text-anchor mapping, syntax modules, attribution, presence,
-operation history, and coroutine-native forge review client.
+clones have distinct retry states. `liquify --screenshot` renders fixed welcome, recovery,
+repository, navigation, settings, C++ editor, complete editor view and panel registry states in
+light and dark through a headless software renderer, with committed PNG proof and pixel-region
+tests. liquid is pinned at `modules/liquid` through its persisted demand-driven query graph,
+text-anchor mapping, syntax modules, attribution, presence, operation history, and coroutine-native
+forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
 embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The
 light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel,
