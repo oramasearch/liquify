@@ -165,6 +165,66 @@ static void install_native_menu() {
   [NSApp setMainMenu:main_menu];
 }
 
+static NSString* accessibility_role(liquify::AccessibilityRole role) {
+    switch (role) {
+    case liquify::AccessibilityRole::group:
+        return NSAccessibilityGroupRole;
+    case liquify::AccessibilityRole::button:
+        return NSAccessibilityButtonRole;
+    case liquify::AccessibilityRole::text_area:
+        return NSAccessibilityTextAreaRole;
+    }
+    return NSAccessibilityGroupRole;
+}
+
+static void install_native_accessibility(SDL_Window* window) {
+    const auto properties = SDL_GetWindowProperties(window);
+    auto* native_window = static_cast<NSWindow*>(
+        SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr));
+    if (native_window == nullptr || native_window.contentView == nullptr) {
+        return;
+    }
+    auto* content = native_window.contentView;
+    content.accessibilityElement = YES;
+    content.accessibilityRole = NSAccessibilityGroupRole;
+    content.accessibilityLabel = @"liquify editor";
+    native_accessibility_elements = [[NSMutableArray alloc] init];
+    auto y = content.bounds.size.height - 36.0;
+    for (const auto& node : liquify::accessibility_nodes()) {
+        auto* label = [[NSString alloc] initWithBytes:node.label.data()
+                                               length:node.label.size()
+                                             encoding:NSUTF8StringEncoding];
+        auto* identifier = [[NSString alloc] initWithBytes:node.id.data()
+                                                    length:node.id.size()
+                                                  encoding:NSUTF8StringEncoding];
+        auto* help = [[NSString alloc] initWithBytes:node.help.data()
+                                              length:node.help.size()
+                                            encoding:NSUTF8StringEncoding];
+        NSAccessibilityElement* element =
+            [NSAccessibilityElement accessibilityElementWithRole:accessibility_role(node.role)
+                                                           frame:NSZeroRect
+                                                           label:label
+                                                          parent:content];
+        element.accessibilityIdentifier = identifier;
+        element.accessibilityHelp = help;
+        element.accessibilityFrameInParentSpace =
+            NSMakeRect(0.0, y, content.bounds.size.width, 32.0);
+        [native_accessibility_elements addObject:element];
+        y = std::max(y - 34.0, 0.0);
+    }
+    content.accessibilityChildren = native_accessibility_elements;
+    content.accessibilityChildrenInNavigationOrder =
+        (NSArray<id<NSAccessibilityElement>>*)native_accessibility_elements;
+}
+
+static bool system_high_contrast() {
+    return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldIncreaseContrast;
+}
+
+static bool system_reduced_motion() {
+    return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+}
+
 #endif
 
 namespace liquify {
@@ -225,6 +285,77 @@ auto imgui_color(design::Rgba color) -> ImVec4 {
 
 auto packed_color(design::Rgba color) -> ImU32 {
   return ImGui::ColorConvertFloat4ToU32(imgui_color(color));
+}
+
+auto effective_palette(bool dark, bool high_contrast) -> design::Palette {
+    auto palette = dark ? design::dark_palette : design::light_palette;
+    if (!high_contrast) {
+        return palette;
+    }
+    palette.canvas = dark ? design::dark_palette.canvas : design::light_palette.surface;
+    palette.surface = palette.canvas;
+    palette.layer = dark ? design::dark_palette.surface : design::light_palette.canvas;
+    palette.layer_hover = palette.selected;
+    palette.border_subtle = palette.text_primary;
+    palette.border_strong = palette.text_primary;
+    palette.border_interactive = palette.focus;
+    palette.text_disabled = palette.text_primary;
+    palette.text_secondary = palette.text_primary;
+    palette.text_tertiary = palette.text_primary;
+    return palette;
+}
+
+#if !defined(__APPLE__) || !defined(__OBJC__)
+auto system_high_contrast() -> bool {
+    return false;
+}
+
+auto system_reduced_motion() -> bool {
+    return false;
+}
+#endif
+
+constexpr auto clipboard_plain_utf8 = "text/plain;charset=utf-8";
+constexpr auto clipboard_plain = "text/plain";
+constexpr auto clipboard_html = "text/html";
+
+const void* SDLCALL clipboard_data(void* userdata, const char* mime_type, std::size_t* size) {
+    const auto* payload = static_cast<const ClipboardPayload*>(userdata);
+    const auto type = std::string_view{mime_type == nullptr ? "" : mime_type};
+    const auto* value = type == clipboard_html ? &payload->html : &payload->plain_text;
+    *size = value->size();
+    return value->data();
+}
+
+void SDLCALL clipboard_cleanup(void* userdata) {
+    delete static_cast<ClipboardPayload*>(userdata);
+}
+
+auto clipboard_value(std::string_view mime_type) -> std::optional<std::string> {
+    auto size = std::size_t{};
+    auto* data = SDL_GetClipboardData(std::string(mime_type).c_str(), &size);
+    if (data == nullptr) {
+        return std::nullopt;
+    }
+    auto value = std::string(static_cast<const char*>(data), size);
+    SDL_free(data);
+    return value;
+}
+
+auto cjk_font_path() -> std::filesystem::path {
+#if defined(__APPLE__)
+    return "/System/Library/Fonts/PingFang.ttc";
+#elif defined(_WIN32)
+    return "C:/Windows/Fonts/msyh.ttc";
+#else
+    for (const auto* path : {"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"}) {
+        if (std::filesystem::exists(path)) {
+            return path;
+        }
+    }
+    return {};
+#endif
 }
 
 auto smoke_text() -> std::string {
@@ -1633,6 +1764,12 @@ void App::reset_settings(SettingsGroup group) {
   persist_settings();
 }
 
+void App::toggle_high_contrast() {
+    shell_state_.high_contrast = !shell_state_.high_contrast;
+    apply_theme();
+    persist_shell_state();
+}
+
 void App::persist_shell_state() {
   if (!options_.repository_path || screenshot_mode()) {
     return;
@@ -2654,6 +2791,114 @@ void App::handle_text(std::string_view text) {
   }
 }
 
+void App::handle_composition(std::string_view text, int selection_start, int selection_length) {
+    if (!editor_ || !editor_focused_ || review_diff_open_ ||
+        editor_->mode() == EditingMode::modal_command) {
+        input_.cancel_composition();
+        return;
+    }
+    input_.update_composition(std::string(text), selection_start, selection_length);
+}
+
+void App::copy_editor_selection(bool cut) {
+    if (!editor_ || !editor_focused_) {
+        return;
+    }
+    const auto selection = editor_->selection();
+    if (!selection) {
+        return;
+    }
+    const auto source = editor_->text();
+    const auto first = editor_->byte_offset(selection->begin);
+    const auto last = editor_->byte_offset(selection->end);
+    const auto selected = source.substr(first, last - first);
+    auto* payload = new ClipboardPayload(
+        make_clipboard_payload(selected, std::string(editor_->display_path())));
+    const char* mime_types[] = {clipboard_plain_utf8, clipboard_plain, clipboard_html};
+    if (!SDL_SetClipboardData(
+            clipboard_data, clipboard_cleanup, payload, mime_types, std::size(mime_types))) {
+        delete payload;
+        editor_status_ = std::string{"clipboard copy failed: "} + SDL_GetError();
+        return;
+    }
+    if (!cut || review_diff_open_ || !editor_mutation_allowed()) {
+        return;
+    }
+    const auto change = editor_->backspace();
+    if (change) {
+        apply_change(change->first_line, change->erased_lines, change->inserted_lines);
+    }
+}
+
+void App::paste_editor_clipboard() {
+    if (!editor_ || !editor_focused_ || review_diff_open_ || !editor_mutation_allowed()) {
+        return;
+    }
+    auto plain = std::optional<std::string>{};
+    if (SDL_HasClipboardData(clipboard_plain_utf8)) {
+        plain = clipboard_value(clipboard_plain_utf8);
+    } else if (SDL_HasClipboardData(clipboard_plain)) {
+        plain = clipboard_value(clipboard_plain);
+    } else if (SDL_HasClipboardText()) {
+        auto* value = SDL_GetClipboardText();
+        if (value != nullptr) {
+            plain = value;
+            SDL_free(value);
+        }
+    }
+    auto html = std::optional<std::string>{};
+    if (!plain && SDL_HasClipboardData(clipboard_html)) {
+        html = clipboard_value(clipboard_html);
+    }
+    const auto value =
+        preferred_clipboard_text(plain ? std::optional<std::string_view>{*plain} : std::nullopt,
+                                 html ? std::optional<std::string_view>{*html} : std::nullopt);
+    if (!value) {
+        editor_status_ = "clipboard does not contain supported text";
+        return;
+    }
+    handle_text(*value);
+}
+
+void App::handle_file_drop(const std::filesystem::path& source, InputPoint point) {
+    const auto target =
+        input_.update_drop_target(point, repository_drop_rectangle_, editor_drop_rectangle_);
+    if (!options_.repository_path || !repository_) {
+        editor_status_ = "open a repository before dropping files";
+        return;
+    }
+    std::error_code filesystem_error;
+    if (!std::filesystem::is_regular_file(source, filesystem_error)) {
+        editor_status_ = "only regular files can be dropped";
+        return;
+    }
+    if (target == DropTarget::none) {
+        editor_status_ = "drop the file on the repository tree or source editor";
+        return;
+    }
+    auto destination = source.filename();
+    if (target == DropTarget::editor && editor_) {
+        destination = std::filesystem::path(editor_->display_path()).parent_path() / destination;
+    }
+    auto opened = liquid::runtime::block_on(liquid::repository::open(*options_.repository_path));
+    if (!opened) {
+        editor_status_ = opened.error().message;
+        return;
+    }
+    auto written =
+        liquid::runtime::block_on(opened->write_file(destination.generic_string(), source));
+    if (!written) {
+        editor_status_ = written.error().message;
+        return;
+    }
+    repository_ = std::make_unique<RepositoryView>(RepositoryView::open(*options_.repository_path));
+    if (target == DropTarget::editor) {
+        const auto path = destination.generic_string();
+        open_editor(path, "drop:" + path);
+    }
+    editor_status_ = "imported " + destination.generic_string();
+}
+
 void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
   const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
   const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
@@ -3024,6 +3269,65 @@ void App::position_cursor(float x, float y, bool extend_selection) {
   const auto &layout = layouts_->line(line, editor_->line(line));
   const auto byte = layout.byte_for_column(column, editor_->line(line).size());
   editor_->set_cursor({line, byte}, extend_selection);
+}
+
+void App::update_text_input_area() {
+    if (!editor_ || !editor_visible_) {
+        return;
+    }
+    const auto cursor = editor_->cursor();
+    const auto row = cursor.line >= scroll_line_ ? cursor.line - scroll_line_ : 0;
+    const auto& layout = layouts_->line(cursor.line, editor_->line(cursor.line));
+    const auto column = layout.column_for_byte(cursor.byte);
+    const auto x = editor_x_ + editor_gutter_width + editor_padding + column * cell_width_ -
+                   horizontal_scroll_;
+    const auto y = editor_y_ + static_cast<float>(row) * line_height_;
+    const auto area = SDL_Rect{static_cast<int>(x),
+                               static_cast<int>(y),
+                               std::max(static_cast<int>(cell_width_), 1),
+                               std::max(static_cast<int>(line_height_), 1)};
+    SDL_SetTextInputArea(window_, &area, 0);
+}
+
+void App::draw_composition() {
+    const auto& composition = input_.composition();
+    if (!composition.active() || !editor_) {
+        return;
+    }
+    const auto cursor = editor_->cursor();
+    if (cursor.line < scroll_line_ || cursor.line >= scroll_line_ + visible_lines_) {
+        return;
+    }
+    const auto& layout = layouts_->line(cursor.line, editor_->line(cursor.line));
+    const auto column = layout.column_for_byte(cursor.byte);
+    const auto x = editor_x_ + editor_gutter_width + editor_padding + column * cell_width_ -
+                   horizontal_scroll_;
+    const auto y = editor_y_ + static_cast<float>(cursor.line - scroll_line_) * line_height_;
+    const auto selection_start = utf8_byte_offset(composition.text, composition.selection_start);
+    const auto selection_end = utf8_byte_offset(
+        composition.text, composition.selection_start + composition.selection_length);
+    const auto prefix_width =
+        ImGui::CalcTextSize(composition.text.data(), composition.text.data() + selection_start).x;
+    const auto selection_width = ImGui::CalcTextSize(composition.text.data() + selection_start,
+                                                     composition.text.data() + selection_end)
+                                     .x;
+    const auto text_size = ImGui::CalcTextSize(composition.text.c_str());
+    const auto palette = effective_palette(applied_dark_theme_, applied_high_contrast_);
+    auto* draw_list = ImGui::GetWindowDrawList();
+    draw_list->AddRectFilled(ImVec2(x, y),
+                             ImVec2(x + text_size.x + design::space1, y + line_height_),
+                             packed_color(palette.overlay));
+    if (selection_width > 0.0F) {
+        draw_list->AddRectFilled(ImVec2(x + prefix_width, y),
+                                 ImVec2(x + prefix_width + selection_width, y + line_height_),
+                                 packed_color(palette.selected));
+    }
+    draw_list->AddText(
+        ImVec2(x, y + 2.0F), packed_color(palette.text_primary), composition.text.c_str());
+    draw_list->AddLine(ImVec2(x, y + line_height_ - 1.0F),
+                       ImVec2(x + text_size.x, y + line_height_ - 1.0F),
+                       packed_color(palette.focus),
+                       applied_high_contrast_ ? 3.0F : 2.0F);
 }
 
 void App::draw_repository_tree() {

@@ -26,6 +26,7 @@ Every screen has light and dark variants:
 | Panel system | Docked, editor-tab and floating panels with shared progress | [`panels-light.png`](screenshots/panels-light.png) | [`panels-dark.png`](screenshots/panels-dark.png) |
 | Navigation | Annotated tree and Quick Open | [`navigation-light.png`](screenshots/navigation-light.png) | [`navigation-dark.png`](screenshots/navigation-dark.png) |
 | Settings | Searchable groups, repository scope, masked credentials and privacy defaults | [`settings-light.png`](screenshots/settings-light.png) | [`settings-dark.png`](screenshots/settings-dark.png) |
+| Accessibility | High contrast, editor focus and active CJK composition | [`accessibility-light.png`](screenshots/accessibility-light.png) | [`accessibility-dark.png`](screenshots/accessibility-dark.png) |
 
 The names in the table are the command-line registry. An unknown name exits 2 and prints every
 valid name. `--screenshot` and `--out` are required together and cannot be combined with a

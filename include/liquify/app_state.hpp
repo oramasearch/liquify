@@ -19,6 +19,7 @@ struct AppShellState {
     float editor_split_ratio = 0.58F;
     ThemePreference theme = ThemePreference::system;
     PanelRegistryState panel_layout = default_panel_registry_state();
+    bool high_contrast = false;
     bool sidebar_visible = true;
     bool bottom_panel_visible = true;
     bool editor_split = false;

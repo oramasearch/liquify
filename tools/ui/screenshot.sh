@@ -38,6 +38,8 @@ states=(
     navigation-dark
     settings-light
     settings-dark
+    accessibility-light
+    accessibility-dark
 )
 
 if [[ ! -x $binary ]]; then

@@ -92,5 +92,15 @@ TEST(Screenshot, SettingsRenderGroupedControlsInBothThemes) {
                                           {18, 18, 22, 255}, 4, 100));
 }
 
+TEST(Screenshot, AccessibilityStateShowsHighContrastFocusInBothThemes) {
+    const auto light = render_state("accessibility-light");
+    const auto dark = render_state("accessibility-dark");
+
+    EXPECT_TRUE(
+        test::region_contains_color(light, {320, 100, 950, 660}, {15, 98, 254, 255}, 1, 1'000));
+    EXPECT_TRUE(
+        test::region_contains_color(dark, {320, 100, 950, 660}, {107, 152, 255, 255}, 1, 1'000));
+}
+
 } // namespace
 } // namespace liquify

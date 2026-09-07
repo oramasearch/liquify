@@ -25,11 +25,12 @@ sync, repository hydration, and assistant progress.
 
 For an open repository, `.liquid/liquify-state.json` stores sidebar width and visibility, bottom
 panel height and visibility, editor split ratio and visibility, panel placements, visibility,
-order, focus, floating bounds and prior dock, plus a compatibility copy of the theme preference.
-The `.liquid` settings files described in [`settings.md`](settings.md) are authoritative. Version 1
-selection fields migrate into version 2 panel state. Invalid state reports an editor status message
-and uses bounded defaults. Reset layout restores the shell and panel defaults without changing the
-theme preference.
+order, focus, floating bounds and prior dock, plus a compatibility copy of the theme preference and
+the high-contrast preference. The `.liquid` settings files described in
+[`settings.md`](settings.md) are authoritative for the theme. Version 1 selection fields migrate
+into version 2 panel state; version 3 adds high contrast. Invalid state reports an editor status
+message and uses bounded defaults. Reset layout restores the shell and panel defaults without
+changing either color preference.
 
 ## Design, fonts, and themes
 
@@ -38,10 +39,13 @@ theme preference.
 palettes come from the upstream token modes. The preference cycles system → light → dark; system
 mode reads `SDL_GetSystemTheme()` every frame, so an OS change is reflected at runtime. The
 searchable settings surface applies theme, supported font sizes, editor behavior, command bindings,
-assistant configuration, lake accounts, and telemetry without reopening the repository.
+assistant configuration, lake accounts, and telemetry without reopening the repository. A separate
+high-contrast preference increases text, border, selection and focus contrast, and macOS Increase
+Contrast enables it automatically. macOS Reduce Motion removes hover transition delay.
 
 IBM Plex Sans is loaded at 11, 12, 14, 16, 20, 24, and 32 logical pixels. IBM Plex Mono is loaded
 at 12, 14, and 16 logical pixels and backs both retained editor geometry and the secondary split.
+A platform font's common CJK ranges are merged into the UI and editor faces when available.
 Dear ImGui's rasterizer density follows `SDL_GetWindowDisplayScale()` at startup and after a
 display-scale event, keeping the logical scale while rebuilding sharper glyphs for dense screens.
 The source and token gate are described in [`design-system.md`](design-system.md).
@@ -61,7 +65,7 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects fourteen seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects fifteen seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -92,6 +96,7 @@ The committed evidence is:
 | Panel system | [light](screenshots/panels-light.png) | [dark](screenshots/panels-dark.png) |
 | Navigation | [light](screenshots/navigation-light.png) | [dark](screenshots/navigation-dark.png) |
 | Settings | [light](screenshots/settings-light.png) | [dark](screenshots/settings-dark.png) |
+| Accessibility | [light](screenshots/accessibility-light.png) | [dark](screenshots/accessibility-dark.png) |
 
 `Screenshot.EditorRendersSelectedSource`, `Screenshot.EditorViewShowsSearchGutterAndBothThemes`
 `Screenshot.PanelRendersDiagnostics`, and

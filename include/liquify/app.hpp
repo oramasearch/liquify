@@ -12,6 +12,7 @@
 
 #include "liquify/app_state.hpp"
 #include "liquify/editor_model.hpp"
+#include "liquify/input.hpp"
 #include "liquify/first_run.hpp"
 #include "liquify/multiplayer.hpp"
 #include "liquify/navigation.hpp"
