@@ -12,11 +12,18 @@ over one pinned libliquid.
 
 ## Shell and repository
 
+With no path, the shell is a repository front door: open a local folder, clone through liquid's
+drive client, reopen one of eight persisted recent repositories, establish a public TAAP identity
+session, or create another process-backed window. Opening a different repository replaces its
+services in the current process. Unreadable local repositories and unreachable lake remotes have
+separate retry states; lake unavailability is normal offline operation
+([`../ui/first-run.md`](../ui/first-run.md)).
+
 `liquify <path>` opens a liquid repository through the public coroutine API, off the render
 thread, renders its root entries, loads nested trees on expansion, and opens blobs into an
 editable in-memory buffer; save writes through libliquid as a drip. Unreadable repositories show
-liquid's error and make `--print-tree` exit non-zero; `liquify` with no path retains the hello
-state. The standard input mode is non-modal and a modal command/insert mode is available.
+liquid's error and make `--print-tree` exit non-zero. The standard input mode is non-modal and a
+modal command/insert mode is available.
 `--smoke` scrolls and edits a 50,000-line buffer, reports frame and typing latency, and exits 0
 ([`../app-shell/README.md`](../app-shell/README.md), [`../editor/README.md`](../editor/README.md)).
 The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
@@ -24,19 +31,20 @@ its gate verifies source hashes and rejects stale generated output. Those roles 
 light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom
 panel, floating panels and status bar. One registry supplies panel metadata, commands, placement,
 focus, state and notifications; each surface moves among dock areas, floats and re-docks. Divider
-sizes and complete panel layouts persist per repository and can be reset; one status channel
-reports build, saved-drip sync, repository hydration and assistant progress. macOS installs native
+sizes and complete panel layouts persist per repository and can be reset. The status bar reports
+daemon, sync, hydration, build, presence, current change, branch, notifications and identity.
+macOS installs native
 command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.md),
 [`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
-The shell, editor, panels, and plugins register into one command model used by the fuzzy palette,
-recent-command list, resolved keyboard dispatch, conflict reporting, native macOS menus,
-`--command`, and generated command documentation. Global and repository `settings.liquid` files
-layer typed keymap overrides ([`../ui/commands.md`](../ui/commands.md)). The searchable settings
-surface reads a user `.liquid` file plus repository overrides and applies theme, fonts, editor
-behavior, keymaps, optional AI, lake accounts and default-off telemetry live. Parser and typed
-validation errors remain inline, group reset is local, and credential values never enter the
-settings model ([`../ui/settings.md`](../ui/settings.md)).
-`--screenshot` renders the fixed welcome, repository, C++ editor and panel registry in light and
+The shared command registry powers fuzzy palette search, recent commands, platform key bindings,
+keymap conflict reporting, native menus and headless `--command` invocation
+([`../ui/commands.md`](../ui/commands.md)).
+The searchable settings surface reads a user `.liquid` file plus repository overrides and applies
+theme, fonts, editor behavior, keymaps, optional AI, lake accounts and default-off telemetry live.
+Parser and typed validation errors remain inline, group reset is local, and credential values never
+enter the settings model ([`../ui/settings.md`](../ui/settings.md)).
+`--screenshot` renders the fixed welcome, recovery, repository, C++ editor, panel registry and
+settings states in light and
 dark through a headless software renderer; the committed image set and pixel tests are described
 in [`../ui/README.md`](../ui/README.md).
 

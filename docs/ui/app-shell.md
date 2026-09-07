@@ -47,9 +47,10 @@ The source and token gate are described in [`design-system.md`](design-system.md
 ## macOS conventions
 
 On macOS, CMake compiles `src/app.cpp` as Objective-C++ so it remains the only SDL/ImGui
-translation unit while installing an AppKit menu bar. The menu bar is generated from the same
-top-level registry groups, active bindings, and plugin commands shown by the palette. Cmd-S saves,
-Cmd-Shift-P opens the palette, Cmd-B toggles the
+translation unit while installing an AppKit menu bar. File, Edit, Selection, View, Go, Run, and
+Review are native top-level groups. The command registry also supplies the fuzzy palette, resolved
+platform bindings, recent-command ordering, typed `.liquid` keymap overrides, and plugin menu
+entries; [`commands.md`](commands.md) is its generated reference. Cmd-S saves, Cmd-Shift-P opens the palette, Cmd-B toggles the
 sidebar, Cmd-J toggles the bottom panel, Cmd-backslash toggles the editor split, and Cmd-Shift-T
 cycles the theme. F7, F8, F9, F12, and F1 retain their existing build, test, deploy, definition,
 and hover behavior.
@@ -59,7 +60,7 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects thirteen seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects fifteen seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -76,6 +77,8 @@ The committed evidence is:
 | State | Light | Dark |
 |---|---|---|
 | Welcome | [light](screenshots/welcome-light.png) | [dark](screenshots/welcome-dark.png) |
+| Unreadable repository | [light](screenshots/repository-unreadable-light.png) | [dark](screenshots/repository-unreadable-dark.png) |
+| Lake offline | [light](screenshots/lake-offline-light.png) | [dark](screenshots/lake-offline-dark.png) |
 | Repository | [light](screenshots/repository-light.png) | [dark](screenshots/repository-dark.png) |
 | Editor tabs and split | [light](screenshots/editor-cpp-light.png) | [dark](screenshots/editor-cpp-dark.png) |
 | Editor view | [light](screenshots/editor-view-light.png) | [dark](screenshots/editor-view-dark.png) |
@@ -89,10 +92,8 @@ The committed evidence is:
 | Panel system | [light](screenshots/panels-light.png) | [dark](screenshots/panels-dark.png) |
 | Settings | [light](screenshots/settings-light.png) | [dark](screenshots/settings-dark.png) |
 
-`Screenshot.EditorRendersSelectedSource`, `Screenshot.PanelRendersDiagnostics`, and
-`Screenshot.EditorViewShowsSearchGutterAndBothThemes`,
-`Screenshot.CommandPaletteShowsSearchAndRecentCommands`, and
-`Screenshot.RegistryIncludesPanelSystemInBothThemes` read the
+`Screenshot.EditorRendersSelectedSource`, `Screenshot.EditorViewShowsSearchGutterAndBothThemes`
+and `Screenshot.PanelRendersDiagnostics` read the
 generated PNG files and check stable shell pixels; `PanelRegistry` and `AppShellState` tests cover
 registry behavior, repository-local round trips, version 1 migration, reset, and invalid state. The
 screenshot script checks the complete matrix and each capture command reports its dimensions.

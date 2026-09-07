@@ -241,6 +241,7 @@ int main(int argc, char **argv) {
     return command_docs(argc, argv, argv[2]);
   }
   liquify::AppOptions opts;
+  opts.executable_path = argv[0];
   bool should_print_tree = false;
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg = argv[i];

@@ -12,6 +12,8 @@ Every screen has light and dark variants:
 | Screen | Purpose | Light | Dark |
 |---|---|---|---|
 | Welcome | First-run entry point and repository action | [`welcome-light.png`](screenshots/welcome-light.png) | [`welcome-dark.png`](screenshots/welcome-dark.png) |
+| Unreadable repository | Local error and retry actions | [`repository-unreadable-light.png`](screenshots/repository-unreadable-light.png) | [`repository-unreadable-dark.png`](screenshots/repository-unreadable-dark.png) |
+| Lake offline | Expected offline clone recovery | [`lake-offline-light.png`](screenshots/lake-offline-light.png) | [`lake-offline-dark.png`](screenshots/lake-offline-dark.png) |
 | Repository | Open repository and deterministic tree | [`repository-light.png`](screenshots/repository-light.png) | [`repository-dark.png`](screenshots/repository-dark.png) |
 | C++ editor | C++ buffer with a highlighted source line | [`editor-cpp-light.png`](screenshots/editor-cpp-light.png) | [`editor-cpp-dark.png`](screenshots/editor-cpp-dark.png) |
 | Editor view | Multi-cursor source, search results, syntax and gutters | [`editor-view-light.png`](screenshots/editor-view-light.png) | [`editor-view-dark.png`](screenshots/editor-view-dark.png) |
@@ -20,7 +22,7 @@ Every screen has light and dark variants:
 | Review | Review panel and comment status | [`review-light.png`](screenshots/review-light.png) | [`review-dark.png`](screenshots/review-dark.png) |
 | Assistant | Offline assistant panel | [`assistant-light.png`](screenshots/assistant-light.png) | [`assistant-dark.png`](screenshots/assistant-dark.png) |
 | Plugins | Data-only plugin panel | [`plugins-light.png`](screenshots/plugins-light.png) | [`plugins-dark.png`](screenshots/plugins-dark.png) |
-| Command palette | Fuzzy results, recent commands and resolved bindings | [`command-palette-light.png`](screenshots/command-palette-light.png) | [`command-palette-dark.png`](screenshots/command-palette-dark.png) |
+| Command palette | Fuzzy search, recent commands and resolved bindings | [`command-palette-light.png`](screenshots/command-palette-light.png) | [`command-palette-dark.png`](screenshots/command-palette-dark.png) |
 | Structural editing | Multi-file edit preview | [`structural-editing-light.png`](screenshots/structural-editing-light.png) | [`structural-editing-dark.png`](screenshots/structural-editing-dark.png) |
 | Panel system | Docked, editor-tab and floating panels with shared progress | [`panels-light.png`](screenshots/panels-light.png) | [`panels-dark.png`](screenshots/panels-dark.png) |
 | Settings | Searchable groups, repository scope, masked credentials and privacy defaults | [`settings-light.png`](screenshots/settings-light.png) | [`settings-dark.png`](screenshots/settings-dark.png) |
@@ -54,10 +56,8 @@ landmarks rather than whole-image hashes so harmless rasterizer differences do n
 intended signal. The editor-view assertion separately proves its themed gutter and syntax roles;
 [`editor.md`](editor.md) records the interaction and liquid data paths.
 
-`Screenshot.RegistryIncludesPanelSystemInBothThemes` and
-`Screenshot.CommandPaletteShowsSearchAndRecentCommands` hold the combined registry at twelve
-screens and twenty-four named states; the settings states increase that registry to thirteen
-screens and twenty-six named states. The panel behavior and layout model are documented in
+`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at fifteen screens
+and thirty named states. The panel behavior and layout model are documented in
 [`panels.md`](panels.md).
 
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced
