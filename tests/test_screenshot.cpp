@@ -69,7 +69,7 @@ TEST(Screenshot, RegistryIncludesPanelSystemInBothThemes) {
   EXPECT_NE(find_screenshot_state("lake-offline-dark"), nullptr);
   EXPECT_NE(find_screenshot_state("settings-light"), nullptr);
   EXPECT_NE(find_screenshot_state("settings-dark"), nullptr);
-  EXPECT_EQ(screenshot_states().size(), 28U);
+  EXPECT_EQ(screenshot_states().size(), 30U);
 }
 
 TEST(Screenshot, NavigationRendersQuickOpenAndAnnotatedTree) {
