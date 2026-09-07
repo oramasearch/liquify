@@ -21,6 +21,9 @@ off. `design/` carries the stamped Orama DTCG snapshot, generated native roles a
 Plex assets. The light/dark application shell hosts every surface through one panel registry;
 dock, editor-tab and floating placement plus focus persist per repository, layouts reset to their
 defaults, and one channel reports long-operation progress. Native macOS menus remain available.
+Searchable `.liquid` settings combine user preferences with repository overrides and apply theme,
+fonts, editor behavior, keymaps, optional AI and lake accounts live; telemetry remains off by
+default and credentials are masked.
 Pull-request CI packages macOS, Windows and Linux installers and `v*` tags publish them;
 [`docs/design/status.md`](docs/design/status.md) lists each area with its page, and the
 specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
@@ -138,6 +141,8 @@ its page there in the same change; this file is only the front door. The most us
   commands, states, and shared progress channel.
 - [`docs/ui/editor.md`](docs/ui/editor.md): the editor interaction model, syntax, gutters, search,
   history and editor-view screenshots.
+- [`docs/ui/settings.md`](docs/ui/settings.md): searchable `.liquid` settings, repository overrides,
+  live application, validation, credentials and telemetry.
 - [`docs/editor/README.md`](docs/editor/README.md): the buffer, the retained text layer and the
   smoke measurements.
 - [`docs/editor/interactive-analysis.md`](docs/editor/interactive-analysis.md),

@@ -140,6 +140,7 @@ add_library(liquify-core STATIC
   src/plugin.cpp
   src/repository_view.cpp
   src/review.cpp
+  src/settings.cpp
   src/screenshot.cpp
   src/structural_edit.cpp
   src/text_layout.cpp
