@@ -31,7 +31,11 @@ command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.m
 The shell, editor, panels, and plugins register into one command model used by the fuzzy palette,
 recent-command list, resolved keyboard dispatch, conflict reporting, native macOS menus,
 `--command`, and generated command documentation. Global and repository `settings.liquid` files
-layer typed keymap overrides ([`../ui/commands.md`](../ui/commands.md)).
+layer typed keymap overrides ([`../ui/commands.md`](../ui/commands.md)). The searchable settings
+surface reads a user `.liquid` file plus repository overrides and applies theme, fonts, editor
+behavior, keymaps, optional AI, lake accounts and default-off telemetry live. Parser and typed
+validation errors remain inline, group reset is local, and credential values never enter the
+settings model ([`../ui/settings.md`](../ui/settings.md)).
 `--screenshot` renders the fixed welcome, repository, C++ editor and panel registry in light and
 dark through a headless software renderer; the committed image set and pixel tests are described
 in [`../ui/README.md`](../ui/README.md).

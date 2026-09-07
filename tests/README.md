@@ -33,6 +33,8 @@ coverage includes the command palette's search and recent-command areas.
 
 `test_editor_model.cpp` covers configuration-driven indentation, every selection shape, literal
 and regular-expression replacement, bracket matching, syntax roles, wrapping and folding.
+`test_settings.cpp` covers `.liquid` settings parsing, precedence, validation, reset, search, safe
+defaults and credential-free serialization.
 `test_editor_buffer.cpp` covers line, selection and multi-cursor edits, UTF-8 cursor movement,
 absolute cursor byte offsets, and a save that retains the pending-drip count and reopens the result through
 `liquid::repository`. `test_text_layout.cpp` proves cached layouts are reused, an edit invalidates
@@ -85,8 +87,8 @@ cases cover a normal streamed answer, a refusal stop reason, and a connection en
 It also proves a proposed replacement leaves repository content unchanged until acceptance, then
 creates exactly one drip and a local assisted-edit record without recording the prompt.
 
-`test_screenshot.cpp` renders the deterministic C++ editor, complete editor view, diagnostics and
-panel-system states through SDL's dummy video driver and software renderer, decodes their PNG
+`test_screenshot.cpp` renders the deterministic C++ editor, complete editor view, diagnostics,
+command-palette, panel-system and settings states through SDL's dummy video driver and software renderer, decodes their PNG
 output and uses
 `ui_pixel_assert.hpp` to prove that a highlighted line, panel title and count badge occupy their
 expected regions.

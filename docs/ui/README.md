@@ -23,6 +23,7 @@ Every screen has light and dark variants:
 | Command palette | Fuzzy results, recent commands and resolved bindings | [`command-palette-light.png`](screenshots/command-palette-light.png) | [`command-palette-dark.png`](screenshots/command-palette-dark.png) |
 | Structural editing | Multi-file edit preview | [`structural-editing-light.png`](screenshots/structural-editing-light.png) | [`structural-editing-dark.png`](screenshots/structural-editing-dark.png) |
 | Panel system | Docked, editor-tab and floating panels with shared progress | [`panels-light.png`](screenshots/panels-light.png) | [`panels-dark.png`](screenshots/panels-dark.png) |
+| Settings | Searchable groups, repository scope, masked credentials and privacy defaults | [`settings-light.png`](screenshots/settings-light.png) | [`settings-dark.png`](screenshots/settings-dark.png) |
 
 The names in the table are the command-line registry. An unknown name exits 2 and prints every
 valid name. `--screenshot` and `--out` are required together and cannot be combined with a
@@ -55,7 +56,8 @@ intended signal. The editor-view assertion separately proves its themed gutter a
 
 `Screenshot.RegistryIncludesPanelSystemInBothThemes` and
 `Screenshot.CommandPaletteShowsSearchAndRecentCommands` hold the combined registry at twelve
-screens and twenty-four named states. The panel behavior and layout model are documented in
+screens and twenty-four named states; the settings states increase that registry to thirteen
+screens and twenty-six named states. The panel behavior and layout model are documented in
 [`panels.md`](panels.md).
 
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced

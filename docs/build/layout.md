@@ -10,6 +10,7 @@ libliquid's public API.
 | `include/liquify/app_state.hpp`, `src/app_state.cpp` | bounded repository-local shell layout, active surfaces, and theme persistence |
 | `include/liquify/command.hpp`, `src/command.cpp` | command registry, platform key chords, fuzzy search, recency, typed keymap overrides, conflicts, and generated reference/default-keymap text |
 | `include/liquify/panel.hpp`, `src/panel.cpp` | plain-C++ panel descriptors, commands, placement, focus, runtime state and shared operation notifications |
+| `include/liquify/settings.hpp`, `src/settings.cpp` | typed `.liquid` user settings, repository overlays, validation, serialization, search and group reset |
 | `include/liquify/screenshot.hpp`, `src/screenshot.cpp` | named screenshot registry plus the in-tree RGBA PNG reader and writer |
 | `include/liquify/editor_model.hpp`, `src/editor_model.cpp` | pure selection, repository preferences, find/replace, syntax-span, bracket, fold and visual-row functions |
 | `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory multi-cursor text buffer, input modes, and libliquid blob read/write path |

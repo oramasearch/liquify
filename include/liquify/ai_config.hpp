@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "liquid/error.hpp"
 
@@ -29,5 +30,9 @@ struct ConfiguredSecret {
 [[nodiscard]] auto set_repository_ai_enabled(const std::filesystem::path& repository_path,
                                              bool enabled) -> liquid::result<void>;
 [[nodiscard]] auto anthropic_api_key() -> ConfiguredSecret;
+[[nodiscard]] auto lake_account_token(std::string_view account) -> ConfiguredSecret;
+[[nodiscard]] auto store_anthropic_api_key(std::string_view value) -> liquid::result<void>;
+[[nodiscard]] auto store_lake_account_token(std::string_view account, std::string_view value)
+    -> liquid::result<void>;
 
 } // namespace liquify

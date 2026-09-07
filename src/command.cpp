@@ -212,7 +212,7 @@ const DefinitionArray definitions{{
      {"Primary+Shift+L"}},
 }};
 
-const std::array<CommandDefinition, 26> trailing_definitions{{
+const std::array<CommandDefinition, 27> trailing_definitions{{
     {"edit.find",
      "Find",
      "Edit",
@@ -258,6 +258,11 @@ const std::array<CommandDefinition, 26> trailing_definitions{{
      "View",
      "Restore the default panel layout.",
      {}},
+    {"settings.open",
+     "Open Settings",
+     "Preferences",
+     "Open the live settings surface.",
+     {"Primary+Comma"}},
     {"build.start",
      "Build",
      "Build, test and deploy",
@@ -384,6 +389,8 @@ auto canonical_key(std::string_view key) -> std::optional<std::string> {
   static const auto names = std::map<std::string_view, std::string_view>{
       {"backslash", "Backslash"},
       {"\\", "Backslash"},
+      {"comma", "Comma"},
+      {",", "Comma"},
       {"backspace", "Backspace"},
       {"delete", "Delete"},
       {"down", "Down"},
@@ -922,11 +929,6 @@ auto global_settings_path() -> std::filesystem::path {
   }
 #endif
   return {};
-}
-
-auto repository_settings_path(const std::filesystem::path &repository)
-    -> std::filesystem::path {
-  return repository / ".liquid" / "settings.liquid";
 }
 
 auto format_command_diagnostic(const CommandDiagnostic &diagnostic)

@@ -340,8 +340,9 @@ TEST(AiConfig, DefaultsOffAndRepositoryOverridesGlobalSetting) {
     const auto global_path = location.path() / "global-config";
     {
         auto output = std::ofstream(global_path);
-        output << "config.liquify.ai.enabled=false\n";
-        output << "config.liquify.ai.model=test-model\n";
+        output << "liquify settings {\n";
+        output << "  ai { enabled: false model: \"test-model\" }\n";
+        output << "}\n";
     }
     const auto initial = liquify::load_ai_config(location.path(), global_path);
     ASSERT_TRUE(initial) << initial.error().message;

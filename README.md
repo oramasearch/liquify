@@ -24,7 +24,10 @@ by `--command`; its generated reference is [`docs/ui/commands.md`](docs/ui/comma
 Plex assets. The light/dark application shell hosts those panels in a persisted repository-local
 layout with native macOS menus. The shell hosts every surface through one panel registry; dock,
 editor-tab and floating placement plus focus persist per repository, layouts reset to their
-defaults, and one channel reports long-operation progress. Pull-request CI packages macOS,
+defaults, and one channel reports long-operation progress. Searchable `.liquid` settings combine
+user preferences with repository overrides and apply theme, fonts, editor behavior, keymaps,
+optional AI and lake accounts live; telemetry remains off by default and credentials are masked.
+Pull-request CI packages macOS,
 Windows and Linux installers and `v*` tags publish them;
 [`docs/design/status.md`](docs/design/status.md) lists each area with its page, and the
 specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.

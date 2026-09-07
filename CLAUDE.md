@@ -31,7 +31,10 @@ status channel reports build, saved-drip sync, repository hydration and assistan
 exposes the command groups and Cmd bindings through the native menu bar. The shell, editor,
 panels, and plugins share one command registry; the fuzzy palette shows recent commands and
 resolved bindings, typed `settings.liquid` files provide global and repository keymap overrides
-with conflict reporting, and `--command` invokes registered headless commands. C and C++ stubs
+with conflict reporting, and `--command` invokes registered headless commands. The searchable
+settings surface reads user and repository `.liquid` files, applies appearance, editor, keymap,
+AI and lake changes live, keeps telemetry off by default, and never places credential values in
+its model or UI. C and C++ stubs
 are graph query values that resolve
 declarations from closed files without retaining full parse trees. Graph-backed editor queries run
 over error-tolerant incremental trees for open overlays, resolve through closed-file

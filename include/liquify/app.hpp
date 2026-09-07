@@ -15,6 +15,7 @@
 #include "liquify/multiplayer.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
+#include "liquify/settings.hpp"
 #include "liquify/structural_edit.hpp"
 
 struct SDL_Window;
@@ -110,6 +111,7 @@ private:
   void toggle_assistant();
   void draw_assistant();
   void draw_command_palette();
+  void draw_settings();
   void configure_commands();
   bool invoke_command(std::string_view name);
   bool invoke_shell_command(std::string_view name);
@@ -138,6 +140,9 @@ private:
   void prepare_smoke_frame(int frame);
   void print_smoke_metrics() const;
   void persist_shell_state();
+  void persist_settings();
+  void apply_settings_live(bool rebuild_fonts = false);
+  void reset_settings(SettingsGroup group);
   void cycle_theme();
   void apply_theme();
   void load_font_atlas(float scale);
@@ -162,6 +167,9 @@ private:
   std::unique_ptr<RetainedTextLayer> text_layer_;
   AppShellState shell_state_;
   PanelRegistry panels_;
+  Settings settings_;
+  SettingsScope settings_scope_{SettingsScope::user};
+  std::vector<SettingsDiagnostic> settings_diagnostics_;
   SDL_Window *window_ = nullptr;
   SDL_Renderer *renderer_ = nullptr;
   float editor_x_{};
@@ -182,6 +190,11 @@ private:
   std::string sidebar_search_;
   std::string find_query_;
   std::string replace_query_;
+  std::string settings_query_;
+  std::string lake_account_name_;
+  std::string lake_account_url_;
+  std::string provider_token_input_;
+  std::string lake_token_input_;
   FindOptions find_options_;
   std::vector<TextMatch> buffer_matches_;
   std::size_t find_match_index_{};
@@ -230,13 +243,17 @@ private:
   float display_scale_ = 1.0F;
   int ui_font_index_ = -1;
   int editor_font_index_ = -1;
+  int heading_font_index_ = -1;
   bool applied_dark_theme_{};
   bool screenshot_written_{};
   bool screenshot_failed_{};
+  bool fonts_rebuild_requested_{};
   int screenshot_frames_rendered_{};
   bool initialized_ = false;
   bool command_palette_open_{};
   bool command_palette_visible_{};
+  bool settings_open_{};
+  bool settings_popup_visible_{};
   bool find_open_{};
   bool context_preview_open_{};
   bool review_diff_open_{};

@@ -36,6 +36,7 @@
 #include "liquify/editor_graph.hpp"
 #include "liquify/multiplayer.hpp"
 #include "liquify/screenshot.hpp"
+#include "liquify/settings.hpp"
 #include "liquify/stub_tree.hpp"
 #include "liquify/version.hpp"
 #include "repository_view.hpp"
@@ -1039,9 +1040,21 @@ private:
 
 App::App(AppOptions options) : options_(std::move(options)) {
   multiplayer_session_ = make_multiplayer_session();
+  const auto *requested_screenshot =
+      options_.screenshot_state
+          ? find_screenshot_state(*options_.screenshot_state)
+          : nullptr;
+  if (requested_screenshot == nullptr) {
+    auto loaded_settings = load_settings(options_.repository_path);
+    settings_ = std::move(loaded_settings.settings);
+    settings_diagnostics_ = std::move(loaded_settings.diagnostics);
+  }
+  settings_scope_ = options_.repository_path ? SettingsScope::repository
+                                             : SettingsScope::user;
   if (options_.repository_path) {
     auto loaded_state = load_app_shell_state(*options_.repository_path);
     shell_state_ = loaded_state.state;
+    shell_state_.theme = settings_.theme;
     if (!loaded_state.error.empty()) {
       editor_status_ = std::move(loaded_state.error);
     }
@@ -1062,21 +1075,20 @@ App::App(AppOptions options) : options_(std::move(options)) {
       }
       editor_graph_ = std::make_unique<EditorGraph>(
           *options_.repository_path, plugin_host_, syntax_frontend_path());
-      auto config = load_ai_config(*options_.repository_path);
-      if (!config) {
-        editor_status_ = config.error().message;
-      } else {
-        ai_context_bytes_ = config->context_bytes;
-        auto key = ConfiguredSecret{};
-        if (config->enabled) {
-          key = anthropic_api_key();
-        }
-        const auto secret = key.value;
-        assistant_ =
-            std::make_unique<Assistant>(*config, key.configured, [secret] {
-              return std::make_unique<AnthropicProvider>(secret);
-            });
+      auto config = AiConfig{.enabled = settings_.ai.enabled,
+                             .context_bytes = settings_.ai.context_bytes,
+                             .model = settings_.ai.model,
+                             .max_tokens = settings_.ai.max_tokens};
+      ai_context_bytes_ = config.context_bytes;
+      auto key = ConfiguredSecret{};
+      if (config.enabled) {
+        key = anthropic_api_key();
       }
+      const auto secret = key.value;
+      assistant_ =
+          std::make_unique<Assistant>(config, key.configured, [secret] {
+            return std::make_unique<AnthropicProvider>(secret);
+          });
       if (options_.lake_url) {
         try {
           const auto *token = std::getenv("LIQUID_TOKEN");
@@ -1179,6 +1191,16 @@ App::App(AppOptions options) : options_(std::move(options)) {
     } else {
       panels_.clear_focus_request();
     }
+    if (screenshot->view == ScreenshotView::settings) {
+      settings_open_ = true;
+      settings_.theme = screenshot->theme == ScreenshotTheme::dark
+                            ? ThemePreference::dark
+                            : ThemePreference::light;
+      settings_.editor.wrap = true;
+      settings_.keymap["run.build"] = "F7";
+      settings_.lake_accounts.push_back(
+          {"orama", "https://api.oramasearch.com/liquid"});
+    }
   }
   configure_commands();
   if (screenshot != nullptr &&
@@ -1247,6 +1269,26 @@ void App::configure_commands() {
   if (options_.repository_path) {
     apply_file(repository_settings_path(*options_.repository_path));
   }
+  auto settings_overrides = std::vector<KeymapOverride>{};
+  settings_overrides.reserve(settings_.keymap.size());
+  for (const auto &[name, binding] : settings_.keymap) {
+    auto command_name = name;
+    if (name == "build.run") {
+      command_name = "run.build";
+    } else if (name == "tests.run") {
+      command_name = "run.tests";
+    } else if (name == "deploy.run") {
+      command_name = "run.deploy";
+    } else if (name == "palette.open") {
+      command_name = "edit.command-palette";
+    }
+    settings_overrides.push_back(
+        {std::move(command_name), {binding}, {user_settings_path(), 1, 1}});
+  }
+  auto diagnostics = commands_->apply_overrides(settings_overrides);
+  for (const auto &diagnostic : diagnostics) {
+    command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
+  }
   if (!command_diagnostics_.empty()) {
     editor_status_ = command_diagnostics_.front();
   } else if (!commands_->conflicts().empty()) {
@@ -1267,6 +1309,10 @@ bool App::invoke_shell_command(std::string_view name) {
   }
   if (name == "edit.command-palette") {
     command_palette_open_ = true;
+    return true;
+  }
+  if (name == "settings.open") {
+    settings_open_ = true;
     return true;
   }
   if (name == "view.toggle-sidebar") {
@@ -1614,18 +1660,26 @@ void App::load_font_atlas(float scale) {
         const_cast<std::uint8_t *>(bytes.data()),
         static_cast<int>(bytes.size()), size, &config);
   };
+  auto ui_distance = std::numeric_limits<float>::max();
   for (const auto size :
        {design::text11, design::text12, design::text14, design::text16,
         design::text20, design::text24, design::text32}) {
     auto *font = add_font(design::ibm_plex_sans_regular, size, "IBM Plex Sans");
-    if (size == design::text14) {
+    const auto distance =
+        std::abs(size - static_cast<float>(settings_.fonts.ui_size));
+    if (distance < ui_distance) {
+      ui_distance = distance;
       ui_font_index_ = io.Fonts->Fonts.Size - 1;
       io.FontDefault = font;
     }
   }
+  auto editor_distance = std::numeric_limits<float>::max();
   for (const auto size : {design::text12, design::text14, design::text16}) {
     add_font(design::ibm_plex_mono_regular, size, "IBM Plex Mono");
-    if (size == design::text14) {
+    const auto distance =
+        std::abs(size - static_cast<float>(settings_.fonts.editor_size));
+    if (distance < editor_distance) {
+      editor_distance = distance;
       editor_font_index_ = io.Fonts->Fonts.Size - 1;
     }
   }
@@ -1706,8 +1760,64 @@ void App::cycle_theme() {
   } else {
     shell_state_.theme = ThemePreference::system;
   }
+  settings_.theme = shell_state_.theme;
   apply_theme();
+  persist_settings();
   persist_shell_state();
+}
+
+void App::apply_settings_live(bool rebuild_fonts) {
+  shell_state_.theme = settings_.theme;
+  if (editor_) {
+    auto preferences = editor_->preferences();
+    preferences.soft_wrap = settings_.editor.wrap;
+    editor_->set_preferences(preferences);
+  }
+  ai_context_bytes_ = settings_.ai.context_bytes;
+  if (options_.repository_path && assistant_) {
+    auto key = ConfiguredSecret{};
+    if (settings_.ai.enabled) {
+      key = anthropic_api_key();
+    }
+    const auto secret = key.value;
+    auto config = AiConfig{.enabled = settings_.ai.enabled,
+                           .context_bytes = settings_.ai.context_bytes,
+                           .model = settings_.ai.model,
+                           .max_tokens = settings_.ai.max_tokens};
+    assistant_ = std::make_unique<Assistant>(config, key.configured, [secret] {
+      return std::make_unique<AnthropicProvider>(secret);
+    });
+  }
+  if (rebuild_fonts && initialized_) {
+    fonts_rebuild_requested_ = true;
+  }
+  apply_theme();
+}
+
+void App::persist_settings() {
+  if (screenshot_mode()) {
+    return;
+  }
+  auto path = user_settings_path();
+  if (settings_scope_ == SettingsScope::repository &&
+      options_.repository_path) {
+    path = repository_settings_path(*options_.repository_path);
+  }
+  const auto saved = save_settings(path, settings_);
+  if (!saved) {
+    editor_status_ = saved.error().message;
+    settings_diagnostics_ = {
+        SettingsDiagnostic{.path = path, .message = saved.error().message}};
+    return;
+  }
+  settings_diagnostics_.clear();
+  editor_status_ = "settings applied";
+}
+
+void App::reset_settings(SettingsGroup group) {
+  reset_settings_group(settings_, group);
+  apply_settings_live(group == SettingsGroup::appearance);
+  persist_settings();
 }
 
 void App::persist_shell_state() {
@@ -2357,30 +2467,10 @@ void App::toggle_assistant() {
     return;
   }
   const auto enable = !assistant_->snapshot().enabled;
-  const auto saved =
-      set_repository_ai_enabled(*options_.repository_path, enable);
-  if (!saved) {
-    editor_status_ = saved.error().message;
-    return;
-  }
-  if (!enable) {
-    assistant_->set_enabled(false);
-    editor_status_ = "AI off";
-    return;
-  }
-  auto config = load_ai_config(*options_.repository_path);
-  if (!config) {
-    editor_status_ = config.error().message;
-    return;
-  }
-  config->enabled = true;
-  ai_context_bytes_ = config->context_bytes;
-  auto key = anthropic_api_key();
-  const auto secret = key.value;
-  assistant_ = std::make_unique<Assistant>(*config, key.configured, [secret] {
-    return std::make_unique<AnthropicProvider>(secret);
-  });
-  editor_status_ = key.configured ? "AI on" : "AI on; key not configured";
+  settings_.ai.enabled = enable;
+  apply_settings_live();
+  persist_settings();
+  editor_status_ = enable ? "AI on" : "AI off";
 }
 
 void App::poll_editor_graph() {
@@ -3128,6 +3218,156 @@ void App::execute_panel_command(std::string_view command) {
   } else if (command == "structural.extract") {
     open_extract_function();
   }
+}
+
+void App::draw_settings() {
+  if (settings_open_) {
+    ImGui::OpenPopup("Settings");
+    settings_open_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(900.0F, 650.0F), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Settings", nullptr,
+                              ImGuiWindowFlags_NoSavedSettings)) {
+    settings_popup_visible_ = false;
+    return;
+  }
+  settings_popup_visible_ = true;
+  ImGui::InputTextWithHint("##settings-search", "Search settings",
+                           &settings_query_);
+  ImGui::SameLine();
+  auto repository_scope = settings_scope_ == SettingsScope::repository;
+  if (!options_.repository_path) {
+    ImGui::BeginDisabled();
+  }
+  if (ImGui::Checkbox("Repository overrides", &repository_scope)) {
+    settings_scope_ =
+        repository_scope ? SettingsScope::repository : SettingsScope::user;
+  }
+  if (!options_.repository_path) {
+    ImGui::EndDisabled();
+  }
+  const auto path =
+      settings_scope_ == SettingsScope::repository && options_.repository_path
+          ? repository_settings_path(*options_.repository_path)
+          : user_settings_path();
+  ImGui::TextDisabled("Editing %s", path.string().c_str());
+  for (const auto &diagnostic : settings_diagnostics_) {
+    ImGui::TextColored(imgui_color((applied_dark_theme_ ? design::dark_palette
+                                                        : design::light_palette)
+                                       .warning),
+                       "%s", diagnostic.message.c_str());
+  }
+  ImGui::Separator();
+  ImGui::BeginChild("settings-scroll", ImVec2(0.0F, -36.0F),
+                    ImGuiChildFlags_Borders);
+  const auto begins = [this](SettingsGroup group) {
+    return settings_group_matches(group, settings_query_) &&
+           ImGui::CollapsingHeader(settings_group_name(group).data(),
+                                   ImGuiTreeNodeFlags_DefaultOpen);
+  };
+  if (begins(SettingsGroup::appearance)) {
+    if (ImGui::SmallButton("Reset appearance")) {
+      reset_settings(SettingsGroup::appearance);
+    }
+    auto theme = static_cast<int>(settings_.theme);
+    constexpr auto themes =
+        std::array{"Follow operating system", "Light", "Dark"};
+    if (ImGui::Combo("Theme", &theme, themes.data(),
+                     static_cast<int>(themes.size()))) {
+      settings_.theme = static_cast<ThemePreference>(theme);
+      apply_settings_live();
+      persist_settings();
+    }
+    auto ui_size = static_cast<int>(settings_.fonts.ui_size);
+    if (ImGui::SliderInt("UI size", &ui_size, 11, 32)) {
+      settings_.fonts.ui_size = static_cast<std::uint32_t>(ui_size);
+      apply_settings_live(true);
+      persist_settings();
+    }
+    auto editor_size = static_cast<int>(settings_.fonts.editor_size);
+    if (ImGui::SliderInt("Editor size", &editor_size, 12, 16)) {
+      settings_.fonts.editor_size = static_cast<std::uint32_t>(editor_size);
+      apply_settings_live(true);
+      persist_settings();
+    }
+  }
+  if (begins(SettingsGroup::editor)) {
+    if (ImGui::SmallButton("Reset editor")) {
+      reset_settings(SettingsGroup::editor);
+    }
+    auto changed = ImGui::Checkbox("Wrap long lines", &settings_.editor.wrap);
+    changed |= ImGui::Checkbox("Show whitespace", &settings_.editor.whitespace);
+    changed |= ImGui::Checkbox("Format .liquid files on save",
+                               &settings_.editor.format_on_save);
+    if (changed) {
+      apply_settings_live();
+      persist_settings();
+    }
+  }
+  if (begins(SettingsGroup::keymap)) {
+    if (ImGui::SmallButton("Reset keymap")) {
+      reset_settings(SettingsGroup::keymap);
+    }
+    ImGui::TextDisabled("Command registry bindings");
+    for (const auto name : {"settings.open", "run.build", "run.tests",
+                            "run.deploy", "edit.command-palette"}) {
+      auto &binding = settings_.keymap[name];
+      if (binding.empty() && commands_) {
+        binding = commands_->binding_label(name);
+      }
+      ImGui::PushID(name);
+      ImGui::SetNextItemWidth(180.0F);
+      if (ImGui::InputText(name, &binding)) {
+        auto override = KeymapOverride{name, {binding}, {path, 1, 1}};
+        auto diagnostics = commands_->apply_overrides({&override, 1});
+        command_diagnostics_.clear();
+        for (const auto &diagnostic : diagnostics) {
+          command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
+        }
+        persist_settings();
+      }
+      ImGui::PopID();
+    }
+  }
+  if (begins(SettingsGroup::ai)) {
+    if (ImGui::SmallButton("Reset AI")) {
+      reset_settings(SettingsGroup::ai);
+    }
+    if (ImGui::Checkbox("Enable AI surface", &settings_.ai.enabled)) {
+      apply_settings_live();
+      persist_settings();
+    }
+    if (ImGui::InputText("Model", &settings_.ai.model)) {
+      apply_settings_live();
+      persist_settings();
+    }
+    ImGui::TextDisabled("Credentials remain in the OS credential store.");
+  }
+  if (begins(SettingsGroup::lake)) {
+    if (ImGui::SmallButton("Reset lake")) {
+      reset_settings(SettingsGroup::lake);
+    }
+    for (const auto &account : settings_.lake_accounts) {
+      ImGui::BulletText("%s — %s", account.name.c_str(), account.url.c_str());
+    }
+    ImGui::TextDisabled("Lake credentials remain in the OS credential store.");
+  }
+  if (begins(SettingsGroup::telemetry)) {
+    if (ImGui::SmallButton("Reset telemetry")) {
+      reset_settings(SettingsGroup::telemetry);
+    }
+    if (ImGui::Checkbox("Enable telemetry", &settings_.telemetry)) {
+      persist_settings();
+    }
+    ImGui::TextDisabled("Off by default.");
+  }
+  ImGui::EndChild();
+  if (ImGui::Button("Close")) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
 }
 
 void App::draw_command_palette() {
@@ -4793,13 +5033,14 @@ void App::draw_contents() {
 
   draw_floating_panels();
   draw_command_palette();
+  draw_settings();
   draw_review_comment_popup();
   draw_structural_editing();
 }
 
 void App::render_editor() {
-  if (!editor_visible_ || !editor_ || editor_width_ <= 0.0F ||
-      editor_height_ <= 0.0F) {
+  if (settings_popup_visible_ || !editor_visible_ || !editor_ ||
+      editor_width_ <= 0.0F || editor_height_ <= 0.0F) {
     return;
   }
   const auto maximum_scroll = editor_->line_count() > visible_lines_
@@ -4898,6 +5139,12 @@ void App::frame() {
   }
   update_window_title();
   poll_multiplayer();
+  if (fonts_rebuild_requested_) {
+    ImGui_ImplSDLRenderer3_DestroyFontsTexture();
+    load_font_atlas(display_scale_);
+    ImGui_ImplSDLRenderer3_CreateFontsTexture();
+    fonts_rebuild_requested_ = false;
+  }
   ImGui_ImplSDLRenderer3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();

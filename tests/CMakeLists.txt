@@ -11,6 +11,7 @@ add_executable(liquify-tests
   test_plugin.cpp
   test_repository_view.cpp
   test_review.cpp
+  test_settings.cpp
   test_screenshot.cpp
   test_structural_edit.cpp
   test_text_layout.cpp
