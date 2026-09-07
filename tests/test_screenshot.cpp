@@ -65,7 +65,20 @@ TEST(Screenshot, RegistryIncludesPanelSystemInBothThemes) {
     EXPECT_NE(find_screenshot_state("repository-unreadable-dark"), nullptr);
     EXPECT_NE(find_screenshot_state("lake-offline-light"), nullptr);
     EXPECT_NE(find_screenshot_state("lake-offline-dark"), nullptr);
-    EXPECT_EQ(screenshot_states().size(), 26U);
+    EXPECT_NE(find_screenshot_state("settings-light"), nullptr);
+    EXPECT_NE(find_screenshot_state("settings-dark"), nullptr);
+    EXPECT_EQ(screenshot_states().size(), 28U);
+}
+
+TEST(Screenshot, SettingsRenderGroupedControlsInBothThemes) {
+    const auto light = render_state("settings-light");
+    const auto dark = render_state("settings-dark");
+
+    EXPECT_EQ(light.width, screenshot_width);
+    EXPECT_EQ(dark.height, screenshot_height);
+    EXPECT_TRUE(
+        test::region_contains_color(light, {190, 70, 900, 650}, {255, 255, 255, 255}, 3, 100));
+    EXPECT_TRUE(test::region_contains_color(dark, {190, 70, 900, 650}, {18, 18, 22, 255}, 4, 100));
 }
 
 } // namespace

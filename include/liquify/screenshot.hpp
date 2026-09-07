@@ -32,6 +32,7 @@ enum class ScreenshotView : std::uint8_t {
     plugins,
     structural_editing,
     panels,
+    settings,
 };
 
 struct ScreenshotState {

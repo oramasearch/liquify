@@ -23,17 +23,20 @@ sync, repository hydration, and assistant progress.
 
 For an open repository, `.liquid/liquify-state.json` stores sidebar width and visibility, bottom
 panel height and visibility, editor split ratio and visibility, panel placements, visibility,
-order, focus, floating bounds and prior dock, plus the theme preference. Version 1 selection
-fields migrate into version 2 panel state. Invalid state reports an editor status message and uses
-bounded defaults. Reset layout restores the shell and panel defaults without changing the theme
-preference.
+order, focus, floating bounds and prior dock, plus a compatibility copy of the theme preference.
+The `.liquid` settings files described in [`settings.md`](settings.md) are authoritative. Version 1
+selection fields migrate into version 2 panel state. Invalid state reports an editor status message
+and uses bounded defaults. Reset layout restores the shell and panel defaults without changing the
+theme preference.
 
 ## Design, fonts, and themes
 
 `src/app.cpp` maps the ImGui style colors and metrics from
 [`design_tokens.generated.hpp`](../../include/liquify/design_tokens.generated.hpp). Light and dark
 palettes come from the upstream token modes. The preference cycles system → light → dark; system
-mode reads `SDL_GetSystemTheme()` every frame, so an OS change is reflected at runtime.
+mode reads `SDL_GetSystemTheme()` every frame, so an OS change is reflected at runtime. The
+searchable settings surface applies theme, supported font sizes, editor behavior, command bindings,
+assistant configuration, lake accounts, and telemetry without reopening the repository.
 
 IBM Plex Sans is loaded at 11, 12, 14, 16, 20, 24, and 32 logical pixels. IBM Plex Mono is loaded
 at 12, 14, and 16 logical pixels and backs both retained editor geometry and the secondary split.
@@ -55,7 +58,7 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects thirteen seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects fourteen seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -84,6 +87,7 @@ The committed evidence is:
 | Plugins | [light](screenshots/plugins-light.png) | [dark](screenshots/plugins-dark.png) |
 | Structural editing | [light](screenshots/structural-editing-light.png) | [dark](screenshots/structural-editing-dark.png) |
 | Panel system | [light](screenshots/panels-light.png) | [dark](screenshots/panels-dark.png) |
+| Settings | [light](screenshots/settings-light.png) | [dark](screenshots/settings-dark.png) |
 
 `Screenshot.EditorRendersSelectedSource`, `Screenshot.EditorViewShowsSearchGutterAndBothThemes`
 and `Screenshot.PanelRendersDiagnostics` read the
