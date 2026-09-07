@@ -11,7 +11,7 @@
 namespace liquify {
 namespace {
 
-constexpr auto state_version = 2;
+constexpr auto state_version = 3;
 
 auto theme_name(ThemePreference theme) -> std::string_view {
     switch (theme) {
@@ -208,6 +208,7 @@ auto load_app_shell_state(const std::filesystem::path& repository) -> AppShellSt
     load_bool(object, "sidebarVisible", loaded.state.sidebar_visible);
     load_bool(object, "bottomPanelVisible", loaded.state.bottom_panel_visible);
     load_bool(object, "editorSplit", loaded.state.editor_split);
+    load_bool(object, "highContrast", loaded.state.high_contrast);
     if (const auto name = string_member(object, "theme")) {
         loaded.state.theme = theme_from_name(*name);
     }
@@ -235,6 +236,7 @@ auto save_app_shell_state(const std::filesystem::path& repository, const AppShel
         {"editorSplitRatio", state.editor_split_ratio},
         {"theme", theme_name(state.theme)},
         {"panels", panel_registry_json(state.panel_layout)},
+        {"highContrast", state.high_contrast},
         {"sidebarVisible", state.sidebar_visible},
         {"bottomPanelVisible", state.bottom_panel_visible},
         {"editorSplit", state.editor_split},
@@ -252,8 +254,10 @@ auto save_app_shell_state(const std::filesystem::path& repository, const AppShel
 
 void reset_app_shell_layout(AppShellState& state) {
     const auto theme = state.theme;
+    const auto high_contrast = state.high_contrast;
     state = AppShellState{};
     state.theme = theme;
+    state.high_contrast = high_contrast;
 }
 
 } // namespace liquify

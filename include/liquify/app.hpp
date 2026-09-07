@@ -12,6 +12,7 @@
 
 #include "liquify/app_state.hpp"
 #include "liquify/editor_model.hpp"
+#include "liquify/input.hpp"
 #include "liquify/multiplayer.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
@@ -126,6 +127,12 @@ private:
     void apply_change(std::size_t first_line, std::size_t erased_lines, std::size_t inserted_lines);
     void handle_key(std::uint32_t key, std::uint16_t modifiers);
     void handle_text(std::string_view text);
+    void handle_composition(std::string_view text, int selection_start, int selection_length);
+    void copy_editor_selection(bool cut);
+    void paste_editor_clipboard();
+    void handle_file_drop(const std::filesystem::path& source, InputPoint point);
+    void draw_composition();
+    void update_text_input_area();
     void position_cursor(float x, float y, bool extend_selection);
     void ensure_cursor_visible();
     void prepare_smoke_frame(int frame);
@@ -135,11 +142,13 @@ private:
     void apply_settings_live(bool rebuild_fonts = false);
     void reset_settings(SettingsGroup group);
     void cycle_theme();
+    void toggle_high_contrast();
     void apply_theme();
     void load_font_atlas(float scale);
     void update_window_title();
     void capture_screenshot();
     [[nodiscard]] auto dark_theme_active() const -> bool;
+    [[nodiscard]] auto high_contrast_active() const -> bool;
     [[nodiscard]] auto screenshot_mode() const -> bool;
     void shutdown();
 
@@ -156,6 +165,7 @@ private:
     std::unique_ptr<TextLayoutCache> layouts_;
     std::unique_ptr<RetainedTextLayer> text_layer_;
     AppShellState shell_state_;
+    InputState input_;
     PanelRegistry panels_;
     Settings settings_;
     SettingsScope settings_scope_{SettingsScope::user};
@@ -168,6 +178,8 @@ private:
     float editor_height_{};
     float line_height_{};
     float cell_width_{};
+    InputRectangle repository_drop_rectangle_;
+    InputRectangle editor_drop_rectangle_;
     std::size_t scroll_line_{};
     float horizontal_scroll_{};
     std::size_t visible_lines_{};
@@ -230,6 +242,8 @@ private:
     int editor_font_index_ = -1;
     int heading_font_index_ = -1;
     bool applied_dark_theme_{};
+    bool applied_high_contrast_{};
+    bool reduced_motion_{};
     bool screenshot_written_{};
     bool screenshot_failed_{};
     bool fonts_rebuild_requested_{};

@@ -8,7 +8,7 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 
 ## Status
 
-**Retained GPU editor with graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
+**Accessible retained GPU editor with graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, and opens blobs into an editable in-memory buffer; save calls
 libliquid and produces a drip.
@@ -31,7 +31,10 @@ status channel reports build, saved-drip sync, repository hydration and assistan
 exposes the command groups and Cmd bindings through the native menu bar. The searchable settings
 surface reads user and repository `.liquid` files, applies appearance, editor, keymap, AI and lake
 changes live, keeps telemetry off by default, and never places credential values in its model or
-UI. C and C++ stubs
+UI. SDL composition supports
+CJK input methods and dead keys; rich and plain clipboard forms, file drops, visible keyboard
+focus, macOS accessibility labels, high contrast and the OS reduced-motion preference cover the
+shell. C and C++ stubs
 are graph query values that resolve
 declarations from closed files without retaining full parse trees. Graph-backed editor queries run
 over error-tolerant incremental trees for open overlays, resolve through closed-file

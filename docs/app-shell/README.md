@@ -18,10 +18,13 @@ Diagnostics and the incremental graph follow the liquid #20 and #21 interfaces.
 
 **Lifecycle** (mirrors Zetta `src/gui/app.cpp`): `SDL_Init(VIDEO)` → window at 70 % of the usable
 display (floors 900×600), resizable, high-pixel-density → `SDL_CreateRenderer` + vsync → ImGui
-context (keyboard nav, no `imgui.ini`, token-derived system/light/dark style and high-density IBM
-Plex atlas) → `ImGui_ImplSDL3_InitForSDLRenderer` +
+context (keyboard nav, no `imgui.ini`, token-derived system/light/dark/high-contrast style and
+high-density IBM Plex atlas with platform CJK fallback) → `ImGui_ImplSDL3_InitForSDLRenderer` +
 `ImGui_ImplSDLRenderer3_Init`. Each frame: poll events (quit on `SDL_EVENT_QUIT` or the window's
-close request), ImGui frame, one full-viewport window, render, present. Shutdown in reverse.
+close request), translate text composition and file-drop events, poll accessibility preferences,
+ImGui frame, one full-viewport window, render, present. Shutdown in reverse. The input state
+machine, focus order and macOS accessibility tree are documented in
+[`../ui/accessibility.md`](../ui/accessibility.md).
 
 **Repository call path.** `liquify <path>` passes the path through `AppOptions` to
 `RepositoryView::open`. That function always launches a `std::async(std::launch::async)` worker;
@@ -89,7 +92,9 @@ invalidation. No repository fixture bytes are committed.
 Plugin tests cover configured global and repository paths; a bad module remains a visible load
 failure while later valid modules register normally.
 Panel-registry and app-shell state tests cover docking, focus, progress, cancellation, reset,
-repository-local round trips, version 1 migration and invalid state. Screenshot tests read the
+repository-local round trips, version 1 migration, high-contrast persistence and invalid state.
+Input state tests cover composition, clipboard conversion, drop routing, motion and accessibility
+metadata. Screenshot tests read the
 in-tree PNG output and inspect stable pixel regions, and `tools/ui/screenshot.sh` renders the full
 light/dark state matrix. Settings model tests cover the `.liquid` user file, repository overlays,
 live-safe defaults, validation, reset, search, and credential-free serialization

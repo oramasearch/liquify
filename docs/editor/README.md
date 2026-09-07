@@ -37,7 +37,12 @@ The default mode is standard, non-modal editing. Arrow, Home, End, Page Up, Page
 Backspace, Delete, Return and text input edit directly. The mode button or primary-modifier+M
 switches to modal command mode; `i` and `a` enter insert mode, Escape returns to command mode, and
 `h`, `j`, `k`, `l`, `0`, `$` and `x` provide its initial command set. Primary-modifier+S saves in
-either mode.
+either mode. SDL composition events keep CJK and dead-key pre-edit text out of the buffer until
+commit. Cut and copy publish rich and plain clipboard forms; paste prefers plain text and accepts
+HTML-only sources. Tab returns focus from the retained editor to the shell, while
+primary-modifier+`]` inserts the repository indentation. Desktop file drops write through
+libliquid at the repository root or beside the active blob. The complete contract and focus order
+are in [`../ui/accessibility.md`](../ui/accessibility.md).
 
 ## Retained rendering
 
