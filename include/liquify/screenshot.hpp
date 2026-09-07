@@ -20,6 +20,8 @@ enum class ScreenshotTheme : std::uint8_t {
 
 enum class ScreenshotView : std::uint8_t {
     welcome,
+    repository_unreadable,
+    lake_offline,
     repository,
     editor_cpp,
     editor_view,

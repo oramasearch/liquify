@@ -12,6 +12,8 @@ Every screen has light and dark variants:
 | Screen | Purpose | Light | Dark |
 |---|---|---|---|
 | Welcome | First-run entry point and repository action | [`welcome-light.png`](screenshots/welcome-light.png) | [`welcome-dark.png`](screenshots/welcome-dark.png) |
+| Unreadable repository | Local error and retry actions | [`repository-unreadable-light.png`](screenshots/repository-unreadable-light.png) | [`repository-unreadable-dark.png`](screenshots/repository-unreadable-dark.png) |
+| Lake offline | Expected offline clone recovery | [`lake-offline-light.png`](screenshots/lake-offline-light.png) | [`lake-offline-dark.png`](screenshots/lake-offline-dark.png) |
 | Repository | Open repository and deterministic tree | [`repository-light.png`](screenshots/repository-light.png) | [`repository-dark.png`](screenshots/repository-dark.png) |
 | C++ editor | C++ buffer with a highlighted source line | [`editor-cpp-light.png`](screenshots/editor-cpp-light.png) | [`editor-cpp-dark.png`](screenshots/editor-cpp-dark.png) |
 | Editor view | Multi-cursor source, search results, syntax and gutters | [`editor-view-light.png`](screenshots/editor-view-light.png) | [`editor-view-dark.png`](screenshots/editor-view-dark.png) |
@@ -53,8 +55,8 @@ landmarks rather than whole-image hashes so harmless rasterizer differences do n
 intended signal. The editor-view assertion separately proves its themed gutter and syntax roles;
 [`editor.md`](editor.md) records the interaction and liquid data paths.
 
-`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at twelve screens and
-twenty-four named states. The panel behavior and layout model are documented in
+`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at fourteen screens
+and twenty-eight named states. The panel behavior and layout model are documented in
 [`panels.md`](panels.md).
 
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced

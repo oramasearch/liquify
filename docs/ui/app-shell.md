@@ -58,7 +58,7 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects twelve seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects fourteen seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -75,6 +75,8 @@ The committed evidence is:
 | State | Light | Dark |
 |---|---|---|
 | Welcome | [light](screenshots/welcome-light.png) | [dark](screenshots/welcome-dark.png) |
+| Unreadable repository | [light](screenshots/repository-unreadable-light.png) | [dark](screenshots/repository-unreadable-dark.png) |
+| Lake offline | [light](screenshots/lake-offline-light.png) | [dark](screenshots/lake-offline-dark.png) |
 | Repository | [light](screenshots/repository-light.png) | [dark](screenshots/repository-dark.png) |
 | Editor tabs and split | [light](screenshots/editor-cpp-light.png) | [dark](screenshots/editor-cpp-dark.png) |
 | Editor view | [light](screenshots/editor-view-light.png) | [dark](screenshots/editor-view-dark.png) |

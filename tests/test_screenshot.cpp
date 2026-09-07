@@ -61,9 +61,13 @@ TEST(Screenshot, EditorViewShowsSearchGutterAndBothThemes) {
 TEST(Screenshot, RegistryIncludesPanelSystemInBothThemes) {
     EXPECT_NE(find_screenshot_state("panels-light"), nullptr);
     EXPECT_NE(find_screenshot_state("panels-dark"), nullptr);
+    EXPECT_NE(find_screenshot_state("repository-unreadable-light"), nullptr);
+    EXPECT_NE(find_screenshot_state("repository-unreadable-dark"), nullptr);
+    EXPECT_NE(find_screenshot_state("lake-offline-light"), nullptr);
+    EXPECT_NE(find_screenshot_state("lake-offline-dark"), nullptr);
     EXPECT_NE(find_screenshot_state("settings-light"), nullptr);
     EXPECT_NE(find_screenshot_state("settings-dark"), nullptr);
-    EXPECT_EQ(screenshot_states().size(), 24U);
+    EXPECT_EQ(screenshot_states().size(), 28U);
 }
 
 TEST(Screenshot, SettingsRenderGroupedControlsInBothThemes) {

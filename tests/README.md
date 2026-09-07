@@ -3,7 +3,8 @@
 `test_repository_view.cpp` creates its readable repository through the pinned `liquid::repository`
 API, writes root and nested entries, and proves that `RepositoryView` reads the same on-disk format
 it links while leaving nested trees unloaded until requested. It also creates a corrupt
-`LIQUID_REPO` marker and checks that the liquid error reaches the view.
+`LIQUID_REPO` marker, checks repository summary metadata, and verifies that clone target validation
+leaves existing contents unchanged.
 
 `test_print_tree_error.cmake` runs the built `liquify --print-tree` command against a corrupt
 repository created in the build tree. It requires a non-zero exit and the same liquid error on
@@ -55,6 +56,10 @@ attaches when a daemon already owns the checkout, serializes overlay mutations, 
 diagnostics and cursor-query results, records edit-to-diagnostic latency and formats the validation
 backlog from daemon status. Its editor-view case loads liquid's real tree-sitter frontend and
 checks syntax, attribution, repository search/replace and operation-log undo.
+
+`test_first_run.cpp` covers repository open/switch state, recent-repository persistence, identity
+session persistence without credentials, distinct unreadable/offline failures, and the complete
+status-bar signal model.
 
 `test_structural_edit.cpp` covers the syntax ancestor selection chain, exact reference ranges,
 rename across two files with one drip per file, unresolved string occurrences, stale-fingerprint
