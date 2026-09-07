@@ -37,6 +37,23 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(LIQUIFY_BUILD_TESTS "Build the test suite" ON)
 
+# Release numbers are provisional; identify the actual IDE and library artifacts.
+find_package(Git REQUIRED)
+foreach(component IN ITEMS LIQUIFY LIQUID)
+  if(component STREQUAL "LIQUIFY")
+    set(revision_directory "${CMAKE_CURRENT_SOURCE_DIR}")
+  else()
+    set(revision_directory "${CMAKE_CURRENT_SOURCE_DIR}/modules/liquid")
+  endif()
+  execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+    WORKING_DIRECTORY "${revision_directory}"
+    RESULT_VARIABLE revision_result
+    OUTPUT_VARIABLE ${component}_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE)
+  if(NOT revision_result EQUAL 0)
+    message(FATAL_ERROR "Cannot identify ${component} source revision")
+  endif()
+endforeach()
+
 find_program(LIQUIFY_NODE_EXECUTABLE NAMES node nodejs)
 if(LIQUIFY_NODE_EXECUTABLE)
   add_custom_target(liquify-token-gate
@@ -142,6 +159,7 @@ add_library(liquify-core STATIC
   src/navigation.cpp
   src/multiplayer.cpp
   src/plugin.cpp
+  src/repository_error.cpp
   src/repository_view.cpp
   src/review.cpp
   src/settings.cpp
@@ -150,6 +168,9 @@ add_library(liquify-core STATIC
   src/text_layout.cpp
   src/stub_tree.cpp
   src/version.cpp)
+target_compile_definitions(liquify-core PRIVATE
+  LIQUIFY_REVISION="${LIQUIFY_REVISION}"
+  LIQUIFY_LIQUID_REVISION="${LIQUID_REVISION}")
 target_include_directories(liquify-core
   PUBLIC include
   PRIVATE modules/corosio/include modules/http/include modules/liquid/src)

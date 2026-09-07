@@ -22,7 +22,7 @@ separate retry states; lake unavailability is normal offline operation
 `liquify <path>` opens a liquid repository through the public coroutine API, off the render
 thread, renders its root entries, loads nested trees on expansion, and opens blobs into an
 editable in-memory buffer; save writes through libliquid as a drip. Unreadable repositories show
-liquid's error and make `--print-tree` exit non-zero. A background index classifies every path,
+liquid's error, adding upgrade guidance for unsupported formats, and make `--print-tree` exit non-zero. A background index classifies every path,
 adds libliquid drive and repository change annotations, and retains libliquid symbol records.
 Quick Open, Symbol Search, definitions, references, available call relationships, breadcrumbs,
 recent locations, history traversal, and repository context actions share one registered default-key
@@ -64,7 +64,10 @@ history. Its interaction, worker and screenshot contracts are in
 
 ## The liquid pin
 
-liquid is pinned at `modules/liquid`. The pin includes liquid's compact-checkpoint repository
+liquid is pinned at `modules/liquid` to `7ff6ed82f93b916ef206c5776e2761b19536d8f3`.
+An independent CLI → IDE → CLI integration check exercises repository creation, file listing,
+editor save, read-back, and unsupported-format guidance; the artifact combinations are in
+[`../build/store-compatibility.md`](../build/store-compatibility.md). The pin includes liquid's compact-checkpoint repository
 format, Phase 2 and 3 APIs, the persisted demand-driven query graph, tree-diff and
 record-enumeration APIs, the per-checkout daemon, registered frontend modules with per-definition
 C/C++ actions, the C/C++ stub-tree query, text-anchor mapping, and the coroutine-native forge

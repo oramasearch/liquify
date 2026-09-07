@@ -59,7 +59,7 @@ files under [`../ui/commands.md`](../ui/commands.md);
 dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md),
 [`../ui/app-shell.md`](../ui/app-shell.md)); `liquify --smoke [N]` scrolls and edits a generated
 50,000-line buffer for N frames (default 30), prints latency metrics, and exits 0; `liquify
-version` prints `liquify <v> (libliquid <v>)`. The complete build, test and run sequence is
+version` prints IDE and libliquid versions with their exact revisions and supported store formats. The complete build, test and run sequence is
 [`../build/local.md`](../build/local.md).
 
 The front door opens a folder through the native SDL dialog, clones a lake repository through
@@ -71,7 +71,7 @@ state file contains the public actor and custody description, never a credential
 
 **libliquid.** liquid is a submodule at `modules/liquid`, built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is `fd7ee06ee9f4`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
+`liquid::liquid`. The pin is `7ff6ed82f93b916ef206c5776e2761b19536d8f3`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
 distribution foundation, compact shallow repository checkpoints, the persisted demand-driven
 query graph from liquid #20, tree-diff and record-enumeration APIs, and the per-checkout daemon and
 cursor fan-out from liquid #21. It also includes liquid #65's registered frontend modules and
@@ -83,6 +83,9 @@ per-reference sync outcomes, streaming source import, flow control, repository p
 operation-log undo, liquid #30's scoped sessions, semantic leases, transient presence, and
 compaction epochs, plus liquid #248's per-line attribution query and versioned plugin event
 callbacks. It also provides the drive-backed clone path used by the repository front door.
+The pin adds liquid #283's version-5 object-map reader and chunk compression. Artifact revisions,
+format upgrade messages, and the independent CLI/IDE integration check are documented in
+[`../build/store-compatibility.md`](../build/store-compatibility.md).
 Checkpoints written before
 the automerge-cpp adoption in liquid #136 do not load. liquid has its own Capy, Corosio and
 automerge-cpp submodules, so

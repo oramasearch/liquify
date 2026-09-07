@@ -15,7 +15,17 @@ location history, and unique default bindings for every navigation action.
 repository created in the build tree. It requires a non-zero exit and the same liquid error on
 standard error. No repository fixture bytes are committed.
 
-`test_version.cpp` checks the public liquify version value and string.
+`test_version.cpp` checks the public liquify version value and revision-bearing build description.
+`test_repository_error.cpp` distinguishes unsupported object-map tags from missing, truncated,
+and corrupt maps and checks the upgrade guidance. `independent_cli_compat.py` is registered as
+`liquify-independent-cli-compat`: it builds a separate liquid CLI checkout or accepts an independently
+built artifact, creates the input through that CLI, runs the IDE and `compat_editor.cpp`, and
+reads the saved bytes back through the CLI's Git export. The same check covers an unsupported
+format and can include an independently cloned lake repository. See
+[`../docs/build/store-compatibility.md`](../docs/build/store-compatibility.md).
+On macOS, do not place `TMPDIR` under a deep absolute worktree path: liquid's daemon socket
+can exceed the platform path limit. See the compatibility page for the separate liquid#282
+FSEvents host-contention condition.
 
 `test_command.cpp` covers the complete built-in registry, fuzzy matching, recent-command order,
 platform primary modifiers, typed `.liquid` keymap parsing, overrides, unbinding, conflict

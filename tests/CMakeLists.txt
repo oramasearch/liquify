@@ -13,6 +13,7 @@ add_executable(liquify-tests
   test_multiplayer.cpp
   test_plugin.cpp
   test_repository_view.cpp
+  test_repository_error.cpp
   test_review.cpp
   test_settings.cpp
   test_screenshot.cpp
@@ -40,6 +41,19 @@ target_include_directories(liquify-tests PRIVATE
   ${CMAKE_SOURCE_DIR}/modules/corosio/include)
 include(GoogleTest)
 gtest_discover_tests(liquify-tests)
+
+add_executable(liquify-compat-editor compat_editor.cpp)
+target_link_libraries(liquify-compat-editor PRIVATE liquify-core)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(LIQUIFY_COMPAT_CLI "" CACHE FILEPATH "Separately configured and built supported liquid CLI")
+add_test(NAME liquify-independent-cli-compat
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/independent_cli_compat.py
+    --ide $<TARGET_FILE:liquify>
+    --editor $<TARGET_FILE:liquify-compat-editor>
+    --work ${CMAKE_CURRENT_BINARY_DIR}/independent-compat
+    --revision 7ff6ed82f93b916ef206c5776e2761b19536d8f3
+    --cli "${LIQUIFY_COMPAT_CLI}")
+set_tests_properties(liquify-independent-cli-compat PROPERTIES RUN_SERIAL TRUE)
 
 add_test(
   NAME liquify-print-tree-unreadable
