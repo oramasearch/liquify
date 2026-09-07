@@ -58,8 +58,8 @@ landmarks rather than whole-image hashes so harmless rasterizer differences do n
 intended signal. The editor-view assertion separately proves its themed gutter and syntax roles;
 [`editor.md`](editor.md) records the interaction and liquid data paths.
 
-`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at fifteen screens
-and thirty named states. The panel behavior and layout model are documented in
+`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at sixteen screens
+and thirty-two named states. The panel behavior and layout model are documented in
 [`panels.md`](panels.md).
 
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced

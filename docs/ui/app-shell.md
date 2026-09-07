@@ -65,7 +65,7 @@ The native window title is `<repository> — <current change> — liquify`; an o
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects fifteen seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects sixteen seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.
@@ -98,10 +98,10 @@ The committed evidence is:
 | Settings | [light](screenshots/settings-light.png) | [dark](screenshots/settings-dark.png) |
 | Accessibility | [light](screenshots/accessibility-light.png) | [dark](screenshots/accessibility-dark.png) |
 
-`Screenshot.EditorRendersSelectedSource`, `Screenshot.EditorViewShowsSearchGutterAndBothThemes`
-`Screenshot.PanelRendersDiagnostics`, and
-`Screenshot.NavigationRendersQuickOpenAndAnnotatedTree` and
-`Screenshot.SettingsRenderGroupedControlsInBothThemes` read the generated PNG files and check
+`Screenshot.EditorRendersSelectedSource`, `Screenshot.EditorViewShowsSearchGutterAndBothThemes`,
+`Screenshot.PanelRendersDiagnostics`, `Screenshot.NavigationRendersQuickOpenAndAnnotatedTree`,
+`Screenshot.SettingsRenderGroupedControlsInBothThemes`, and
+`Screenshot.AccessibilityStateShowsHighContrastFocusInBothThemes` read the generated PNG files and check
 stable shell pixels; `PanelRegistry` and `AppShellState` tests cover registry behavior,
 repository-local round trips, version 1 migration, reset, and invalid state. The screenshot script
 checks the complete matrix and each capture command reports its dimensions.
