@@ -135,6 +135,7 @@ add_library(liquify-core STATIC
   src/editor_model.cpp
   src/editor_graph.cpp
   src/input.cpp
+  src/first_run.cpp
   src/interactive_analysis.cpp
   src/panel.cpp
   src/multiplayer.cpp

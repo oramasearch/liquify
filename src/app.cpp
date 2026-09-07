@@ -7,10 +7,12 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <future>
 #include <initializer_list>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -26,6 +28,7 @@
 
 #include "editor_buffer.hpp"
 #include "liquid/hash.hpp"
+#include "liquid/identity.hpp"
 #include "liquid/liquid.hpp"
 #include "liquify/ai_config.hpp"
 #include "liquify/assistant.hpp"
@@ -1150,60 +1153,30 @@ App::App(AppOptions options) : options_(std::move(options)) {
         settings_diagnostics_ = std::move(loaded_settings.diagnostics);
     }
     settings_scope_ = options_.repository_path ? SettingsScope::repository : SettingsScope::user;
-    if (options_.repository_path) {
-        auto loaded_state = load_app_shell_state(*options_.repository_path);
-        shell_state_ = loaded_state.state;
-        shell_state_.theme = settings_.theme;
-        if (!loaded_state.error.empty()) {
-            editor_status_ = std::move(loaded_state.error);
-        }
-        repository_ =
-            std::make_unique<RepositoryView>(RepositoryView::open(*options_.repository_path));
-        if (repository_->error().empty()) {
-            auto plugins = load_configured_plugins(*options_.repository_path);
-            if (!plugins) {
-                plugin_host_ = std::make_shared<PluginHost>();
-                auto message = plugins.error().message;
-                if (!plugins.error().context.empty()) {
-                    message += ": " + plugins.error().context;
-                }
-                plugin_failures_.push_back({{}, std::move(message)});
-            } else {
-                plugin_host_ = std::move(plugins->host);
-                plugin_failures_ = std::move(plugins->failures);
-            }
-            editor_graph_ = std::make_unique<EditorGraph>(
-                *options_.repository_path, plugin_host_, syntax_frontend_path());
-            auto config = AiConfig{.enabled = settings_.ai.enabled,
-                                   .context_bytes = settings_.ai.context_bytes,
-                                   .model = settings_.ai.model,
-                                   .max_tokens = settings_.ai.max_tokens};
-            {
-                ai_context_bytes_ = config.context_bytes;
-                auto key = ConfiguredSecret{};
-                if (config.enabled) {
-                    key = anthropic_api_key();
-                }
-                const auto secret = key.value;
-                assistant_ = std::make_unique<Assistant>(config, key.configured, [secret] {
-                    return std::make_unique<AnthropicProvider>(secret);
-                });
-            }
-            if (options_.lake_url) {
-                try {
-                    const auto* token = std::getenv("LIQUID_TOKEN");
-                    review_ = std::make_unique<ReviewController>(
-                        *options_.repository_path,
-                        *options_.lake_url,
-                        token == nullptr ? std::string{} : std::string{token});
-                    review_->request_list();
-                } catch (const std::exception& error) {
-                    editor_status_ = std::string{"review configuration: "} + error.what();
-                }
-            }
+    shell_state_.theme = settings_.theme;
+    first_run_state_path_ = default_first_run_state_path();
+    if (!options_.screenshot_state) {
+        auto loaded = load_first_run_state(first_run_state_path_);
+        first_run_ = std::move(loaded.state);
+        if (!loaded.error.empty()) {
+            editor_status_ = std::move(loaded.error);
         }
     }
-    panels_.restore(shell_state_.panel_layout);
+    const auto initial_repository = options_.repository_path;
+    options_.repository_path.reset();
+    if (initial_repository) {
+        auto repository =
+            std::make_unique<RepositoryView>(RepositoryView::open(*initial_repository));
+        if (repository->error().empty()) {
+            activate_repository(std::move(repository));
+            first_run_.repository_opened(repository_summary());
+            persist_first_run();
+        } else {
+            first_run_.open_failed(*initial_repository, std::string(repository->error()));
+        }
+    } else {
+        panels_.restore(shell_state_.panel_layout);
+    }
     if (options_.smoke) {
         editor_ = std::make_unique<EditorBuffer>(
             EditorBuffer::from_text("smoke-50000", "smoke-50000.txt", smoke_text()));
@@ -1219,8 +1192,38 @@ App::App(AppOptions options) : options_(std::move(options)) {
         options_.forced_theme = screenshot->theme == ScreenshotTheme::dark ? ThemePreference::dark
                                                                            : ThemePreference::light;
         shell_state_.high_contrast = screenshot->high_contrast;
+        first_run_.restore(
+            {{.path = "/Users/ora/projects/liquify",
+              .name = "liquify",
+              .last_change = "First-run repository lifecycle",
+              .last_changed_at = "Today",
+              .branch = "issue-36-first-run",
+              .opened_at = std::chrono::sys_seconds{std::chrono::seconds{30}}},
+             {.path = "/Users/ora/projects/liquid",
+              .name = "liquid",
+              .last_change = "Drive clone support",
+              .last_changed_at = "Yesterday",
+              .branch = "main",
+              .opened_at = std::chrono::sys_seconds{std::chrono::seconds{20}}},
+             {.path = "/Users/ora/projects/orama-bridge",
+              .name = "orama-bridge",
+              .last_change = "Update tracking",
+              .last_changed_at = "Sep 4",
+              .branch = "main",
+              .opened_at = std::chrono::sys_seconds{std::chrono::seconds{10}}}},
+            IdentitySession{.actor = "taap:1:ed25519:7YQ2M4AB", .custody = "local device"});
+        if (screenshot->view == ScreenshotView::repository_unreadable) {
+            first_run_.open_failed("/Users/ora/projects/missing",
+                                   "repository marker is not readable");
+        } else if (screenshot->view == ScreenshotView::lake_offline) {
+            first_run_.begin_clone("https://lake.orama.com/orama/example",
+                                   "/Users/ora/projects/example");
+            first_run_.clone_failed("lake.orama.com is unreachable", true);
+        }
     }
-    if (screenshot != nullptr && screenshot->view != ScreenshotView::welcome) {
+    if (screenshot != nullptr && screenshot->view != ScreenshotView::welcome &&
+        screenshot->view != ScreenshotView::repository_unreadable &&
+        screenshot->view != ScreenshotView::lake_offline) {
         editor_ = std::make_unique<EditorBuffer>(
             EditorBuffer::from_text("screenshot-main", "src/app.cpp", screenshot_text()));
         layouts_ = std::make_unique<TextLayoutCache>();
@@ -1286,6 +1289,248 @@ App::App(AppOptions options) : options_(std::move(options)) {
             settings_.lake_accounts.push_back({"orama", "https://api.oramasearch.com/liquid"});
         }
     }
+}
+
+void App::activate_repository(std::unique_ptr<RepositoryView> repository) {
+    if (repository_) {
+        persist_shell_state();
+    }
+    editor_.reset();
+    layouts_.reset();
+    text_layer_.reset();
+    editor_graph_.reset();
+    review_.reset();
+    assistant_.reset();
+    plugin_host_.reset();
+    plugin_failures_.clear();
+    plugin_panels_.clear();
+    multiplayer_.reset();
+    multiplayer_refresh_ = {};
+    next_multiplayer_refresh_ = {};
+    find_query_.clear();
+    replace_query_.clear();
+    buffer_matches_.clear();
+    find_match_index_ = 0;
+    column_selection_anchor_.reset();
+    repository_ = std::move(repository);
+    options_.repository_path = repository_->path();
+    if (!screenshot_mode()) {
+        auto loaded_settings = load_settings(options_.repository_path);
+        settings_ = std::move(loaded_settings.settings);
+        settings_diagnostics_ = std::move(loaded_settings.diagnostics);
+    }
+    settings_scope_ = SettingsScope::repository;
+
+    auto loaded_state = load_app_shell_state(*options_.repository_path);
+    shell_state_ = loaded_state.state;
+    shell_state_.theme = settings_.theme;
+    if (!loaded_state.error.empty()) {
+        editor_status_ = std::move(loaded_state.error);
+    } else {
+        editor_status_.clear();
+    }
+    panels_ = PanelRegistry{};
+    panels_.restore(shell_state_.panel_layout);
+
+    auto plugins = load_configured_plugins(*options_.repository_path);
+    if (!plugins) {
+        plugin_host_ = std::make_shared<PluginHost>();
+        auto message = plugins.error().message;
+        if (!plugins.error().context.empty()) {
+            message += ": " + plugins.error().context;
+        }
+        plugin_failures_.push_back({{}, std::move(message)});
+    } else {
+        plugin_host_ = std::move(plugins->host);
+        plugin_failures_ = std::move(plugins->failures);
+    }
+    editor_graph_ = std::make_unique<EditorGraph>(
+        *options_.repository_path, plugin_host_, syntax_frontend_path());
+
+    auto config = AiConfig{.enabled = settings_.ai.enabled,
+                           .context_bytes = settings_.ai.context_bytes,
+                           .model = settings_.ai.model,
+                           .max_tokens = settings_.ai.max_tokens};
+    ai_context_bytes_ = config.context_bytes;
+    auto key = ConfiguredSecret{};
+    if (config.enabled) {
+        key = anthropic_api_key();
+    }
+    const auto secret = key.value;
+    assistant_ = std::make_unique<Assistant>(
+        config, key.configured, [secret] { return std::make_unique<AnthropicProvider>(secret); });
+    if (options_.lake_url) {
+        try {
+            const auto* token = std::getenv("LIQUID_TOKEN");
+            review_ = std::make_unique<ReviewController>(*options_.repository_path,
+                                                         *options_.lake_url,
+                                                         token == nullptr ? std::string{}
+                                                                          : std::string{token});
+            review_->request_list();
+        } catch (const std::exception& error) {
+            editor_status_ = std::string{"review configuration: "} + error.what();
+        }
+    }
+}
+
+auto App::repository_summary() const -> RepositorySummary {
+    if (!repository_) {
+        return {};
+    }
+    return {
+        .path = repository_->path(),
+        .name = repository_->name(),
+        .last_change = repository_->last_change().empty() ? std::string{"No named change"}
+                                                          : std::string{repository_->last_change()},
+        .last_changed_at = std::string{repository_->last_changed_at()},
+        .branch = repository_->branch().empty() ? std::string{"No branch"}
+                                                : std::string{repository_->branch()},
+        .current_change = std::string{repository_->current_change()},
+        .offline_reason = std::string{repository_->offline_reason()},
+        .remote_bytes = repository_->remote_bytes(),
+        .hydration_debt = repository_->hydration_debt(),
+        .pending_uploads = repository_->pending_uploads(),
+        .presence_count = repository_->presence_count(),
+    };
+}
+
+void App::persist_first_run() {
+    if (screenshot_mode()) {
+        return;
+    }
+    const auto error = save_first_run_state(first_run_state_path_, first_run_);
+    if (!error.empty()) {
+        editor_status_ = error;
+    }
+}
+
+void App::begin_open_repository(std::filesystem::path path) {
+    if (repository_operation_) {
+        return;
+    }
+    first_run_.begin_open(path);
+    repository_operation_is_clone_ = false;
+    repository_operation_.emplace(std::async(std::launch::async, [path = std::move(path)] {
+        return std::make_unique<RepositoryView>(RepositoryView::open(path));
+    }));
+}
+
+void App::begin_clone_repository(std::string remote, std::filesystem::path path) {
+    if (repository_operation_) {
+        return;
+    }
+    first_run_.begin_clone(remote, path);
+    options_.lake_url = remote;
+    repository_operation_is_clone_ = true;
+    const auto* configured_token = std::getenv("LIQUID_TOKEN");
+    const auto token = configured_token == nullptr ? std::string{} : std::string{configured_token};
+    repository_operation_.emplace(std::async(
+        std::launch::async, [path = std::move(path), remote = std::move(remote), token]() mutable {
+            return std::make_unique<RepositoryView>(
+                RepositoryView::clone(std::move(path), std::move(remote), token));
+        }));
+}
+
+void App::poll_repository_lifecycle() {
+    if (!repository_operation_ ||
+        repository_operation_->wait_for(std::chrono::milliseconds::zero()) !=
+            std::future_status::ready) {
+        return;
+    }
+    try {
+        auto repository = repository_operation_->get();
+        if (!repository->error().empty()) {
+            if (repository_operation_is_clone_) {
+                first_run_.clone_failed(std::string{repository->error()}, repository->offline());
+            } else {
+                first_run_.open_failed(first_run_.pending_path(), std::string{repository->error()});
+            }
+        } else {
+            activate_repository(std::move(repository));
+            first_run_.repository_opened(repository_summary());
+            persist_first_run();
+        }
+    } catch (const std::exception& error) {
+        if (repository_operation_is_clone_) {
+            first_run_.clone_failed(error.what(), false);
+        } else {
+            first_run_.open_failed(first_run_.pending_path(), error.what());
+        }
+    }
+    repository_operation_.reset();
+}
+
+void App::show_folder_dialog() {
+    if (folder_dialog_open_) {
+        return;
+    }
+    folder_dialog_open_ = true;
+    const auto default_location = repository_ ? repository_->path().string() : std::string{};
+    SDL_ShowOpenFolderDialog(
+        [](void* userdata, const char* const* files, int) {
+            auto* app = static_cast<App*>(userdata);
+            app->folder_dialog_open_ = false;
+            if (files != nullptr && files[0] != nullptr) {
+                app->begin_open_repository(files[0]);
+            }
+        },
+        this,
+        window_,
+        default_location.empty() ? nullptr : default_location.c_str(),
+        false);
+}
+
+void App::open_new_window(std::optional<std::filesystem::path> repository) {
+    const auto executable = options_.executable_path.string();
+    if (executable.empty()) {
+        editor_status_ = "cannot locate the liquify executable";
+        return;
+    }
+    const auto repository_argument = repository ? repository->string() : std::string{};
+    const char* arguments[] = {
+        executable.c_str(),
+        repository ? repository_argument.c_str() : nullptr,
+        nullptr,
+    };
+    auto* process = SDL_CreateProcess(arguments, false);
+    if (process == nullptr) {
+        editor_status_ = std::string{"cannot open another window: "} + SDL_GetError();
+        return;
+    }
+    SDL_DestroyProcess(process);
+}
+
+void App::begin_sign_in() {
+    if (identity_operation_) {
+        return;
+    }
+    identity_error_.clear();
+    identity_operation_.emplace(std::async(std::launch::async, [] {
+        auto signer = liquid::runtime::block_on(liquid::identity_detail::local_signer());
+        if (!signer) {
+            auto message = signer.error().message;
+            if (!signer.error().context.empty()) {
+                message = signer.error().context + ": " + message;
+            }
+            throw std::runtime_error(message);
+        }
+        const auto actor = signer->identity();
+        return IdentitySession{.actor = std::string{actor.identifier()}, .custody = actor.custody};
+    }));
+}
+
+void App::poll_sign_in() {
+    if (!identity_operation_ || identity_operation_->wait_for(std::chrono::milliseconds::zero()) !=
+                                    std::future_status::ready) {
+        return;
+    }
+    try {
+        first_run_.sign_in(identity_operation_->get());
+        persist_first_run();
+    } catch (const std::exception& error) {
+        identity_error_ = error.what();
+    }
+    identity_operation_.reset();
 }
 
 App::~App() {
@@ -1630,7 +1875,7 @@ void App::reset_panel_layout() {
 
 void App::update_window_title() {
     auto repository_name = std::string{"Welcome"};
-    if (options_.repository_path) {
+    if (options_.repository_path && first_run_.phase() == RepositoryLifecyclePhase::open) {
         repository_name = options_.repository_path->filename().string();
         if (repository_name.empty()) {
             repository_name = options_.repository_path->string();
@@ -4789,25 +5034,229 @@ void App::draw_floating_panels() {
     }
 }
 
-void App::draw_status_bar() {
-    const auto repository = screenshot_mode() ? std::string{"orama/liquify"}
-                                              : (options_.repository_path
-                                                     ? options_.repository_path->filename().string()
-                                                     : std::string{"No repository"});
-    ImGui::TextUnformatted(repository.c_str());
+void App::draw_clone_dialog() {
+    if (clone_dialog_open_) {
+        ImGui::OpenPopup("Clone from lake");
+        clone_dialog_open_ = false;
+    }
+    const auto center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+    ImGui::SetNextWindowSize(ImVec2(560.0F, 0.0F), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Clone from lake", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+    ImGui::TextWrapped("Clone a lake repository through liquid's drive client. Offline failures "
+                       "remain available for retry.");
+    ImGui::Spacing();
+    ImGui::InputTextWithHint("Lake repository", "https://lake.example/repository", &clone_remote_);
+    ImGui::InputTextWithHint("Local folder", "/path/to/new-folder", &clone_path_);
+    ImGui::Spacing();
+    const auto ready = !clone_remote_.empty() && !clone_path_.empty();
+    ImGui::BeginDisabled(!ready);
+    if (ImGui::Button("Clone repository")) {
+        begin_clone_repository(clone_remote_, clone_path_);
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
     ImGui::SameLine();
-    const auto* screenshot =
-        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
-    ImGui::TextDisabled(screenshot != nullptr && screenshot->view == ScreenshotView::editor_view
-                            ? "Editor view #32"
-                        : screenshot_mode() ? "Change #31"
-                                            : "Working change");
+    if (ImGui::Button("Cancel")) {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+void App::draw_welcome() {
+    const auto available = ImGui::GetContentRegionAvail();
+    const auto card_width = std::min(available.x - design::space8 * 2.0F, 920.0F);
+    ImGui::SetCursorPosX(std::max((available.x - card_width) * 0.5F, design::space4));
+    ImGui::SetCursorPosY(design::space8);
+    ImGui::BeginChild("first-run-card",
+                      ImVec2(card_width, std::max(available.y - design::space8 * 2.0F, 1.0F)),
+                      ImGuiChildFlags_Border,
+                      ImGuiWindowFlags_AlwaysUseWindowPadding);
+    ImGui::TextUnformatted("Welcome to liquify");
+    ImGui::TextDisabled("Build software locally. Collaborate through lake when it is reachable.");
+    ImGui::Spacing();
+
+    const auto phase = first_run_.phase();
+    if (phase == RepositoryLifecyclePhase::unreadable) {
+        ImGui::TextUnformatted("Repository could not be opened");
+        ImGui::TextWrapped("%s", first_run_.pending_path().string().c_str());
+        ImGui::TextWrapped("%s", first_run_.error().c_str());
+        if (ImGui::Button("Retry")) {
+            begin_open_repository(first_run_.pending_path());
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Choose another folder")) {
+            show_folder_dialog();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Back")) {
+            first_run_.return_to_welcome();
+        }
+        ImGui::Separator();
+    } else if (phase == RepositoryLifecyclePhase::offline ||
+               phase == RepositoryLifecyclePhase::failed) {
+        ImGui::TextUnformatted(phase == RepositoryLifecyclePhase::offline
+                                   ? "Lake is unreachable - offline is normal"
+                                   : "Repository was not cloned");
+        ImGui::TextWrapped("%s", first_run_.error().c_str());
+        if (ImGui::Button("Retry clone")) {
+            begin_clone_repository(first_run_.clone_remote(), first_run_.pending_path());
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Back")) {
+            first_run_.return_to_welcome();
+        }
+        ImGui::Separator();
+    } else if (phase == RepositoryLifecyclePhase::opening ||
+               phase == RepositoryLifecyclePhase::cloning) {
+        ImGui::TextUnformatted(phase == RepositoryLifecyclePhase::opening
+                                   ? "Opening repository..."
+                                   : "Cloning repository...");
+        ImGui::TextDisabled("%s", first_run_.pending_path().string().c_str());
+        ImGui::Separator();
+    }
+
+    ImGui::BeginDisabled(repository_operation_.has_value());
+    if (ImGui::Button("Open folder", ImVec2(150.0F, 38.0F))) {
+        show_folder_dialog();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clone from lake", ImVec2(150.0F, 38.0F))) {
+        clone_dialog_open_ = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("New window", ImVec2(150.0F, 38.0F))) {
+        open_new_window();
+    }
+    ImGui::EndDisabled();
+    ImGui::Spacing();
+
+    if (first_run_.session()) {
+        ImGui::Text("Lake session: %s", first_run_.session()->actor.c_str());
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", first_run_.session()->custody.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Sign out")) {
+            first_run_.sign_out();
+            persist_first_run();
+        }
+    } else {
+        ImGui::BeginDisabled(identity_operation_.has_value());
+        if (ImGui::Button(identity_operation_ ? "Signing in..." : "Sign in to lake")) {
+            begin_sign_in();
+        }
+        ImGui::EndDisabled();
+    }
+    if (!identity_error_.empty()) {
+        ImGui::TextWrapped("Could not establish a session: %s", identity_error_.c_str());
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Recent repositories");
+    if (first_run_.recent().empty()) {
+        ImGui::TextDisabled("Repositories you open will appear here.");
+    } else if (ImGui::BeginTable("recent-repositories",
+                                 4,
+                                 ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                     ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Repository", ImGuiTableColumnFlags_WidthStretch, 1.4F);
+        ImGui::TableSetupColumn("Last change", ImGuiTableColumnFlags_WidthStretch, 2.2F);
+        ImGui::TableSetupColumn("Branch", ImGuiTableColumnFlags_WidthStretch, 1.0F);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 86.0F);
+        ImGui::TableHeadersRow();
+        for (const auto& recent : first_run_.recent()) {
+            ImGui::PushID(recent.path.string().c_str());
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            if (ImGui::Selectable(
+                    recent.name.c_str(), false, ImGuiSelectableFlags_SpanAllColumns)) {
+                begin_open_repository(recent.path);
+            }
+            ImGui::TextDisabled("%s", recent.path.string().c_str());
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextWrapped("%s", recent.last_change.c_str());
+            ImGui::TextDisabled("%s", recent.last_changed_at.c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(recent.branch.c_str());
+            ImGui::TableSetColumnIndex(3);
+            if (ImGui::SmallButton("New window")) {
+                open_new_window(recent.path);
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    ImGui::EndChild();
+    draw_clone_dialog();
+}
+
+void App::draw_status_bar() {
+    const auto graph = editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
+    auto input = StatusBarInput{
+        .repository_open = repository_ != nullptr,
+        .daemon_running = editor_graph_ != nullptr,
+        .daemon_available = editor_graph_ != nullptr,
+        .sync_running = sync_was_running_,
+        .hydration_running =
+            hydration_was_running_ || (repository_ && repository_->loading_directory_count() > 0),
+        .build_running = graph.build_running,
+        .offline = repository_ && repository_->offline(),
+        .pending_uploads = repository_ ? repository_->pending_uploads() : 0,
+        .hydration_debt = repository_ ? repository_->hydration_debt() : 0,
+        .remote_bytes = repository_ ? repository_->remote_bytes() : 0,
+        .presence_count = repository_ ? repository_->presence_count() : 0,
+        .notification_count = panels_.notifications().size(),
+        .build_result = graph.build_result,
+        .current_change = repository_ ? std::string{repository_->current_change()} : std::string{},
+        .branch = repository_ ? std::string{repository_->branch()} : std::string{},
+        .session = first_run_.session() ? first_run_.session()->actor : std::string{},
+    };
+    if (screenshot_mode() && editor_) {
+        input.repository_open = true;
+        input.daemon_running = true;
+        input.daemon_available = true;
+        input.build_result = "passed";
+        input.presence_count = 3;
+        input.current_change = "blake3:7f2a921bf67e";
+        input.branch = "issue-36-first-run";
+        input.session = "taap:1:ed25519:7YQ2M4";
+    }
+
+    const auto repository_name = repository_ ? repository_->name() : std::string{"liquify"};
+    if (repository_ && ImGui::SmallButton(repository_name.c_str())) {
+        first_run_.return_to_welcome();
+    } else if (!repository_) {
+        ImGui::TextUnformatted(repository_name.c_str());
+    }
+    const auto segments = status_bar_segments(input);
+    for (const auto& segment : segments) {
+        ImGui::SameLine();
+        if (segment.ends_with("notifications") && panels_.latest_notification() != nullptr) {
+            if (ImGui::SmallButton(segment.c_str())) {
+                const auto* notification = panels_.latest_notification();
+                panels_.focus(notification->panel);
+                const auto placement = panels_.layout(notification->panel).placement;
+                shell_state_.sidebar_visible =
+                    placement == PanelPlacement::sidebar ? true : shell_state_.sidebar_visible;
+                shell_state_.bottom_panel_visible =
+                    placement == PanelPlacement::bottom ? true : shell_state_.bottom_panel_visible;
+            }
+        } else if (segment == "Sign in") {
+            if (ImGui::SmallButton(segment.c_str())) {
+                begin_sign_in();
+            }
+        } else {
+            ImGui::TextDisabled("%s", segment.c_str());
+        }
+    }
     if (editor_) {
         const auto cursor = editor_->cursor();
         ImGui::SameLine();
-        ImGui::TextDisabled("Ln %zu, Col %zu", cursor.line + 1, cursor.byte + 1);
+        ImGui::TextDisabled("Ln %zu:%zu", cursor.line + 1, cursor.byte + 1);
         ImGui::SameLine();
-        ImGui::TextDisabled("%zu cursors · %s: %zu · %s",
+        ImGui::TextDisabled("%zu cursors | %s:%zu | %s",
                             editor_->cursors().size(),
                             editor_->preferences().indent_style == IndentStyle::tabs ? "Tabs"
                                                                                      : "Spaces",
@@ -4816,17 +5265,6 @@ void App::draw_status_bar() {
     }
     if (const auto* notification = panels_.latest_notification()) {
         ImGui::PushID(notification->id.c_str());
-        ImGui::SameLine();
-        if (ImGui::SmallButton(notification->message.c_str())) {
-            panels_.focus(notification->panel);
-            const auto placement = panels_.layout(notification->panel).placement;
-            if (placement == PanelPlacement::sidebar) {
-                shell_state_.sidebar_visible = true;
-            } else if (placement == PanelPlacement::bottom) {
-                shell_state_.bottom_panel_visible = true;
-            }
-            persist_shell_state();
-        }
         if (notification->active && notification->total > 0) {
             ImGui::SameLine();
             const auto fraction = static_cast<float>(notification->completed) /
@@ -4865,6 +5303,26 @@ void App::draw_status_bar() {
 
 void App::draw_contents() {
     const auto available = ImGui::GetContentRegionAvail();
+    const auto* screenshot =
+        options_.screenshot_state ? find_screenshot_state(*options_.screenshot_state) : nullptr;
+    const auto screenshot_workspace = screenshot != nullptr &&
+                                      screenshot->view != ScreenshotView::welcome &&
+                                      screenshot->view != ScreenshotView::repository_unreadable &&
+                                      screenshot->view != ScreenshotView::lake_offline;
+    const auto show_first_run = !options_.smoke && !screenshot_workspace &&
+                                first_run_.phase() != RepositoryLifecyclePhase::open;
+    if (show_first_run) {
+        const auto content_height =
+            std::max(available.y - status_bar_height - ImGui::GetStyle().ItemSpacing.y, 1.0F);
+        ImGui::BeginChild("first-run", ImVec2(available.x, content_height));
+        draw_welcome();
+        ImGui::EndChild();
+        ImGui::BeginChild(
+            "status-bar", ImVec2(available.x, status_bar_height), ImGuiChildFlags_Border);
+        draw_status_bar();
+        ImGui::EndChild();
+        return;
+    }
     const auto center_height =
         std::max(available.y - status_bar_height - ImGui::GetStyle().ItemSpacing.y, 1.0F);
     ImGui::BeginChild(
@@ -5054,6 +5512,8 @@ void App::render_editor() {
 }
 
 void App::frame() {
+    poll_repository_lifecycle();
+    poll_sign_in();
     poll_editor_graph();
     poll_review();
     poll_plugins();
@@ -5297,6 +5757,7 @@ void App::shutdown() {
         return;
     }
     persist_shell_state();
+    persist_first_run();
     SDL_StopTextInput(window_);
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();

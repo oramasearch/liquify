@@ -13,6 +13,7 @@
 #include "liquify/app_state.hpp"
 #include "liquify/editor_model.hpp"
 #include "liquify/input.hpp"
+#include "liquify/first_run.hpp"
 #include "liquify/multiplayer.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/review.hpp"
@@ -45,6 +46,7 @@ struct AppOptions {
     std::optional<std::string> screenshot_state;
     std::optional<std::filesystem::path> screenshot_output;
     std::optional<ThemePreference> forced_theme;
+    std::filesystem::path executable_path;
 };
 
 class App {
@@ -73,6 +75,8 @@ private:
     void draw_panel_menu(PanelId id);
     void draw_diagnostics_panel(const EditorGraphSnapshot& snapshot);
     void draw_status_bar();
+    void draw_welcome();
+    void draw_clone_dialog();
     void draw_split_editor();
     void draw_repository_tree();
     void draw_repository_entries(std::string_view directory);
@@ -146,6 +150,16 @@ private:
     void apply_theme();
     void load_font_atlas(float scale);
     void update_window_title();
+    void begin_open_repository(std::filesystem::path path);
+    void begin_clone_repository(std::string remote, std::filesystem::path path);
+    void poll_repository_lifecycle();
+    void activate_repository(std::unique_ptr<RepositoryView> repository);
+    void show_folder_dialog();
+    void open_new_window(std::optional<std::filesystem::path> repository = {});
+    void begin_sign_in();
+    void poll_sign_in();
+    void persist_first_run();
+    [[nodiscard]] auto repository_summary() const -> RepositorySummary;
     void capture_screenshot();
     [[nodiscard]] auto dark_theme_active() const -> bool;
     [[nodiscard]] auto high_contrast_active() const -> bool;
@@ -153,7 +167,11 @@ private:
     void shutdown();
 
     AppOptions options_;
+    FirstRunState first_run_;
+    std::filesystem::path first_run_state_path_;
     std::unique_ptr<RepositoryView> repository_;
+    std::optional<std::future<std::unique_ptr<RepositoryView>>> repository_operation_;
+    std::optional<std::future<IdentitySession>> identity_operation_;
     std::unique_ptr<EditorBuffer> editor_;
     std::unique_ptr<EditorGraph> editor_graph_;
     std::unique_ptr<ReviewController> review_;
@@ -202,6 +220,9 @@ private:
     std::size_t find_match_index_{};
     std::optional<TextPosition> column_selection_anchor_;
     std::string window_title_;
+    std::string clone_remote_;
+    std::string clone_path_;
+    std::string identity_error_;
     std::optional<AssistantAction> pending_assistant_action_;
     std::string pending_assistant_prompt_;
     std::string context_preview_;
@@ -263,6 +284,9 @@ private:
     bool sync_was_running_{};
     bool hydration_was_running_{};
     bool assistant_was_running_{};
+    bool clone_dialog_open_{};
+    bool folder_dialog_open_{};
+    bool repository_operation_is_clone_{};
     bool quit_ = false;
 };
 
