@@ -53,9 +53,12 @@ These are native libraries. Opening an untrusted repository whose metadata names
 native code, so repositories and configured paths must be trusted. One failed path is reported in
 the plugin panel without suppressing modules that loaded successfully.
 
-Plugin commands appear in the command palette with their declared default binding. Selecting one
-invokes it with an empty canonical-CBOR map. Plugin text panels refresh independently and render
-their decoded view model below the analysis results; the plugin never receives UI objects.
+Plugin commands enter the shared registry with their declared default binding. They appear in the
+fuzzy palette and native macOS Plugins menu, participate in typed keymap overrides and conflict
+reporting, and can be invoked headlessly by stable name when configured globally. Invocation uses
+an empty canonical-CBOR map; the headed path keeps failures in editor status and the headless path
+writes canonical-CBOR output. Plugin text panels refresh independently and render their decoded
+view model below the analysis results; the plugin never receives UI objects.
 
 Each panel operation is invoked independently. A returned error, exception, malformed owned value,
 non-canonical CBOR value, or unsupported view model becomes that panel's error snapshot and

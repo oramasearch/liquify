@@ -49,6 +49,14 @@ TEST(Screenshot, PanelRendersDiagnostics) {
                                           {186, 27, 35, 255}, 40, 2));
 }
 
+TEST(Screenshot, CommandPaletteShowsSearchAndRecentCommands) {
+  const auto image = render_state("command-palette-light");
+  EXPECT_TRUE(test::region_contains_color(image, {260, 140, 760, 520},
+                                          {255, 255, 255, 255}, 1, 100'000));
+  EXPECT_TRUE(test::region_contains_color(image, {270, 180, 725, 34},
+                                          {244, 244, 244, 255}, 1, 5'000));
+}
+
 TEST(Screenshot, EditorViewShowsSearchGutterAndBothThemes) {
   const auto light = render_state("editor-view-light");
   const auto dark = render_state("editor-view-dark");
@@ -71,7 +79,9 @@ TEST(Screenshot, RegistryIncludesPanelSystemInBothThemes) {
   EXPECT_NE(find_screenshot_state("settings-dark"), nullptr);
   EXPECT_NE(find_screenshot_state("accessibility-light"), nullptr);
   EXPECT_NE(find_screenshot_state("accessibility-dark"), nullptr);
-  EXPECT_EQ(screenshot_states().size(), 32U);
+  EXPECT_NE(find_screenshot_state("command-palette-light"), nullptr);
+  EXPECT_NE(find_screenshot_state("command-palette-dark"), nullptr);
+  EXPECT_EQ(screenshot_states().size(), 34U);
 }
 
 TEST(Screenshot, NavigationRendersQuickOpenAndAnnotatedTree) {

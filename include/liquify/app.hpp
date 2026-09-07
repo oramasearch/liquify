@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "liquify/app_state.hpp"
+#include "liquify/command.hpp"
 #include "liquify/editor_model.hpp"
 #include "liquify/first_run.hpp"
 #include "liquify/input.hpp"
@@ -132,6 +133,8 @@ private:
   void draw_assistant();
   void draw_command_palette();
   void draw_settings();
+  void configure_commands();
+  bool invoke_command(std::string_view name);
   void draw_plugin_panels();
   void draw_structural_panel();
   void invoke_plugin_command(std::string_view name);
@@ -196,6 +199,7 @@ private:
   std::unique_ptr<EditorGraph> editor_graph_;
   std::unique_ptr<ReviewController> review_;
   std::unique_ptr<Assistant> assistant_;
+  std::unique_ptr<CommandRegistry> commands_;
   std::shared_ptr<PluginHost> plugin_host_;
   std::optional<MultiplayerSnapshot> multiplayer_;
   std::future<liquid::result<MultiplayerSnapshot>> multiplayer_refresh_;
@@ -262,6 +266,8 @@ private:
   std::string review_comment_body_;
   std::vector<PluginLoadFailure> plugin_failures_;
   std::vector<PluginPanelSnapshot> plugin_panels_;
+  std::vector<std::string> command_diagnostics_;
+  std::vector<std::string> native_menu_commands_;
   std::vector<NavigationSymbol> navigation_results_;
   CallHierarchy navigation_hierarchy_;
   NavigationHistory navigation_history_;
@@ -286,6 +292,9 @@ private:
   std::vector<std::string> structural_unresolved_;
   std::vector<std::string> structural_accepted_files_;
   std::string structural_name_;
+  std::string command_palette_query_;
+  std::string command_palette_previous_query_;
+  std::size_t command_palette_selection_{};
   std::size_t next_comment_index_{};
   std::size_t ai_context_bytes_{64 * 1024};
   float display_refresh_hz_{};
@@ -302,6 +311,7 @@ private:
   int screenshot_frames_rendered_{};
   bool initialized_ = false;
   bool command_palette_open_{};
+  bool command_palette_visible_{};
   bool settings_open_{};
   bool settings_popup_visible_{};
   bool find_open_{};

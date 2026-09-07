@@ -25,9 +25,9 @@ drips with `sync_endpoint_options::atomic` set to false. The panel reports trans
 byte totals, then every `sync_ref_outcome`. A refused reference shows the remote's reason; applied
 references remain visible when another reference is refused.
 
-**Bindings.** F7 builds, F8 runs all tests, and F9 deploys. Primary-modifier+P opens the command
-palette, which lists the same three commands. The status line reports the running-action count and
-the latest build summary.
+**Bindings.** F7 builds, F8 runs all tests, and F9 deploys. Primary-modifier+Shift+P opens the
+command palette, which lists the same three commands. The status line reports the running-action
+count and the latest build summary.
 
 **Concurrency.** UI input only queues a request. The graph worker consumes the build event sequence
 and performs test and deploy operations, then copies snapshots under a mutex for rendering. The UI

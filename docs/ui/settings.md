@@ -34,7 +34,7 @@ liquify settings {
   keymap {
     bindings: {
       "settings.open": "Cmd+,",
-      "build.run": "F7"
+      "run.build": "F7"
     }
   }
   ai {

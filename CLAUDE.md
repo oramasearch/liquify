@@ -44,7 +44,9 @@ focus, macOS accessibility labels, high contrast and the OS reduced-motion prefe
 shell. C and C++ stubs
 status channel reports daemon, sync, hydration, build, presence, current change, branch,
 notifications and identity session. macOS exposes the command groups and Cmd bindings through the
-native menu bar. The searchable settings surface reads user and repository `.liquid` files,
+native menu bar. The same registry provides a fuzzy palette with recent commands and resolved
+bindings, typed `.liquid` keymap overrides with conflict reporting, plugin commands, and headless
+`--command` invocation. The searchable settings surface reads user and repository `.liquid` files,
 applies appearance, editor, keymap, AI and lake changes live, keeps telemetry off by default, and
 never places credential values in its model or UI. SDL composition supports CJK input methods and
 dead keys; rich and plain clipboard forms, file drops, visible keyboard focus, macOS accessibility

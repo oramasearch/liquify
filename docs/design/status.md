@@ -44,6 +44,9 @@ daemon, sync, hydration, build, presence, current change, branch, notifications 
 macOS installs native
 command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.md),
 [`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
+The shared command registry powers fuzzy palette search, recent commands, platform key bindings,
+keymap conflict reporting, native menus and headless `--command` invocation
+([`../ui/commands.md`](../ui/commands.md)).
 The searchable settings surface reads a user `.liquid` file plus repository overrides and applies
 theme, fonts, editor behavior, keymaps, optional AI, lake accounts and default-off telemetry live.
 Parser and typed validation errors remain inline, group reset is local, and credential values never

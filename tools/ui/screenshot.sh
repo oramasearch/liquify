@@ -30,6 +30,8 @@ states=(
     assistant-dark
     plugins-light
     plugins-dark
+    command-palette-light
+    command-palette-dark
     structural-editing-light
     structural-editing-dark
     panels-light
@@ -53,4 +55,4 @@ for state in "${states[@]}"; do
     "$binary" --screenshot "$state" --out "$output_dir/$state.png"
 done
 
-printf 'screenshots: ok — 16 screens × 2 themes at 1280x800\n'
+printf 'screenshots: ok — 17 screens × 2 themes at 1280x800\n'

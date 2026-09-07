@@ -54,18 +54,19 @@ The source and token gate are described in [`design-system.md`](design-system.md
 
 On macOS, CMake compiles `src/app.cpp` as Objective-C++ so it remains the only SDL/ImGui
 translation unit while installing an AppKit menu bar. File, Edit, Selection, View, Go, Run, and
-Review are native top-level groups. Cmd-S saves, Cmd-Shift-P opens the palette, Cmd-B toggles the
-sidebar, Cmd-J toggles the bottom panel, Cmd-backslash toggles the editor split, and Cmd-Shift-T
-cycles the theme. F7, F8, F9, F12, and F1 retain their existing build, test, deploy, definition,
-and hover behavior. Cmd-P opens paths, Cmd-T opens symbols, Cmd-R opens recent locations, and the
-complete cross-platform default-key table is in [`navigation.md`](navigation.md).
+Review are native top-level groups. The command registry supplies the fuzzy palette, resolved
+platform bindings, recent-command ordering, typed `.liquid` overrides, and plugin commands;
+[`commands.md`](commands.md) is its generated reference. Cmd-S saves, Cmd-Shift-P opens the
+palette, Cmd-B toggles the sidebar, Cmd-J toggles the bottom panel, Cmd-backslash toggles the
+editor split, Cmd-Shift-T cycles the theme, Cmd-P opens paths, Cmd-T opens symbols, and Cmd-R
+opens recent locations.
 
 The native window title is `<repository> — <current change> — liquify`; an open review replaces
 `Working change` with its change identifier.
 
 ## Deterministic screenshots
 
-The named screenshot registry in [`README.md`](README.md) selects sixteen seeded shell states in
+The named screenshot registry in [`README.md`](README.md) selects seventeen seeded shell states in
 light and dark. SDL's dummy video driver and software renderer produce a hidden fixed 1280×800
 frame, and the in-tree PNG writer captures RGBA output. No display, repository, network, or
 container is involved.

@@ -28,7 +28,10 @@ through one panel registry; dock, editor-tab and floating placement plus focus p
 repository, layouts reset to their defaults, and one channel reports long-operation progress.
 Native macOS menus remain available. Searchable `.liquid` settings combine user preferences with
 repository overrides and apply theme, fonts, editor behavior, keymaps, optional AI and lake
-accounts live; telemetry remains off by default and credentials are masked. Pull-request CI
+accounts live; telemetry remains off by default and credentials are masked. The shared command
+registry supplies the fuzzy command palette, platform bindings, conflict reporting, macOS menus
+and headless `--command` invocation; its generated reference is in
+[`docs/ui/commands.md`](docs/ui/commands.md). Pull-request CI
 packages macOS, Windows and Linux installers
 and `v*` tags publish them; [`docs/design/status.md`](docs/design/status.md) lists each area with
 its page, and the specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.

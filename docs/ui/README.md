@@ -22,6 +22,7 @@ Every screen has light and dark variants:
 | Review | Review panel and comment status | [`review-light.png`](screenshots/review-light.png) | [`review-dark.png`](screenshots/review-dark.png) |
 | Assistant | Offline assistant panel | [`assistant-light.png`](screenshots/assistant-light.png) | [`assistant-dark.png`](screenshots/assistant-dark.png) |
 | Plugins | Data-only plugin panel | [`plugins-light.png`](screenshots/plugins-light.png) | [`plugins-dark.png`](screenshots/plugins-dark.png) |
+| Command palette | Fuzzy search, recent commands and resolved bindings | [`command-palette-light.png`](screenshots/command-palette-light.png) | [`command-palette-dark.png`](screenshots/command-palette-dark.png) |
 | Structural editing | Multi-file edit preview | [`structural-editing-light.png`](screenshots/structural-editing-light.png) | [`structural-editing-dark.png`](screenshots/structural-editing-dark.png) |
 | Panel system | Docked, editor-tab and floating panels with shared progress | [`panels-light.png`](screenshots/panels-light.png) | [`panels-dark.png`](screenshots/panels-dark.png) |
 | Navigation | Annotated tree and Quick Open | [`navigation-light.png`](screenshots/navigation-light.png) | [`navigation-dark.png`](screenshots/navigation-dark.png) |
@@ -58,8 +59,8 @@ landmarks rather than whole-image hashes so harmless rasterizer differences do n
 intended signal. The editor-view assertion separately proves its themed gutter and syntax roles;
 [`editor.md`](editor.md) records the interaction and liquid data paths.
 
-`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at sixteen screens
-and thirty-two named states. The panel behavior and layout model are documented in
+`Screenshot.RegistryIncludesPanelSystemInBothThemes` also holds the registry at seventeen screens
+and thirty-four named states. The panel behavior and layout model are documented in
 [`panels.md`](panels.md).
 
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced

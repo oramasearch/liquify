@@ -32,6 +32,7 @@
 #include "liquid/liquid.hpp"
 #include "liquify/ai_config.hpp"
 #include "liquify/assistant.hpp"
+#include "liquify/command.hpp"
 #include "liquify/design_tokens.generated.hpp"
 #include "liquify/editor_graph.hpp"
 #include "liquify/multiplayer.hpp"
@@ -1220,6 +1221,9 @@ App::App(AppOptions options) : options_(std::move(options)) {
       quick_open_query_ = "app";
       quick_open_open_ = true;
     }
+    if (screenshot->view == ScreenshotView::command_palette) {
+      command_palette_open_ = true;
+    }
     if (screenshot->view == ScreenshotView::settings) {
       settings_open_ = true;
       settings_.theme = screenshot->theme == ScreenshotTheme::dark
@@ -1313,6 +1317,7 @@ void App::activate_repository(std::unique_ptr<RepositoryView> repository) {
       editor_status_ = std::string{"review configuration: "} + error.what();
     }
   }
+  configure_commands();
 }
 
 auto App::repository_summary() const -> RepositorySummary {
@@ -1490,6 +1495,114 @@ void App::poll_sign_in() {
 
 App::~App() { shutdown(); }
 
+void App::configure_commands() {
+  commands_ = std::make_unique<CommandRegistry>();
+  command_diagnostics_.clear();
+  for (const auto &definition : builtin_commands()) {
+    auto added = commands_->add(definition);
+    if (!added) {
+      command_diagnostics_.push_back(added.error());
+    }
+  }
+  for (const auto &panel : standard_panel_descriptors()) {
+    for (const auto &command : panel.commands) {
+      if (commands_->find(command.id) != nullptr) {
+        continue;
+      }
+      auto added = commands_->add({std::string(command.id),
+                                   std::string(command.title),
+                                   std::string(panel.title),
+                                   "Command provided by a panel.",
+                                   {}});
+      if (!added) {
+        command_diagnostics_.push_back(added.error());
+      }
+    }
+  }
+  if (plugin_host_) {
+    for (const auto &plugin : plugin_host_->commands()) {
+      auto bindings = std::vector<std::string>{};
+      if (!plugin.default_binding.empty()) {
+        bindings.push_back(plugin.default_binding);
+      }
+      auto added = commands_->add(
+          {plugin.name, plugin.name, "Plugins",
+           "Command registered by the " + plugin.plugin + " plugin.",
+           std::move(bindings), true, true});
+      if (!added) {
+        command_diagnostics_.push_back(added.error());
+      }
+    }
+  }
+  const auto apply_file = [this](const std::filesystem::path &path) {
+    const auto loaded = load_keymap(path);
+    for (const auto &diagnostic : loaded.diagnostics) {
+      command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
+    }
+    for (const auto &diagnostic :
+         commands_->apply_overrides(loaded.overrides)) {
+      command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
+    }
+  };
+  if (!screenshot_mode() && !options_.smoke) {
+    apply_file(global_settings_path());
+    if (options_.repository_path) {
+      apply_file(repository_settings_path(*options_.repository_path));
+    }
+  }
+}
+
+bool App::invoke_command(std::string_view name) {
+  const auto *definition = commands_ ? commands_->find(name) : nullptr;
+  if (definition == nullptr) {
+    return false;
+  }
+  commands_->record_use(name);
+  if (definition->plugin) {
+    invoke_plugin_command(name);
+    return true;
+  }
+  if (name == "file.save") {
+    save_editor();
+  } else if (name == "edit.command-palette") {
+    command_palette_open_ = true;
+  } else if (name == "settings.open") {
+    settings_open_ = true;
+  } else if (name == "view.toggle-sidebar") {
+    shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
+    persist_shell_state();
+  } else if (name == "view.toggle-bottom-panel") {
+    shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
+    persist_shell_state();
+  } else if (name == "view.toggle-editor-split") {
+    shell_state_.editor_split = !shell_state_.editor_split;
+    persist_shell_state();
+  } else if (name == "view.cycle-theme") {
+    cycle_theme();
+  } else if (name == "go.definition") {
+    request_definition();
+  } else if (name == "go.hover") {
+    request_hover();
+  } else if (name == "go.completion") {
+    request_completion();
+  } else if (name == "run.build") {
+    request_build();
+  } else if (name == "run.tests") {
+    request_tests();
+  } else if (name == "run.deploy") {
+    request_deploy();
+  } else if (name == "assistant.toggle") {
+    toggle_assistant();
+  } else if (name == "panel.reset-layout") {
+    reset_panel_layout();
+  } else if (name == "help.version") {
+    editor_status_ = "liquify " + std::string(version_string());
+  } else {
+    execute_panel_command(name);
+  }
+  return true;
+}
+
 bool App::init() {
   const auto *screenshot =
       options_.screenshot_state
@@ -1579,6 +1692,11 @@ bool App::init() {
   ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
   ImGui_ImplSDLRenderer3_Init(renderer_);
   SDL_StartTextInput(window_);
+  configure_commands();
+  if (screenshot != nullptr &&
+      screenshot->view == ScreenshotView::command_palette) {
+    commands_->record_use("view.repository");
+  }
 #if defined(__APPLE__) && defined(__OBJC__)
   if (!screenshot_mode()) {
     install_native_menu();
@@ -3950,50 +4068,74 @@ void App::execute_panel_command(std::string_view command) {
 }
 
 void App::draw_command_palette() {
+  command_palette_visible_ = false;
   if (command_palette_open_) {
     ImGui::OpenPopup("Command palette");
     command_palette_open_ = false;
   }
+  ImGui::SetNextWindowSize(ImVec2(760.0F, 520.0F), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal("Command palette", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+                              ImGuiWindowFlags_NoSavedSettings)) {
     return;
   }
-  const auto command = [this](const char *label, auto invoke) {
-    if (ImGui::Selectable(label)) {
-      invoke();
-      ImGui::CloseCurrentPopup();
-    }
-  };
-  for (const auto &navigation : navigation_commands()) {
-    const auto label = std::string(navigation.name) + " (" +
-                       std::string(navigation.default_binding) + ")";
-    command(label.c_str(), [this, action = navigation.action] {
-      invoke_navigation_action(action);
-    });
+  command_palette_visible_ = true;
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
   }
-  for (const auto &descriptor : standard_panel_descriptors()) {
-    const auto show = "Panels: Show " + std::string(descriptor.title);
-    command(show.c_str(), [this, id = descriptor.id] {
-      panels_.focus(id);
-      persist_shell_state();
-    });
-    for (const auto &panel_command : descriptor.commands) {
-      command(panel_command.title.data(),
-              [this, id = panel_command.id] { execute_panel_command(id); });
-    }
+  ImGui::SetNextItemWidth(-1.0F);
+  ImGui::InputTextWithHint("##command-search", "Search commands",
+                           &command_palette_query_);
+  if (command_palette_query_ != command_palette_previous_query_) {
+    command_palette_previous_query_ = command_palette_query_;
+    command_palette_selection_ = 0;
   }
-  command("Panels: Reset layout", [this] { reset_panel_layout(); });
-  command("Preferences: Open Settings", [this] { settings_open_ = true; });
-  if (plugin_host_) {
-    for (const auto &plugin_command : plugin_host_->commands()) {
-      auto label = "Plugin: " + plugin_command.name;
-      if (!plugin_command.default_binding.empty()) {
-        label += " (" + plugin_command.default_binding + ")";
+  if (!commands_) {
+    ImGui::EndPopup();
+    return;
+  }
+  const auto matches = commands_->search(command_palette_query_);
+  auto pending = std::optional<std::string>{};
+  if (ImGui::BeginTable("command-results", 3,
+                        ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+                            ImGuiTableFlags_SizingStretchProp,
+                        ImVec2(0.0F, -1.0F))) {
+    ImGui::TableSetupColumn("Command", ImGuiTableColumnFlags_WidthStretch,
+                            0.60F);
+    ImGui::TableSetupColumn("Group", ImGuiTableColumnFlags_WidthStretch, 0.20F);
+    ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 0.20F);
+    ImGui::TableHeadersRow();
+    for (const auto &match : matches) {
+      const auto *definition = commands_->find(match.name);
+      if (definition == nullptr) {
+        continue;
       }
-      command(label.c_str(), [this, name = plugin_command.name] {
-        invoke_plugin_command(name);
-      });
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      const auto label = definition->title + "##" + definition->name;
+      if (ImGui::Selectable(label.c_str(), false,
+                            ImGuiSelectableFlags_SpanAllColumns)) {
+        pending = definition->name;
+      }
+      ImGui::TableSetColumnIndex(1);
+      ImGui::TextDisabled("%s", definition->group.c_str());
+      ImGui::TableSetColumnIndex(2);
+      const auto binding = commands_->binding_label(definition->name);
+      ImGui::TextDisabled("%s", binding.c_str());
     }
+    ImGui::EndTable();
+  }
+  if (pending) {
+    invoke_command(*pending);
+    ImGui::CloseCurrentPopup();
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  if (command_palette_query_.empty()) {
+    ImGui::TextDisabled("Recent commands: %zu", commands_->recent().size());
+  }
+  for (const auto &diagnostic : command_diagnostics_) {
+    ImGui::TextDisabled("%s", diagnostic.c_str());
   }
   ImGui::EndPopup();
 }
