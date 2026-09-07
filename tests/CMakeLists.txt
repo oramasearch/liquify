@@ -4,6 +4,7 @@ add_executable(liquify-tests
   test_editor_buffer.cpp
   test_editor_model.cpp
   test_editor_graph.cpp
+  test_first_run.cpp
   test_interactive_analysis.cpp
   test_panel.cpp
   test_navigation.cpp

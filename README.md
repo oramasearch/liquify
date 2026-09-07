@@ -10,69 +10,28 @@ and why it is a native editor rather than an extension, is in
 
 ## Status
 
-`liquify <path>` opens an annotated liquid repository tree, provides fuzzy path and graph-symbol
-navigation with location history, edits blobs in a retained GPU text buffer and saves through
-libliquid as a drip; C and C++ buffers add graph-backed diagnostics, navigation and completion,
-structural editing, and F7, F8 and F9 build, test and deploy through the attached daemon. The
-editor adds multi-cursor and column editing, repository-configured indentation, liquid syntax and
-collaboration gutters, search/replace, and operation-log undo/redo. `--lake` adds review in place
-with cursor-anchored comments, native plugins register
-queries, commands and panels, and the assistant is off by default and opens no connection while
-off. `design/` carries the stamped Orama DTCG snapshot, generated native roles and embedded IBM
-Plex assets. The light/dark application shell hosts every surface through one panel registry;
-dock, editor-tab and floating placement plus focus persist per repository, layouts reset to their
-defaults, and one channel reports long-operation progress. Native macOS menus remain available.
-Searchable `.liquid` settings combine user preferences with repository overrides and apply theme,
-fonts, editor behavior, keymaps, optional AI and lake accounts live; telemetry remains off by
-default and credentials are masked.
-Pull-request CI packages macOS, Windows and Linux installers and `v*` tags publish them;
-[`docs/design/status.md`](docs/design/status.md) lists each area with its page, and the
-specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
-> **Status: retained GPU editor with graph-backed analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and an optional AI surface.**
-> `liquify <path>` opens a liquid repository through the public coroutine API, renders its root
-> entries, loads nested trees on expansion, and opens blobs into an editable in-memory buffer;
-> save writes through libliquid as a drip. Unreadable repositories show liquid's error and make
-> `--print-tree` exit non-zero;
-> `liquify` with no path retains the hello state, and `--smoke` scrolls and edits 50,000 lines.
-> The pin includes liquid's compact-checkpoint repository format, Phase 2 and 3 APIs, and the
-> persisted demand-driven query graph, tree-diff and record-enumeration APIs, per-checkout daemon,
-> registered frontend modules with per-definition C/C++ actions, C/C++ stub-tree query,
-> text-anchor mapping, and the coroutine-native forge review client used by review-in-place
-> workflows. Stub trees resolve declarations from closed files without retaining their full parse
-> trees. Open
-> overlays retain error-tolerant incremental trees and answer node,
-> enclosing-definition, definition, reference, hover, completion and build-diagnostic queries;
-> an edit cancels their in-flight graph work. The editor renders graph diagnostics inline and in a
-> panel, exposes definition, hover and completion controls, and shows daemon drip triggers plus the
-> validation backlog in its status line. Syntax-node selection, cross-file rename and C/C++
-> extract-function run on the editor worker and preview fingerprinted node edits before applying
-> one drip per changed file. The same canonical CBOR records are accepted by the headless
-> `--apply-edits` command. With `--lake`, the review panel pulls lake changes, renders retained
-> inline text hunks and conflict values, posts cursor-anchored comments, advances their exact,
-> moved, approximate, or deleted positions across revised heads, and updates review state. The
-> default-off assistant builds inspectable, byte-budgeted
-> context from those graph facts, streams the Anthropic Messages API over pinned Corosio and
-> Boost.HTTP, and applies a proposed edit only after user acceptance. Turning it off constructs no
-> provider and opens no connection.
-> Native plugins share liquid's versioned frontend C boundary, register graph queries, commands,
-> and canonical-CBOR panels, and load through checked static or configured dynamic paths. Plugin
-> commands appear in the palette and data-only panels render below analysis results. The sample
-> proves all three registrations; load and panel failures remain local to their source.
-> Plugins may also subscribe to liquid's ABI-v1 presence, lease, and attribution events. The editor
-> displays active sessions, nearby line attribution including delegated-agent writes, and lease
-> holders; it obtains and releases file leases through liquid and refuses covered edits before a
-> local buffer mutation.
-> F7 plans and starts the configured build through the attached daemon, then renders its action
-> event stream, critical path and scheduler decisions. F8 lists and runs graph test actions; F9
-> pushes saved drips to the configured sync remote and reports every reference outcome, including
-> an authorization refusal while accepted references continue. Failed action diagnostics render on
-> their affected editor lines.
-> Pull-request CI also produces a hardened-runtime macOS `pkg` and `dmg`, a signed and install-tested
-> Windows MSIX, and an AppImage exercised on Ubuntu and Fedora. `v*` tags publish those installers
-> with signed and unsigned SHA-256 records; notarization runs when the release secrets are present.
-> The specification lives in
-> [`oramasearch/liquid`](https://github.com/oramasearch/liquid) under
-> [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
+`liquify` opens a repository front door with local open, lake clone, recent repositories, identity
+session and additional-window actions. `liquify <path>` opens a liquid repository, edits blobs in
+a retained GPU text buffer and saves
+through libliquid as a drip; C and C++ buffers add graph-backed diagnostics, navigation and
+completion, structural editing, and F7, F8 and F9 build, test and deploy through the attached
+daemon. The editor adds multi-cursor and column editing, repository-configured indentation,
+liquid syntax and collaboration gutters, search/replace, and operation-log undo/redo.
+Quick Open, Symbol Search, definitions, references, call hierarchy, breadcrumbs, recent
+locations, history traversal, and repository context actions share registered default-key commands.
+`--lake` adds review in place with cursor-anchored comments. Multiplayer surfaces presence,
+per-line attribution and semantic lease controls, including lease events delivered to native
+plugins. Native plugins register queries, commands and panels, and the assistant is off by default
+and opens no connection while off. `design/` carries the stamped Orama DTCG snapshot, generated
+native roles and embedded IBM Plex assets. The light/dark application shell hosts every surface
+through one panel registry; dock, editor-tab and floating placement plus focus persist per
+repository, layouts reset to their defaults, and one channel reports long-operation progress.
+Native macOS menus remain available. Searchable `.liquid` settings combine user preferences with
+repository overrides and apply theme, fonts, editor behavior, keymaps, optional AI and lake
+accounts live; telemetry remains off by default and credentials are masked. Pull-request CI
+packages macOS, Windows and Linux installers
+and `v*` tags publish them; [`docs/design/status.md`](docs/design/status.md) lists each area with
+its page, and the specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
 
 ## Build and run
 
@@ -138,12 +97,12 @@ its page there in the same change; this file is only the front door. The most us
   native constants, IBM Plex assets, and token gate.
 - [`docs/ui/app-shell.md`](docs/ui/app-shell.md): the persisted editor layout, themes, native
   macOS conventions, and light/dark screenshot matrix.
+- [`docs/ui/first-run.md`](docs/ui/first-run.md): first run, repository switching, lake clone,
+  identity session, recovery states, multiple windows, and status signals.
 - [`docs/ui/panels.md`](docs/ui/panels.md): the panel registry, docking, layout persistence,
   commands, states, and shared progress channel.
 - [`docs/ui/editor.md`](docs/ui/editor.md): the editor interaction model, syntax, gutters, search,
   history and editor-view screenshots.
-- [`docs/ui/navigation.md`](docs/ui/navigation.md): repository annotations, fuzzy paths,
-  graph-symbol navigation, breadcrumbs, history, commands, and context actions.
 - [`docs/ui/settings.md`](docs/ui/settings.md): searchable `.liquid` settings, repository overrides,
   live application, validation, credentials and telemetry.
 - [`docs/editor/README.md`](docs/editor/README.md): the buffer, the retained text layer and the

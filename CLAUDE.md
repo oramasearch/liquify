@@ -9,6 +9,8 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 ## Status
 
 **Retained GPU editor with indexed repository and graph-symbol navigation, graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and deploy, structural editing, review in place, native plugins, and optional AI.**
+`./build/liquify` opens a repository front door with local open, lake clone, recent repositories,
+local TAAP identity and additional-window actions. Repositories switch without restarting.
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, indexes all paths and libliquid symbol records, annotates file
 kind plus drive and change state, and opens blobs into an editable in-memory buffer; save calls
@@ -17,24 +19,26 @@ breadcrumbs, recent locations, and back/forward share one navigation action regi
 bindings; repository rows expose open, rename, move, new-file, and reveal actions.
 The standard input mode is non-modal and a modal command/insert mode is available. Multi-cursor
 and column edits, repository indentation, liquid syntax/folds, collaboration gutters,
-search/replace and operation-log history are part of the editor view. Unreadable repositories
-retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer, reports frame
-and typing latency, and exits 0. `liquify --screenshot` renders the fixed welcome, repository,
-navigation, C++ editor, complete editor view and panel registry in light and dark through a
-headless software renderer, with committed PNG proof and pixel-region tests. liquid is pinned at
-`modules/liquid` through its persisted demand-driven query graph, text-anchor mapping, syntax
-modules, attribution, presence, operation history, and coroutine-native forge review client.
+search/replace and operation-log history are part of the editor view. Unreadable
+repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
+reports frame and typing latency, and exits 0. Unreadable local repositories and unreachable lake
+clones have distinct retry states. `liquify --screenshot` renders fixed welcome, recovery,
+repository, navigation, settings, C++ editor, complete editor view and panel registry states in
+light and dark through a headless software renderer, with committed PNG proof and pixel-region
+tests. liquid is pinned at `modules/liquid` through its persisted demand-driven query graph,
+text-anchor mapping, syntax modules, attribution, presence, operation history, and coroutine-native
+forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
 embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The
 light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel,
 floating panels and status bar from those roles. One plain-C++ registry owns every panel's
 metadata, commands, placement, focus, state and notifications; panels move among dock areas, float
 and re-dock, repository-local state persists the complete layout, and reset restores defaults. One
-status channel reports build, saved-drip sync, repository hydration and assistant progress. macOS
-exposes the command groups and Cmd bindings through the native menu bar. The searchable settings
-surface reads user and repository `.liquid` files, applies appearance, editor, keymap, AI and lake
-changes live, keeps telemetry off by default, and never places credential values in its model or
-UI. C and C++ stubs
+status channel reports daemon, sync, hydration, build, presence, current change, branch,
+notifications and identity session. macOS exposes the command groups and Cmd bindings through the
+native menu bar. The searchable settings surface reads user and repository `.liquid` files,
+applies appearance, editor, keymap, AI and lake changes live, keeps telemetry off by default, and
+never places credential values in its model or UI. C and C++ stubs
 are graph query values that resolve
 declarations from closed files without retaining full parse trees. Graph-backed editor queries run
 over error-tolerant incremental trees for open overlays, resolve through closed-file

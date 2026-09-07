@@ -14,6 +14,10 @@ namespace {
 constexpr auto states = std::to_array<ScreenshotState>({
     {"welcome-light", ScreenshotView::welcome, ScreenshotTheme::light},
     {"welcome-dark", ScreenshotView::welcome, ScreenshotTheme::dark},
+    {"repository-unreadable-light", ScreenshotView::repository_unreadable, ScreenshotTheme::light},
+    {"repository-unreadable-dark", ScreenshotView::repository_unreadable, ScreenshotTheme::dark},
+    {"lake-offline-light", ScreenshotView::lake_offline, ScreenshotTheme::light},
+    {"lake-offline-dark", ScreenshotView::lake_offline, ScreenshotTheme::dark},
     {"repository-light", ScreenshotView::repository, ScreenshotTheme::light},
     {"repository-dark", ScreenshotView::repository, ScreenshotTheme::dark},
     {"editor-cpp-light", ScreenshotView::editor_cpp, ScreenshotTheme::light},
