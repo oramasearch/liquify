@@ -123,3 +123,10 @@ The separate CTest case `liquify-native-window` checks scale 2 and density 1 on 
 display moves, font rebuild, logical mouse hits and exact palette/floating-panel occlusion. It
 requires a desktop and writes live framebuffer PNGs under the build tree. See [the
 contract](../docs/ui/app-shell.md).
+
+`native_buffer_regression.cpp` is registered with CTest on macOS. It opens a native window, sends
+native text/key/close events, and clicks real Save / Discard / Cancel buttons. It verifies
+dirty-buffer identity, selection and undo retention across file switches and all discard paths;
+run it separately from headless CTest as described in
+[`../docs/ui/buffers.md`](../docs/ui/buffers.md). Local buffer tests also cover selection and
+multi-cursor undo, redo invalidation and saving without clearing history.

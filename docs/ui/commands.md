@@ -4,6 +4,7 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 
 | Group | Command | Name | macOS | Windows | Linux | Description |
 |---|---|---|---|---|---|---|
+| File | Close File | `file.close` | `Cmd+W` | `Ctrl+W` | `Ctrl+W` | Close the active buffer, confirming any unsaved changes. |
 | File | Save | `file.save` | `Cmd+S` | `Ctrl+S` | `Ctrl+S` | Save the active editor buffer through libliquid. |
 | Edit | Command Palette | `edit.command-palette` | `Cmd+Shift+P` | `Ctrl+Shift+P` | `Ctrl+Shift+P` | Find and run any registered command. |
 | Edit | Select All | `edit.select-all` | `Cmd+A` | `Ctrl+A` | `Ctrl+A` | Select the active editor buffer. |

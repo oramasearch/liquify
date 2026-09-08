@@ -20,7 +20,9 @@ directly for buffer text, selection and cursor; no other translation unit includ
 
 `EditorBuffer` is a plain-C++ line buffer. Its positions are a line number and UTF-8 byte boundary;
 movement and deletion preserve codepoint boundaries. Insertions and replacements return the exact
-range of removed and inserted lines. The buffer remains in memory until save.
+range of removed and inserted lines. Each open path retains its buffer, selections and local undo/redo until an explicit close or
+repository replacement. Save persists text without releasing the buffer. The native confirmation
+and crash policy are in [`../ui/buffers.md`](../ui/buffers.md).
 
 Opening a root blob calls `liquid::repository::open` and `repository::read` on a worker. Saving
 copies the current bytes to a worker and calls `repository::write`, so the write follows

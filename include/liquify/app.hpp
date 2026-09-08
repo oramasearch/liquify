@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <future>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -66,6 +67,7 @@ public:
   int run();
 
 private:
+  friend class NativeBufferRegression;
   friend class NativeWindowTest;
   bool init_window(bool high_pixel_density);
   void frame(bool present = true);
@@ -114,6 +116,13 @@ private:
   void submit_review_comment();
   void poll_review();
   void save_editor();
+  bool save_buffer(EditorBuffer &buffer);
+  void undo_editor(bool redo);
+  void close_editor();
+  void request_quit();
+  bool confirm_discard(std::string_view action, bool active_only = false);
+  void remember_editor_view();
+  void refresh_saved_buffer(const std::string &path);
   void sync_editor_graph();
   void request_definition();
   void request_hover();
@@ -179,7 +188,7 @@ private:
   void begin_open_repository(std::filesystem::path path);
   void begin_clone_repository(std::string remote, std::filesystem::path path);
   void poll_repository_lifecycle();
-  void activate_repository(std::unique_ptr<RepositoryView> repository);
+  bool activate_repository(std::unique_ptr<RepositoryView> repository);
   void show_folder_dialog();
   void open_new_window(std::optional<std::filesystem::path> repository = {});
   void begin_sign_in();
@@ -199,7 +208,15 @@ private:
   std::optional<std::future<std::unique_ptr<RepositoryView>>>
       repository_operation_;
   std::optional<std::future<IdentitySession>> identity_operation_;
-  std::unique_ptr<EditorBuffer> editor_;
+  std::optional<std::string> pending_lake_url_;
+  struct OpenBuffer {
+    std::unique_ptr<EditorBuffer> buffer;
+    std::size_t scroll_line{};
+    float horizontal_scroll{};
+  };
+  std::map<std::string, OpenBuffer> open_buffers_;
+  std::unique_ptr<EditorBuffer> transient_editor_;
+  EditorBuffer *editor_{};
   std::unique_ptr<EditorGraph> editor_graph_;
   std::unique_ptr<ReviewController> review_;
   std::unique_ptr<Assistant> assistant_;

@@ -21,7 +21,9 @@ separate retry states; lake unavailability is normal offline operation
 
 `liquify <path>` opens a liquid repository through the public coroutine API, off the render
 thread, renders its root entries, loads nested trees on expansion, and opens blobs into an
-editable in-memory buffer; save writes through libliquid as a drip. Unreadable repositories show
+editable in-memory buffer per path; switching retains text, selection and local undo. Native
+Save / Discard / Cancel dialogs protect close, repository replacement and quit
+([`../ui/buffers.md`](../ui/buffers.md)); save writes through libliquid as a drip. Unreadable repositories show
 liquid's error, adding upgrade guidance for unsupported formats, and make `--print-tree` exit non-zero. A background index classifies every path,
 adds libliquid drive and repository change annotations, and retains libliquid symbol records.
 Quick Open, Symbol Search, definitions, references, available call relationships, breadcrumbs,
@@ -62,8 +64,8 @@ in [`../ui/README.md`](../ui/README.md).
 
 The editor supports multi-cursor and rectangular edits, repository-configured indentation,
 soft-wrap and fold row models, liquid tree-sitter syntax, bracket matching, line/diagnostic/
-attribution/presence/Drive gutters, buffer and repository search/replace, and repository operation
-history. Its interaction, worker and screenshot contracts are in
+attribution/presence/Drive gutters, buffer and repository search/replace, per-buffer undo/redo,
+and repository operation history. Its interaction, worker and screenshot contracts are in
 [`../ui/editor.md`](../ui/editor.md).
 
 ## The liquid pin

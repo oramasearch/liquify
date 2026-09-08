@@ -238,6 +238,9 @@ add_custom_command(TARGET liquify POST_BUILD
           "$<TARGET_FILE_DIR:liquify>/frontends/$<TARGET_FILE_NAME:liquid-frontend-tree-sitter>")
 
 if(LIQUIFY_BUILD_TESTS)
+  if(APPLE)
+    target_compile_definitions(liquify-app PRIVATE LIQUIFY_NATIVE_BUFFER_REGRESSION)
+  endif()
   if(LIQUIFY_NATIVE_WINDOW_TESTS)
     target_compile_definitions(liquify-app PRIVATE LIQUIFY_NATIVE_WINDOW_TESTS)
   endif()

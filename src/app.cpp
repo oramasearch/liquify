@@ -46,9 +46,15 @@
 #include "repository_view.hpp"
 #include "text_layout.hpp"
 
+#ifdef LIQUIFY_NATIVE_BUFFER_REGRESSION
+#include "../tests/native_buffer_regression.hpp"
+#endif
+
 #if defined(__APPLE__) && defined(__OBJC__)
 enum NativeMenuCommand : std::int32_t {
   menu_save = 1,
+  menu_close,
+  menu_quit,
   menu_palette,
   menu_sidebar,
   menu_panel,
@@ -132,9 +138,12 @@ static void install_native_menu() {
                           keyEquivalent:@""];
   [application_menu addItem:about];
   [application_menu addItem:[NSMenuItem separatorItem]];
-  auto *quit = [[NSMenuItem alloc] initWithTitle:@"Quit liquify"
-                                          action:@selector(terminate:)
-                                   keyEquivalent:@"q"];
+  auto *quit =
+      [[NSMenuItem alloc] initWithTitle:@"Quit liquify"
+                                 action:@selector(performLiquifyCommand:)
+                          keyEquivalent:@"q"];
+  [quit setTag:menu_quit];
+  [quit setTarget:native_menu_target];
   [application_menu addItem:quit];
   [application_root setSubmenu:application_menu];
   [main_menu addItem:application_root];
@@ -142,7 +151,9 @@ static void install_native_menu() {
   constexpr auto command = NSEventModifierFlagCommand;
   constexpr auto command_shift =
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
-  add_native_menu(main_menu, @"File", {{@"Save", @"s", command, menu_save}});
+  add_native_menu(main_menu, @"File",
+                  {{@"Save", @"s", command, menu_save},
+                   {@"Close File", @"w", command, menu_close}});
   add_native_menu(main_menu, @"Edit",
                   {{@"Copy", @"c", command, menu_copy},
                    {@"Cut", @"x", command, menu_cut},
@@ -1100,9 +1111,12 @@ App::App(AppOptions options) : options_(std::move(options)) {
     auto repository = std::make_unique<RepositoryView>(
         RepositoryView::open(*initial_repository));
     if (repository->error().empty()) {
-      activate_repository(std::move(repository));
-      first_run_.repository_opened(repository_summary());
-      persist_first_run();
+      if (activate_repository(std::move(repository))) {
+        first_run_.repository_opened(repository_summary());
+        persist_first_run();
+      } else if (repository_) {
+        first_run_.repository_opened(repository_summary());
+      }
     } else {
       first_run_.open_failed(*initial_repository,
                              std::string(repository->error()));
@@ -1111,8 +1125,9 @@ App::App(AppOptions options) : options_(std::move(options)) {
     panels_.restore(shell_state_.panel_layout);
   }
   if (options_.smoke) {
-    editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
+    transient_editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
         "smoke-50000", "smoke-50000.txt", smoke_text()));
+    editor_ = transient_editor_.get();
     layouts_ = std::make_unique<TextLayoutCache>();
     layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
     text_layer_ = std::make_unique<RetainedTextLayer>();
@@ -1161,8 +1176,9 @@ App::App(AppOptions options) : options_(std::move(options)) {
   if (screenshot != nullptr && screenshot->view != ScreenshotView::welcome &&
       screenshot->view != ScreenshotView::repository_unreadable &&
       screenshot->view != ScreenshotView::lake_offline) {
-    editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
+    transient_editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
         "screenshot-main", "src/app.cpp", screenshot_text()));
+    editor_ = transient_editor_.get();
     layouts_ = std::make_unique<TextLayoutCache>();
     layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
     text_layer_ = std::make_unique<RetainedTextLayer>();
@@ -1240,11 +1256,22 @@ App::App(AppOptions options) : options_(std::move(options)) {
   }
 }
 
-void App::activate_repository(std::unique_ptr<RepositoryView> repository) {
+bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
+  if (!confirm_discard("Switch repository")) {
+    return false;
+  }
   if (repository_) {
     persist_shell_state();
   }
-  editor_.reset();
+  if (repository_operation_is_clone_) {
+    options_.lake_url = pending_lake_url_;
+  }
+  editor_ = nullptr;
+  open_buffers_.clear();
+  transient_editor_.reset();
+  analysis_buffer_open_ = false;
+  analysis_text_.clear();
+  navigation_history_ = NavigationHistory{};
   layouts_.reset();
   text_layer_.reset();
   editor_graph_.reset();
@@ -1321,6 +1348,7 @@ void App::activate_repository(std::unique_ptr<RepositoryView> repository) {
     }
   }
   configure_commands();
+  return true;
 }
 
 auto App::repository_summary() const -> RepositorySummary {
@@ -1374,7 +1402,7 @@ void App::begin_clone_repository(std::string remote,
     return;
   }
   first_run_.begin_clone(remote, path);
-  options_.lake_url = remote;
+  pending_lake_url_ = remote;
   repository_operation_is_clone_ = true;
   const auto *configured_token = std::getenv("LIQUID_TOKEN");
   const auto token = configured_token == nullptr
@@ -1405,9 +1433,12 @@ void App::poll_repository_lifecycle() {
                                std::string{repository->error()});
       }
     } else {
-      activate_repository(std::move(repository));
-      first_run_.repository_opened(repository_summary());
-      persist_first_run();
+      if (activate_repository(std::move(repository))) {
+        first_run_.repository_opened(repository_summary());
+        persist_first_run();
+      } else if (repository_) {
+        first_run_.repository_opened(repository_summary());
+      }
     }
   } catch (const std::exception &error) {
     if (repository_operation_is_clone_) {
@@ -1417,6 +1448,7 @@ void App::poll_repository_lifecycle() {
     }
   }
   repository_operation_.reset();
+  pending_lake_url_.reset();
 }
 
 void App::show_folder_dialog() {
@@ -1567,6 +1599,10 @@ bool App::invoke_command(std::string_view name) {
   }
   if (name == "file.save") {
     save_editor();
+  } else if (name == "file.close") {
+    close_editor();
+  } else if (name == "edit.undo" || name == "edit.redo") {
+    undo_editor(name == "edit.redo");
   } else if (name == "edit.command-palette") {
     command_palette_open_ = true;
   } else if (name == "settings.open") {
@@ -2064,27 +2100,180 @@ void App::capture_screenshot() {
               options_.screenshot_output->string().c_str());
 }
 
+bool App::confirm_discard(std::string_view action, bool active_only) {
+  auto dirty = std::vector<EditorBuffer *>{};
+  auto message = std::string{"Save changes before continuing?\n\n"};
+  for (auto &[path, open] : open_buffers_) {
+    if (open.buffer->dirty() &&
+        (!active_only || open.buffer.get() == editor_)) {
+      dirty.push_back(open.buffer.get());
+      message += path + "\n";
+    }
+  }
+  if (dirty.empty()) {
+    return true;
+  }
+  if (!window_) {
+    editor_status_ = "a native window is required to confirm unsaved changes";
+    return false;
+  }
+  const SDL_MessageBoxButtonData buttons[] = {
+      {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Save"},
+      {0, 2, "Discard"},
+      {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel"},
+  };
+  const auto title = std::string(action);
+  const SDL_MessageBoxData dialog = {SDL_MESSAGEBOX_WARNING,
+                                     window_,
+                                     title.c_str(),
+                                     message.c_str(),
+                                     static_cast<int>(std::size(buttons)),
+                                     buttons,
+                                     nullptr};
+  auto selected = 0;
+  if (!SDL_ShowMessageBox(&dialog, &selected)) {
+    editor_status_ =
+        std::string{"unable to confirm unsaved changes: "} + SDL_GetError();
+    return false;
+  }
+  if (selected == 2) {
+    return true;
+  }
+  if (selected != 1) {
+    return false;
+  }
+  for (auto *buffer : dirty) {
+    if (!save_buffer(*buffer)) {
+      const auto error =
+          std::string(buffer->display_path()) + ": " + editor_status_;
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Save failed",
+                               error.c_str(), window_);
+      return false;
+    }
+  }
+  return true;
+}
+
+void App::close_editor() {
+  if (!editor_ || !confirm_discard("Close file", true)) {
+    return;
+  }
+  const auto path = std::string(editor_->display_path());
+  auto *closing = editor_;
+  if (editor_graph_ && !review_diff_open_) {
+    editor_graph_->close_buffer(std::filesystem::path(path));
+  }
+  editor_ = nullptr;
+  const auto found = open_buffers_.find(path);
+  if (found != open_buffers_.end() && found->second.buffer.get() == closing) {
+    open_buffers_.erase(found);
+  }
+  transient_editor_.reset();
+  layouts_.reset();
+  text_layer_.reset();
+  analysis_buffer_open_ = false;
+  analysis_text_.clear();
+  review_diff_open_ = false;
+  editor_focused_ = false;
+  if (!open_buffers_.empty()) {
+    open_editor(open_buffers_.begin()->first, "retained");
+  }
+}
+
+void App::request_quit() {
+  if (confirm_discard("Quit liquify")) {
+    quit_ = true;
+  }
+}
+
+void App::undo_editor(bool redo) {
+  if (!editor_ || review_diff_open_ || !editor_mutation_allowed()) {
+    return;
+  }
+  const auto change = redo ? editor_->redo() : editor_->undo();
+  if (change) {
+    apply_change(change->first_line, change->erased_lines,
+                 change->inserted_lines);
+  }
+}
+
+void App::refresh_saved_buffer(const std::string &path) {
+  const auto found = open_buffers_.find(path);
+  if (found == open_buffers_.end() || found->second.buffer->dirty() ||
+      !options_.repository_path) {
+    return;
+  }
+  auto loaded =
+      EditorBuffer::open(*options_.repository_path, path, "saved:" + path);
+  if (!loaded.error().empty()) {
+    editor_status_ = std::string(loaded.error());
+    return;
+  }
+  auto &buffer = *found->second.buffer;
+  const auto change = buffer.refresh_saved_text(loaded.text());
+  if (change && &buffer == editor_) {
+    apply_change(change->first_line, change->erased_lines,
+                 change->inserted_lines);
+  } else if (change && editor_graph_) {
+    const auto language = stub_language_for_path(path);
+    if (language) {
+      editor_graph_->open_buffer(path, *language, buffer.text());
+    }
+  }
+}
+
+void App::remember_editor_view() {
+  if (!editor_) {
+    return;
+  }
+  const auto found = open_buffers_.find(std::string(editor_->display_path()));
+  if (found != open_buffers_.end() && found->second.buffer.get() == editor_) {
+    found->second.scroll_line = scroll_line_;
+    found->second.horizontal_scroll = horizontal_scroll_;
+  }
+}
+
 void App::open_editor(std::string path, std::string blob_id,
                       bool record_history) {
-  repository_focused_ = false;
+  if (!options_.repository_path) {
+    return;
+  }
+  path = std::filesystem::path(path).lexically_normal().generic_string();
+  auto found = open_buffers_.find(path);
+  if (found != open_buffers_.end() && found->second.buffer.get() == editor_) {
+    repository_focused_ = false;
+    editor_focused_ = true;
+    return;
+  }
+  if (found == open_buffers_.end()) {
+    auto buffer = std::make_unique<EditorBuffer>(EditorBuffer::open(
+        *options_.repository_path, path, std::move(blob_id)));
+    if (!buffer->error().empty()) {
+      editor_status_ = std::string(buffer->error());
+      return;
+    }
+    found = open_buffers_.emplace(path, OpenBuffer{std::move(buffer)}).first;
+  }
+  remember_editor_view();
   if (record_history) {
     if (const auto current = current_navigation_location()) {
       navigation_history_.replace_current(*current);
     }
-    navigation_history_.visit({path, 0, 0});
+  }
+  editor_ = found->second.buffer.get();
+  const auto cursor = editor_->cursor();
+  const auto location = NavigationLocation{path, cursor.line, cursor.byte};
+  if (record_history) {
+    navigation_history_.visit(location);
   } else {
-    navigation_history_.replace_current({path, 0, 0});
+    navigation_history_.replace_current(location);
   }
-  if (analysis_buffer_open_ && editor_graph_ && editor_) {
-    editor_graph_->close_buffer(std::filesystem::path(editor_->display_path()));
-  }
+  repository_focused_ = false;
   analysis_buffer_open_ = false;
   analysis_text_.clear();
   review_diff_open_ = false;
   structural_selection_history_.clear();
   structural_references_.clear();
-  editor_ = std::make_unique<EditorBuffer>(EditorBuffer::open(
-      *options_.repository_path, std::move(path), std::move(blob_id)));
   auto preferences = editor_->preferences();
   preferences.soft_wrap = settings_.editor.wrap;
   editor_->set_preferences(preferences);
@@ -2092,8 +2281,11 @@ void App::open_editor(std::string path, std::string blob_id,
   layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
   text_layer_ = std::make_unique<RetainedTextLayer>();
   text_layer_->reset(editor_->line_count());
-  scroll_line_ = 0;
-  horizontal_scroll_ = 0.0F;
+  scroll_line_ = found->second.scroll_line;
+  horizontal_scroll_ = found->second.horizontal_scroll;
+  column_selection_anchor_.reset();
+  buffer_matches_ = editor_->find(find_query_, find_options_);
+  find_match_index_ = 0;
   editor_focused_ = true;
   editor_status_.clear();
   if (!editor_graph_ || !editor_->error().empty()) {
@@ -2136,7 +2328,9 @@ void App::open_navigation_location(const NavigationLocation &location,
     }
   }
   open_editor(location.path.generic_string(), std::move(blob), record_history);
-  if (!editor_ || !editor_->error().empty()) {
+  if (!editor_ || !editor_->error().empty() ||
+      editor_->display_path() !=
+          location.path.lexically_normal().generic_string()) {
     return;
   }
   editor_->set_cursor({static_cast<std::size_t>(location.line),
@@ -2288,9 +2482,7 @@ void App::show_review_diff(const ReviewSnapshot &review) {
   if (!review.selected || !review.head) {
     return;
   }
-  if (analysis_buffer_open_ && editor_graph_ && editor_) {
-    editor_graph_->close_buffer(std::filesystem::path(editor_->display_path()));
-  }
+  remember_editor_view();
   analysis_buffer_open_ = false;
   analysis_text_.clear();
   review_diff_lines_ = review.diff;
@@ -2302,8 +2494,9 @@ void App::show_review_diff(const ReviewSnapshot &review) {
     text += review_diff_lines_[index].text;
   }
   const auto title = "Review " + review.selected->id + " — text diff";
-  editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
+  transient_editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
       "review:" + review.selected->id, title, std::move(text)));
+  editor_ = transient_editor_.get();
   layouts_ = std::make_unique<TextLayoutCache>();
   layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
   text_layer_ = std::make_unique<RetainedTextLayer>();
@@ -2480,26 +2673,29 @@ void App::apply_change(std::size_t first_line, std::size_t erased_lines,
 }
 
 void App::save_editor() {
-  if (!editor_) {
-    return;
+  if (editor_ && !review_diff_open_) {
+    static_cast<void>(save_buffer(*editor_));
   }
+}
+
+bool App::save_buffer(EditorBuffer &buffer) {
   if (settings_.editor.format_on_save &&
-      std::filesystem::path(editor_->display_path()).extension() == ".liquid") {
+      std::filesystem::path(buffer.display_path()).extension() == ".liquid") {
     auto document =
-        liquid::parse_configuration(editor_->text(), editor_->display_path());
+        liquid::parse_configuration(buffer.text(), buffer.display_path());
     if (!document) {
       editor_status_ = document.error().message;
-      return;
+      return false;
     }
     auto formatted = liquid::format_configuration(*document);
     if (!formatted) {
       editor_status_ = formatted.error().message;
-      return;
+      return false;
     }
-    if (*formatted != editor_->text()) {
-      editor_->select_all();
-      const auto change = editor_->insert_text(*formatted);
-      if (change) {
+    if (*formatted != buffer.text()) {
+      buffer.select_all();
+      const auto change = buffer.insert_text(*formatted);
+      if (change && &buffer == editor_) {
         apply_change(change->first_line, change->erased_lines,
                      change->inserted_lines);
       }
@@ -2515,25 +2711,26 @@ void App::save_editor() {
         *options_.repository_path, repository_options));
     if (!repository) {
       editor_status_ = repository.error().message;
-      return;
+      return false;
     }
-    saved = editor_->save(*repository);
+    saved = buffer.save(*repository);
   } else {
-    saved = editor_->save();
+    saved = buffer.save();
   }
   if (!saved) {
-    editor_status_ = std::string(editor_->error());
-    return;
+    editor_status_ = std::string(buffer.error());
+    return false;
   }
   editor_status_ = "saved as a drip";
   if (editor_graph_) {
-    editor_graph_->note_saved_drip(editor_->pending_drips());
+    editor_graph_->note_saved_drip(buffer.pending_drips());
     editor_graph_->refresh_status();
     if (build_running) {
       request_build();
       editor_status_ = "saved as a drip; build replanned";
     }
   }
+  return true;
 }
 
 void App::sync_editor_graph() {
@@ -2761,7 +2958,7 @@ void App::request_assistant_context(std::optional<AssistantAction> action) {
       editor_status_ = snapshot.history_error;
     } else if (editor_) {
       const auto path = std::string(editor_->display_path());
-      open_editor(path, "history:" + path);
+      refresh_saved_buffer(path);
       editor_status_ = "repository edit history applied";
     }
   }
@@ -2926,17 +3123,10 @@ void App::poll_editor_graph() {
       const auto refused = snapshot.structural_result->refused.size();
       editor_status_ = "structural edits applied=" + std::to_string(applied) +
                        " refused=" + std::to_string(refused);
-      const auto current_path =
-          editor_ ? std::string(editor_->display_path()) : std::string{};
-      const auto changed_current = std::ranges::any_of(
-          snapshot.structural_result->applied,
-          [&current_path](const auto &item) {
-            return item.path.generic_string() == current_path;
-          });
       structural_preview_open_ = false;
       structural_preview_.clear();
-      if (changed_current) {
-        open_editor(current_path, "structural:" + current_path);
+      for (const auto &item : snapshot.structural_result->applied) {
+        refresh_saved_buffer(item.path.generic_string());
       }
     }
   }
@@ -3103,6 +3293,7 @@ void App::handle_file_drop(const std::filesystem::path &source,
       RepositoryView::open(*options_.repository_path));
   if (target == DropTarget::editor) {
     const auto path = destination.generic_string();
+    refresh_saved_buffer(path);
     open_editor(path, "drop:" + path);
   }
   editor_status_ = "imported " + destination.generic_string();
@@ -3112,6 +3303,14 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
   const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
   const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
   const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
+  if (command_matches(settings_, "file.close", "Primary+W", key, modifiers)) {
+    close_editor();
+    return;
+  }
+  if (primary && key == SDLK_Q) {
+    request_quit();
+    return;
+  }
   if (command_matches(settings_, "settings.open", "Primary+,", key,
                       modifiers)) {
     settings_open_ = true;
@@ -3224,13 +3423,7 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     return;
   }
   if (primary && key == SDLK_Z) {
-    if (editor_graph_) {
-      if (shift) {
-        editor_graph_->request_redo();
-      } else {
-        editor_graph_->request_undo();
-      }
-    }
+    undo_editor(shift);
     return;
   }
   if (primary && key == SDLK_L) {
@@ -6502,11 +6695,22 @@ int App::run() {
     while (SDL_PollEvent(&event)) {
       ImGui_ImplSDL3_ProcessEvent(&event);
       if (event.type == SDL_EVENT_QUIT) {
-        quit_ = true;
+        request_quit();
       }
       if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
           event.window.windowID == SDL_GetWindowID(window_)) {
-        quit_ = true;
+        request_quit();
+      }
+      if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED &&
+          event.window.windowID == SDL_GetWindowID(window_)) {
+        const auto next_scale =
+            std::max(SDL_GetWindowDisplayScale(window_), 1.0F);
+        if (next_scale != display_scale_) {
+          ImGui_ImplSDLRenderer3_DestroyFontsTexture();
+          display_scale_ = next_scale;
+          load_font_atlas(display_scale_);
+          ImGui_ImplSDLRenderer3_CreateFontsTexture();
+        }
       }
       if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
           event.window.windowID == SDL_GetWindowID(window_)) {
@@ -6537,6 +6741,12 @@ int App::run() {
 #if defined(__APPLE__) && defined(__OBJC__)
       if (event.type == SDL_EVENT_USER) {
         switch (event.user.code) {
+        case menu_close:
+          close_editor();
+          break;
+        case menu_quit:
+          request_quit();
+          break;
         case menu_save:
           save_editor();
           break;
@@ -6627,6 +6837,12 @@ int App::run() {
         }
       }
 #endif
+      if (quit_) {
+        break;
+      }
+    }
+    if (quit_) {
+      break;
     }
 
     prepare_smoke_frame(frames);
@@ -6647,7 +6863,7 @@ int App::run() {
 
     ++frames;
     if (options_.max_frames > 0 && frames >= options_.max_frames) {
-      quit_ = true;
+      break;
     }
   }
   if (options_.smoke) {
@@ -6678,6 +6894,83 @@ void App::shutdown() {
   initialized_ = false;
 }
 
+#ifdef LIQUIFY_NATIVE_BUFFER_REGRESSION
+void NativeBufferRegression::text(std::string_view value) {
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_TEXT_INPUT;
+  event.text.text = value.data();
+  SDL_PushEvent(&event);
+}
+
+void NativeBufferRegression::key(char value, bool shift) {
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_KEY_DOWN;
+  event.key.key = static_cast<SDL_Keycode>(value);
+  event.key.mod = SDL_KMOD_GUI;
+  if (shift) {
+    event.key.mod |= SDL_KMOD_SHIFT;
+  }
+  SDL_PushEvent(&event);
+}
+
+void NativeBufferRegression::close_window(App &app) {
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+  event.window.windowID = SDL_GetWindowID(app.window_);
+  SDL_PushEvent(&event);
+}
+
+void NativeBufferRegression::describe_window(App &app) {
+  std::printf(
+      "Native window: driver=%s scale=%.1f visible=%s\n",
+      SDL_GetCurrentVideoDriver(), SDL_GetWindowDisplayScale(app.window_),
+      (SDL_GetWindowFlags(app.window_) & SDL_WINDOW_HIDDEN) ? "no" : "yes");
+}
+
+void NativeBufferRegression::answer_dialog(std::string_view label) {
+  const auto separator = label.find('|');
+  const auto remaining = separator == std::string_view::npos
+                             ? std::string{}
+                             : std::string(label.substr(separator + 1));
+  label = label.substr(0, separator);
+  auto *title = [[NSString alloc] initWithBytes:label.data()
+                                         length:label.size()
+                                       encoding:NSUTF8StringEncoding];
+  // Click the actual native alert button after the modal run loop starts.
+  dispatch_after(
+      dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC),
+      dispatch_get_main_queue(), ^{
+        auto *modal = [NSApp modalWindow];
+        auto *pending = [NSMutableArray array];
+        if (modal != nil) {
+          [pending addObject:[modal contentView]];
+          if ([modal attachedSheet] != nil) {
+            [pending addObject:[[modal attachedSheet] contentView]];
+          }
+        }
+        while ([pending count] != 0) {
+          NSView *view = [pending lastObject];
+          [pending removeLastObject];
+          if ([view isKindOfClass:[NSButton class]] &&
+              [[(NSButton *)view title] isEqualToString:title]) {
+            std::printf("Native dialog: clicked %s\n", [title UTF8String]);
+            if (!remaining.empty()) {
+              answer_dialog(remaining);
+            }
+            [(NSButton *)view performClick:nil];
+            [title release];
+            return;
+          }
+          [pending addObjectsFromArray:[view subviews]];
+        }
+        std::fprintf(stderr, "FAIL: native dialog button %s was not found\n",
+                     [title UTF8String]);
+        [title release];
+        std::exit(1);
+      });
+}
+#endif
+
 #ifdef LIQUIFY_NATIVE_WINDOW_TESTS
 // The display test stays here to preserve the single SDL/ImGui translation
 // unit.
@@ -6705,8 +6998,8 @@ public:
       app.shell_state_.editor_split = false;
       app.shell_state_.sidebar_visible = true;
       // #54: The native renderer test uses the screenshot suite's in-memory
-      // source fixture. An external liquid CLI can produce a newer store format
-      // than the libliquid pin, and repository loading is outside this
+      // source fixture. An external liquid CLI can produce a newer store
+      // format than the libliquid pin, and repository loading is outside this
       // rendering regression.
       app.first_run_.repository_opened(
           {.path = "native-window-fixture", .name = "native-window-fixture"});
@@ -6714,8 +7007,10 @@ public:
       for (int line = 0; line < 100; ++line) {
         source += "// Native window rendering: " + std::string(180, 'M') + "\n";
       }
-      app.editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
-          "native-window-source", "src/main.cpp", source));
+      app.transient_editor_ =
+          std::make_unique<EditorBuffer>(EditorBuffer::from_text(
+              "native-window-source", "src/main.cpp", source));
+      app.editor_ = app.transient_editor_.get();
       app.layouts_ = std::make_unique<TextLayoutCache>();
       app.layouts_->reset(std::string(app.editor_->blob_id()),
                           app.editor_->line_count());
@@ -6856,14 +7151,14 @@ private:
     const auto y = app.editor_y_ + app.line_height_ * 15.5F;
     app.position_cursor(x, y, false);
     const auto cursor = app.editor_->cursor();
-    std::printf(
-        "native-window: hit expected=%zu:%zu actual=%zu:%zu position=%.1f,%.1f "
-        "scroll=%.1f\n",
-        target_line, target_byte, cursor.line, cursor.byte, x, y,
-        app.horizontal_scroll_);
-    require(
-        cursor.line == target_line && cursor.byte == target_byte,
-        "logical mouse hit did not resolve through the displayed text layout");
+    std::printf("native-window: hit expected=%zu:%zu actual=%zu:%zu "
+                "position=%.1f,%.1f "
+                "scroll=%.1f\n",
+                target_line, target_byte, cursor.line, cursor.byte, x, y,
+                app.horizontal_scroll_);
+    require(cursor.line == target_line && cursor.byte == target_byte,
+            "logical mouse hit did not resolve through the displayed text "
+            "layout");
   }
 
   static void focus_source_tab(App &app) {
@@ -6922,8 +7217,9 @@ private:
   }
 
   static void replace_buffer(App &app, const std::string &text) {
-    app.editor_ = std::make_unique<EditorBuffer>(
+    app.transient_editor_ = std::make_unique<EditorBuffer>(
         EditorBuffer::from_text("native-occlusion", "src/main.cpp", text));
+    app.editor_ = app.transient_editor_.get();
     app.layouts_->reset("native-occlusion", app.editor_->line_count());
     app.text_layer_->reset(app.editor_->line_count());
   }

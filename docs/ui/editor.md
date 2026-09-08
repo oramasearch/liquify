@@ -35,10 +35,10 @@ Primary-modifier+Shift+F opens repository search. Repository queries use
 location from the Search results panel. Repository replacement searches first, rewrites matching
 blobs through `repository::write`, and reports the replacement count.
 
-Primary-modifier+Z and primary-modifier+Shift+Z request undo and redo from liquid's repository
-operation log. Repository and structural writes are operation boundaries, so a multi-file agent or
-structural change is presented as one history action rather than a sequence of keystrokes. After a
-history operation the active blob is reopened from liquid.
+Primary-modifier+Z and primary-modifier+Shift+Z undo and redo the active buffer's local edits,
+including unsaved typing. Switching files and saving keep this history. Liquid's repository
+operation history remains a graph API; its structural operations retain their grouped semantics.
+The lifetime, native close confirmation and crash policy are in [`buffers.md`](buffers.md).
 
 ## Asynchronous data path
 

@@ -72,3 +72,6 @@ dependency compresses and expands image data.
 The [coordinate contract and native window regression](app-shell.md#logical-coordinates-and-native-pixels)
 cover drawable scaling, retained composition and logical hit testing with a real GPU window.
 Headless fixture success alone does not establish native rendering correctness.
+
+The display-required dirty-buffer regression and lifetime policy are documented in
+[`buffers.md`](buffers.md). Native discard dialogs are verified by that regression.

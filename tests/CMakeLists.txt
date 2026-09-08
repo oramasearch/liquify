@@ -63,6 +63,23 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
     LABELS "native;display" RUN_SERIAL TRUE TIMEOUT 180)
 endif()
 
+if(APPLE)
+  add_executable(liquify-native-buffer-regression native_buffer_regression.cpp)
+  target_link_libraries(liquify-native-buffer-regression PRIVATE liquify-app)
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cache/t")
+  add_test(
+    NAME liquify-native-buffer-regression
+    COMMAND liquify-native-buffer-regression
+            "${CMAKE_CURRENT_BINARY_DIR}/native-buffer-regression-fixture")
+  set_tests_properties(
+    liquify-native-buffer-regression
+    PROPERTIES
+      WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+      ENVIRONMENT
+        "LIQUID_HOME=${CMAKE_BINARY_DIR}/.cache/liquify-native-buffer-home;TMPDIR=.cache/t"
+      SKIP_RETURN_CODE 77)
+endif()
+
 add_test(
   NAME liquify-print-tree-unreadable
   COMMAND ${CMAKE_COMMAND}

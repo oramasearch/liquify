@@ -13,13 +13,15 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 local TAAP identity and additional-window actions. Repositories switch without restarting.
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, indexes all paths and libliquid symbol records, annotates file
-kind plus drive and change state, and opens blobs into an editable in-memory buffer; save calls
-libliquid and produces a drip. Quick Open, Symbol Search, definitions, references, call hierarchy,
+kind plus drive and change state, and opens blobs into retained in-memory buffers keyed by path.
+Switching preserves text, selections and local undo; native Save / Discard / Cancel dialogs protect
+close, repository replacement and quit (see `docs/ui/buffers.md`). Save calls libliquid and produces
+a drip. Quick Open, Symbol Search, definitions, references, call hierarchy,
 breadcrumbs, recent locations, and back/forward share one navigation action registry with default
 bindings; repository rows expose open, rename, move, new-file, and reveal actions.
 The standard input mode is non-modal and a modal command/insert mode is available. Multi-cursor
 and column edits, repository indentation, liquid syntax/folds, collaboration gutters,
-search/replace and operation-log history are part of the editor view. Unreadable
+search/replace, local edit history and operation-log history are part of the editor view. Unreadable
 repositories retain liquid's error, with upgrade guidance for unsupported store formats, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
 reports frame and typing latency, and exits 0. Unreadable local repositories and unreachable lake
 clones have distinct retry states. `liquify --screenshot` renders fixed welcome, recovery,
