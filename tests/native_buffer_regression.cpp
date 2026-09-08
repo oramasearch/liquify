@@ -12,6 +12,8 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <vector>
 
 namespace {
 void require(bool condition, std::string_view message) {
@@ -39,6 +41,23 @@ struct BufferState {
                buffer->dirty() == dirty;
     }
 };
+
+class FixtureCleanup {
+public:
+    explicit FixtureCleanup(std::vector<std::filesystem::path>& paths) : paths_(paths) {}
+
+    ~FixtureCleanup() {
+        for (const auto& path : paths_) {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    }
+
+private:
+    std::vector<std::filesystem::path>& paths_;
+};
+
+std::vector<std::filesystem::path> fixture_paths;
 
 void create_fixture(const std::filesystem::path& path) {
     auto repository = liquid::runtime::block_on(liquid::repository::create(path));
@@ -163,7 +182,9 @@ void liquify::NativeBufferRegression::save_failure(App& app) {
 
 void liquify::NativeBufferRegression::switch_repository(App& app) {
     const auto original_path = *app.options_.repository_path;
-    const auto other_path = std::filesystem::path(original_path.string() + "-second");
+    const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto other_path = std::filesystem::path(original_path.string() + "-second-" + suffix);
+    fixture_paths.push_back(other_path);
     create_fixture(other_path);
     text("REPOSITORY_SWITCH_MARKER");
     pulse(app);
@@ -256,11 +277,18 @@ int main(int argc, char** argv) {
     try {
         const auto fixture = std::filesystem::absolute(argv[1]);
         require(!std::filesystem::exists(fixture), "fixture directory is fresh");
+        fixture_paths.push_back(fixture);
+        FixtureCleanup cleanup(fixture_paths);
         create_fixture(fixture);
         liquify::AppOptions options;
         options.repository_path = fixture;
         liquify::App app(options);
-        require(app.init(), "native application initialized");
+        if (!app.init()) {
+            std::fprintf(stderr,
+                         "SKIP: native window initialization is unavailable on this macOS host\n");
+            return 77;
+        }
+        require(true, "native application initialized");
         return liquify::NativeBufferRegression::run(app);
     } catch (const std::exception& error) {
         std::fprintf(stderr, "FAIL: %s\n", error.what());

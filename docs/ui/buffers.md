@@ -58,6 +58,8 @@ LIQUID_HOME="$PWD/.cache/issue-55/home" \
   "$PWD/.cache/issue-55/native-fixture"
 ```
 
-The fixture directory must not already exist. Proof output and the before/after record are kept
+On macOS CTest registers this as `liquify-native-buffer-regression`; it creates its fixture under
+the build directory and removes it after the run. If a native window cannot be initialized, the
+test reports a clear skip rather than a failure. Proof output and the before/after record are kept
 with the pull request for Refs #55. Rendering/scale, general native acceptance coverage and status
 bar layout are tracked separately.
