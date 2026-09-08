@@ -46,8 +46,8 @@ contract](../ui/app-shell.md#logical-coordinates-and-native-pixels)). One regist
 metadata, commands, placement, focus, state and notifications; each surface moves among dock
 areas, floats and re-docks. Divider
 sizes and complete panel layouts persist per repository and can be reset. The status bar reports
-daemon, sync, hydration, build, presence, current change, branch, notifications and identity.
-macOS installs native
+actionable build, sync, hydration and failure state. Collaboration, identity, change, timing and
+validation records remain available through explicit gutter, panel, and details controls. macOS installs native
 command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.md),
 [`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
 The shared command registry powers fuzzy palette search, recent commands, platform key bindings,
@@ -88,8 +88,8 @@ retain error-tolerant incremental trees and answer node, enclosing-definition, d
 reference, hover, completion and build-diagnostic queries; an edit cancels their in-flight graph
 work. Graph-backed editor queries resolve through closed-file stubs or compiler symbol records and
 read build diagnostics by translation unit. The editor renders graph diagnostics inline and in a
-panel, exposes definition, hover and completion controls, and shows daemon drip triggers plus the
-validation backlog in its status line
+panel, exposes definition, hover and completion controls, and makes daemon drip triggers plus the
+validation backlog available from Diagnostics details
 ([`../editor/interactive-analysis.md`](../editor/interactive-analysis.md)).
 
 ## Structural editing

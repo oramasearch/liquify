@@ -259,7 +259,6 @@ constexpr float editor_padding = design::space2;
 constexpr float editor_gutter_width = 72.0F;
 constexpr float activity_bar_width = design::control_lg;
 constexpr float divider_size = design::space1;
-constexpr float status_bar_height = design::space6;
 
 auto normalized_binding(std::string_view binding) -> std::string {
   auto output = std::string{};
@@ -310,6 +309,232 @@ auto imgui_color(design::Rgba color) -> ImVec4 {
 
 auto packed_color(design::Rgba color) -> ImU32 {
   return ImGui::ColorConvertFloat4ToU32(imgui_color(color));
+}
+
+// UI-only formatting: source, model values and clipboard payloads stay intact.
+auto compact_identifier(std::string_view value) -> std::string {
+  const auto colon = value.rfind(':');
+  const auto payload = colon == std::string_view::npos ? 0 : colon + 1;
+  if (value.size() - payload <= 8) {
+    return std::string(value);
+  }
+  return std::string(value.substr(0, payload + 8)) + "…";
+}
+
+auto compact_identifiers(std::string_view text) -> std::string {
+  auto output = std::string{};
+  for (std::size_t offset = 0; offset < text.size();) {
+    auto end = offset;
+    while (end < text.size() &&
+           (std::isalnum(static_cast<unsigned char>(text[end])) ||
+            text[end] == ':')) {
+      ++end;
+    }
+    if (end == offset) {
+      output += text[offset++];
+      continue;
+    }
+    const auto word = text.substr(offset, end - offset);
+    const auto hex =
+        word.size() >= 32 && std::ranges::all_of(word, [](unsigned char c) {
+          return std::isxdigit(c);
+        });
+    output += word.starts_with("taap:") || word.starts_with("blake3:") || hex
+                  ? compact_identifier(word)
+                  : std::string(word);
+    offset = end;
+  }
+  return output;
+}
+
+void identifier_detail(const char *label, const std::string &value) {
+  if (value.empty()) {
+    return;
+  }
+  ImGui::PushID(label);
+  ImGui::TextUnformatted(label);
+  ImGui::SameLine();
+  const auto button = compact_identifier(value) + "##copy";
+  if (ImGui::SmallButton(button.c_str())) {
+    SDL_SetClipboardText(value.c_str());
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("%s\nClick to copy", value.c_str());
+  }
+  ImGui::PopID();
+}
+
+void detail_text(const std::string &value) {
+  ImGui::TextWrapped("%s", compact_identifiers(value).c_str());
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("%s", value.c_str());
+  }
+}
+
+enum class ShellIcon {
+  folder,
+  search,
+  review,
+  build,
+  people,
+  diagnostic,
+  assistant,
+  plugin,
+  structure,
+  document,
+  code,
+  header,
+  markdown,
+  settings,
+  data
+};
+
+auto panel_icon(PanelId id) -> ShellIcon {
+  switch (id) {
+  case PanelId::repository:
+    return ShellIcon::folder;
+  case PanelId::search:
+    return ShellIcon::search;
+  case PanelId::review:
+    return ShellIcon::review;
+  case PanelId::build:
+    return ShellIcon::build;
+  case PanelId::multiplayer:
+    return ShellIcon::people;
+  case PanelId::diagnostics:
+    return ShellIcon::diagnostic;
+  case PanelId::assistant:
+    return ShellIcon::assistant;
+  case PanelId::plugins:
+    return ShellIcon::plugin;
+  case PanelId::structural_editing:
+    return ShellIcon::structure;
+  }
+  return ShellIcon::document;
+}
+
+auto file_icon(NavigationFileKind kind) -> ShellIcon {
+  switch (kind) {
+  case NavigationFileKind::directory:
+    return ShellIcon::folder;
+  case NavigationFileKind::c_source:
+  case NavigationFileKind::cpp_source:
+    return ShellIcon::code;
+  case NavigationFileKind::header:
+    return ShellIcon::header;
+  case NavigationFileKind::markdown:
+    return ShellIcon::markdown;
+  case NavigationFileKind::cmake:
+    return ShellIcon::settings;
+  case NavigationFileKind::json:
+  case NavigationFileKind::binary:
+    return ShellIcon::data;
+  default:
+    return ShellIcon::document;
+  }
+}
+
+// Small native strokes avoid relying on icon glyphs absent from IBM Plex.
+void draw_shell_icon(ShellIcon icon, ImVec2 origin) {
+  auto *draw = ImGui::GetWindowDrawList();
+  const auto color = ImGui::GetColorU32(ImGuiCol_Text);
+  const auto point = [origin](float x, float y) {
+    return ImVec2(origin.x + x, origin.y + y);
+  };
+  const auto line = [&](float x, float y, float u, float v) {
+    draw->AddLine(point(x, y), point(u, v), color, 1.5F);
+  };
+  switch (icon) {
+  case ShellIcon::folder:
+    draw->AddRect(point(1, 5), point(15, 14), color, 1.5F, 0, 1.5F);
+    line(1, 5, 1, 2);
+    line(1, 2, 7, 2);
+    line(7, 2, 9, 5);
+    break;
+  case ShellIcon::search:
+    draw->AddCircle(point(6, 6), 4.5F, color, 16, 1.5F);
+    line(10, 10, 15, 15);
+    break;
+  case ShellIcon::build:
+    draw->AddTriangle(point(3, 1), point(14, 8), point(3, 15), color, 1.5F);
+    break;
+  case ShellIcon::people:
+    draw->AddCircle(point(5, 4), 2.5F, color, 12, 1.5F);
+    draw->AddCircle(point(12, 5), 2.0F, color, 12, 1.5F);
+    draw->AddRect(point(1, 9), point(9, 15), color, 3.0F, 0, 1.5F);
+    line(11, 10, 15, 10);
+    line(15, 10, 15, 15);
+    break;
+  case ShellIcon::diagnostic:
+    draw->AddTriangle(point(8, 1), point(15, 15), point(1, 15), color, 1.5F);
+    line(8, 6, 8, 10);
+    draw->AddCircleFilled(point(8, 12.5F), 1, color);
+    break;
+  case ShellIcon::assistant:
+    line(8, 1, 8, 15);
+    line(1, 8, 15, 8);
+    line(3, 3, 13, 13);
+    line(3, 13, 13, 3);
+    break;
+  case ShellIcon::plugin:
+  case ShellIcon::structure:
+  case ShellIcon::settings:
+    draw->AddRect(point(3, 4), point(13, 13), color, 1, 0, 1.5F);
+    line(5, 0, 5, 4);
+    line(11, 0, 11, 4);
+    line(8, 13, 8, 16);
+    break;
+  case ShellIcon::review:
+    draw->AddRect(point(1, 2), point(15, 12), color, 2, 0, 1.5F);
+    line(4, 12, 4, 16);
+    line(4, 16, 8, 12);
+    break;
+  default:
+    draw->AddRect(point(2, 1), point(14, 15), color, 1, 0, 1.5F);
+    if (icon == ShellIcon::code || icon == ShellIcon::header) {
+      line(6, 6, 4, 8);
+      line(4, 8, 6, 10);
+      line(10, 6, 12, 8);
+      line(12, 8, 10, 10);
+      if (icon == ShellIcon::header) {
+        line(5, 3, 11, 3);
+      }
+    } else {
+      line(5, 5, 11, 5);
+      line(5, 8, 11, 8);
+      line(5, 11, icon == ShellIcon::markdown ? 8 : 11, 11);
+    }
+    break;
+  }
+}
+
+void item_icon(ShellIcon icon, float inset = 4.0F) {
+  const auto begin = ImGui::GetItemRectMin();
+  const auto height = ImGui::GetItemRectSize().y;
+  draw_shell_icon(icon, {begin.x + inset, begin.y + (height - 16.0F) * 0.5F});
+}
+
+void file_type_hint(NavigationFileKind kind) {
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("%s", navigation_file_kind_name(kind).data());
+  }
+}
+
+bool file_item(const char *name, NavigationFileKind kind,
+               bool selected = false) {
+  const auto label = std::string("      ") + name;
+  const auto clicked = ImGui::Selectable(label.c_str(), selected);
+  item_icon(file_icon(kind));
+  file_type_hint(kind);
+  return clicked;
+}
+
+bool directory_item(const char *name) {
+  const auto label = std::string("      ") + name;
+  const auto open = ImGui::TreeNode(label.c_str());
+  item_icon(ShellIcon::folder, ImGui::GetTreeNodeToLabelSpacing());
+  file_type_hint(NavigationFileKind::directory);
+  return open;
 }
 
 auto effective_palette(bool dark, bool high_contrast) -> design::Palette {
@@ -1643,6 +1868,10 @@ bool App::invoke_command(std::string_view name) {
 }
 
 bool App::init() { return init_window(true); }
+
+auto App::diagnostics_viewport() const -> InputRectangle {
+  return diagnostics_viewport_;
+}
 
 bool App::init_window(bool high_pixel_density) {
   const auto *screenshot =
@@ -3741,9 +3970,10 @@ void App::draw_composition() {
 }
 
 void App::draw_repository_tree() {
-  const auto path = options_.repository_path->string();
-  ImGui::Text("Repository: %s", path.c_str());
-  ImGui::TextDisabled("opened in %.3f ms", repository_->open_time().count());
+  ImGui::TextUnformatted(repository_->name().c_str());
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("%s", options_.repository_path->string().c_str());
+  }
   ImGui::Separator();
   if (!repository_->error().empty()) {
     ImGui::TextWrapped("Could not open this repository: %s",
@@ -3825,9 +4055,7 @@ void App::draw_review_panel() {
   if (ImGui::SmallButton("Request changes")) {
     review_->request_changes();
   }
-  ImGui::TextDisabled("text diff %.3f ms | anchor map %.3f ms",
-                      snapshot.review.open_to_first_hunk_ms,
-                      snapshot.review.anchor_mapping_ms);
+
   ImGui::Text("Comments (%zu)", snapshot.review.comments.size());
   for (std::size_t index = 0; index < snapshot.review.comments.size();
        ++index) {
@@ -3884,8 +4112,7 @@ void App::draw_repository_entries(std::string_view directory) {
         metadata == nullptr
             ? navigation_file_kind(path, entry.kind == liquid::node_kind::tree)
             : metadata->kind;
-    auto label =
-        "[" + std::string(navigation_file_kind_name(kind)) + "] " + entry.name;
+    auto label = "      " + entry.name;
     if (metadata != nullptr &&
         metadata->change != NavigationChangeState::clean) {
       label += "  [" +
@@ -3907,9 +4134,13 @@ void App::draw_repository_entries(std::string_view directory) {
         repository_focused_ = true;
         open_editor(path, liquid::to_string(entry.id));
       }
+      item_icon(file_icon(kind));
+      file_type_hint(kind);
     } else if (entry.kind == liquid::node_kind::tree) {
       const auto open =
           ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_OpenOnArrow);
+      item_icon(file_icon(kind), ImGui::GetTreeNodeToLabelSpacing());
+      file_type_hint(kind);
       if (ImGui::IsItemClicked()) {
         repository_selection_ = path;
         repository_selection_blob_.clear();
@@ -3991,9 +4222,9 @@ void App::draw_navigation_popups() {
     ImGui::InputTextWithHint("##quick-open", "Type a path", &quick_open_query_,
                              quick_open_flags);
     if (navigation_screenshot) {
-      ImGui::Selectable("[C++] src/app.cpp", true);
-      ImGui::Selectable("[C++] src/app_state.cpp");
-      ImGui::Selectable("[md] docs/ui/app-shell.md");
+      file_item("src/app.cpp", NavigationFileKind::cpp_source, true);
+      file_item("src/app_state.cpp", NavigationFileKind::cpp_source);
+      file_item("docs/ui/app-shell.md", NavigationFileKind::markdown);
       ImGui::TextDisabled("3 path matches · Primary+P");
     } else if (!repository_) {
       ImGui::TextDisabled("Open a repository to search paths.");
@@ -4003,15 +4234,15 @@ void App::draw_navigation_popups() {
       for (const auto &match :
            rank_paths(repository_->navigation_paths(), quick_open_query_)) {
         const auto &path = repository_->navigation_paths()[match.index];
-        const auto label = "[" +
-                           std::string(navigation_file_kind_name(path.kind)) +
-                           "] " + path.path.generic_string() + "##quick-" +
+        const auto label = "      " + path.path.generic_string() + "##quick-" +
                            std::to_string(match.index);
         if (ImGui::Selectable(label.c_str())) {
           open_editor(path.path.generic_string(), path.blob_id);
           quick_open_query_.clear();
           ImGui::CloseCurrentPopup();
         }
+        item_icon(file_icon(path.kind));
+        file_type_hint(path.kind);
       }
     }
     if (ImGui::Button("Close")) {
@@ -5114,6 +5345,246 @@ void App::draw_plugin_panels() {
   }
 }
 
+void App::draw_editor_modes() {
+  const auto mode = editing_mode_name(editor_->mode());
+  if (ImGui::Button(mode.data())) {
+    ImGui::OpenPopup("editor-mode");
+  }
+  if (ImGui::BeginPopup("editor-mode")) {
+    for (const auto value : {EditingMode::standard, EditingMode::modal_command,
+                             EditingMode::modal_insert}) {
+      if (ImGui::MenuItem(editing_mode_name(value).data(), nullptr,
+                          editor_->mode() == value)) {
+        editor_->set_mode(value);
+        editor_focused_ = true;
+      }
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::SameLine();
+  ImGui::BeginDisabled(!analysis_buffer_open_);
+  if (ImGui::Button("Structural")) {
+    ImGui::OpenPopup("structural-actions");
+  }
+  if (ImGui::BeginPopup("structural-actions")) {
+    if (ImGui::MenuItem("Expand selection")) {
+      expand_structural_selection();
+    }
+    if (ImGui::MenuItem("Shrink selection")) {
+      shrink_structural_selection();
+    }
+    if (ImGui::MenuItem("Select enclosing definition")) {
+      select_enclosing_definition();
+    }
+    if (ImGui::MenuItem("Rename")) {
+      open_rename();
+    }
+    if (ImGui::MenuItem("Extract function")) {
+      open_extract_function();
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::EndDisabled();
+  if (assistant_) {
+    ImGui::SameLine();
+    if (ImGui::Button(assistant_->snapshot().enabled ? "AI: on" : "AI: off")) {
+      toggle_assistant();
+    }
+  }
+}
+
+void App::draw_editor_toolbar() {
+  const auto origin = ImGui::GetCursorScreenPos();
+  const auto available = ImGui::GetContentRegionAvail();
+  const auto next_group = [](const char *name, float width) {
+    ImGui::EndGroup();
+    const auto end = ImGui::GetItemRectMax().x;
+    const auto right =
+        ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+    if (end + width + design::space4 < right) {
+      ImGui::SameLine(0, design::space4);
+    }
+    ImGui::BeginGroup();
+    ImGui::TextDisabled("%s", name);
+  };
+  ImGui::BeginGroup();
+  ImGui::TextDisabled("File");
+  ImGui::BeginDisabled(review_diff_open_);
+  if (ImGui::Button("Save")) {
+    save_editor();
+    editor_focused_ = true;
+  }
+  ImGui::EndDisabled();
+  next_group("Build", 270.0F);
+  if (ImGui::Button("Build (F7)")) {
+    request_build();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Tests (F8)")) {
+    request_tests();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Deploy (F9)")) {
+    request_deploy();
+  }
+  next_group("View", 180.0F);
+  if (ImGui::Button(shell_state_.editor_split ? "Unsplit" : "Split")) {
+    shell_state_.editor_split = !shell_state_.editor_split;
+    persist_shell_state();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button(shell_state_.bottom_panel_visible ? "Hide panel"
+                                                      : "Show panel")) {
+    shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
+    persist_shell_state();
+  }
+  next_group("Mode", 260.0F);
+  ImGui::BeginDisabled(review_diff_open_);
+  draw_editor_modes();
+  ImGui::EndDisabled();
+  ImGui::EndGroup();
+  ImGui::Separator();
+  const auto end = ImGui::GetItemRectMax();
+  toolbar_rectangle_ = {origin.x, origin.y, available.x, end.y - origin.y};
+}
+
+void App::draw_multiplayer_details() {
+  if (!multiplayer_) {
+    ImGui::TextDisabled("Open a repository file to inspect collaboration.");
+    return;
+  }
+  auto count = std::size_t{};
+  for (const auto &value : multiplayer_->presence) {
+    if (value.session == multiplayer_session_) {
+      continue;
+    }
+    ImGui::PushID(static_cast<int>(count++));
+    detail_text(multiplayer_presence_text(value));
+    identifier_detail("Actor", value.actor.taap_id);
+    identifier_detail("Session", liquid::to_string(value.session));
+    ImGui::Separator();
+    ImGui::PopID();
+  }
+  if (count == 0) {
+    ImGui::TextDisabled("No other active sessions");
+  }
+  if (ImGui::CollapsingHeader("Leases")) {
+    for (const auto &value : multiplayer_->leases) {
+      detail_text(multiplayer_lease_text(value));
+    }
+  }
+  if (ImGui::CollapsingHeader("Local identity")) {
+    identifier_detail("Session", liquid::to_string(multiplayer_session_));
+    identifier_detail("Change", liquid::to_string(multiplayer_->change.value));
+  }
+}
+
+void App::draw_line_attribution(std::size_t line) {
+  ImGui::Text("Line %zu attribution", line + 1);
+  if (multiplayer_) {
+    const auto found = std::ranges::find(multiplayer_->attribution, line + 1,
+                                         &liquid::line_attribution::line);
+    if (found != multiplayer_->attribution.end()) {
+      identifier_detail("Author", found->by.taap_id);
+      identifier_detail("Session", liquid::to_string(found->session));
+      identifier_detail("Change", liquid::to_string(found->change.value));
+      if (found->agent) {
+        ImGui::TextDisabled("Assisted edit");
+      }
+      return;
+    }
+  }
+  const auto graph =
+      editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
+  const auto found =
+      std::ranges::find(graph.attribution, line, &AttributionSnapshot::line);
+  if (found != graph.attribution.end()) {
+    identifier_detail("Author", found->actor);
+    // The graph's change is already abbreviated; the repository snapshot above
+    // owns the full value.
+    ImGui::TextDisabled("Change: %s",
+                        compact_identifier(found->change).c_str());
+  } else {
+    ImGui::TextDisabled("No saved attribution for this line");
+  }
+}
+
+void App::draw_repository_details(const EditorGraphSnapshot &snapshot) {
+  if (!repository_details_open_) {
+    return;
+  }
+  ImGui::Separator();
+  ImGui::TextUnformatted("Repository details");
+  if (repository_) {
+    ImGui::TextWrapped("%s", options_.repository_path->string().c_str());
+    ImGui::Text("Opened in %.3f ms", repository_->open_time().count());
+    identifier_detail("Working change",
+                      std::string(repository_->current_change()));
+  }
+  if (first_run_.session()) {
+    identifier_detail("Identity", first_run_.session()->actor);
+  }
+  identifier_detail("Session", liquid::to_string(multiplayer_session_));
+  detail_text(editor_graph_status(snapshot));
+  if (snapshot.daemon && snapshot.daemon->last_drip) {
+    identifier_detail("Last drip",
+                      liquid::to_string(snapshot.daemon->last_drip->value));
+  }
+  ImGui::Text("Edit to first result %.3f ms", snapshot.edit_to_diagnostic_ms);
+  if (review_) {
+    const auto review = review_->snapshot();
+    ImGui::Text("Text diff %.3f ms | anchor map %.3f ms",
+                review.review.open_to_first_hunk_ms,
+                review.review.anchor_mapping_ms);
+  }
+  if (!snapshot.error.empty()) {
+    detail_text(snapshot.error);
+  }
+  if (repository_) {
+    const auto state = StatusBarInput{
+        .repository_open = true,
+        .daemon_running = snapshot.daemon_running,
+        .daemon_available = editor_graph_ != nullptr,
+        .sync_running = sync_was_running_,
+        .hydration_running = hydration_was_running_,
+        .build_running = snapshot.build_running,
+        .offline = repository_->offline(),
+        .pending_uploads = repository_->pending_uploads(),
+        .hydration_debt = repository_->hydration_debt(),
+        .remote_bytes = repository_->remote_bytes(),
+        .presence_count = repository_->presence_count(),
+        .notification_count = panels_.notifications().size(),
+        .build_result = snapshot.build_result,
+        .branch = std::string(repository_->branch()),
+    };
+    for (const auto &segment : status_bar_segments(state)) {
+      if (segment != "Sign in" && segment != "No change") {
+        detail_text(segment);
+      }
+    }
+  }
+}
+
+auto App::panel_label(PanelId id) const -> std::string {
+  auto label = std::string(panels_.descriptor(id).title);
+  if (id == PanelId::diagnostics) {
+    const auto snapshot =
+        editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
+    const auto count =
+        screenshot_mode()
+            ? 3
+            : snapshot.diagnostics.size() + snapshot.build_diagnostics.size();
+    label += " " + std::to_string(count);
+    if (!structural_diagnostics_.empty() || !snapshot.query_error.empty()) {
+      label += " !";
+    }
+  }
+  if (panels_.panel_state(id).busy) {
+    label += " · Working";
+  }
+  return label;
+}
+
 void App::draw_editor() {
   const auto path = std::string(editor_->display_path());
   const auto graph_snapshot =
@@ -5147,129 +5618,42 @@ void App::draw_editor() {
     ImGui::SameLine();
     ImGui::TextUnformatted("*");
   }
-  ImGui::SameLine();
   if (review_diff_open_) {
+    ImGui::SameLine();
     ImGui::TextDisabled("read-only text diff");
-  } else if (ImGui::Button(editing_mode_name(editor_->mode()).data())) {
-    const auto next = editor_->mode() == EditingMode::standard
-                          ? EditingMode::modal_command
-                          : EditingMode::standard;
-    editor_->set_mode(next);
-    editor_focused_ = true;
-  }
-  if (!review_diff_open_) {
-    ImGui::SameLine();
-    if (ImGui::Button("Save")) {
-      save_editor();
-      editor_focused_ = true;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Build (F7)")) {
-      request_build();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Tests (F8)")) {
-      request_tests();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Deploy (F9)")) {
-      request_deploy();
-    }
-  }
-  if (assistant_) {
-    ImGui::SameLine();
-    const auto enabled = assistant_->snapshot().enabled;
-    if (ImGui::Button(enabled ? "AI: on" : "AI: off")) {
-      toggle_assistant();
-    }
-  }
-  if (analysis_buffer_open_) {
-    ImGui::SameLine();
-    if (ImGui::Button("Definition (F12)")) {
-      request_definition();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Hover (F1)")) {
-      request_hover();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Complete")) {
-      request_completion();
-    }
   }
   ImGui::SameLine();
-  if (ImGui::Button(shell_state_.editor_split ? "Unsplit" : "Split")) {
-    shell_state_.editor_split = !shell_state_.editor_split;
-    persist_shell_state();
+  if (ImGui::SmallButton("...##file-actions")) {
+    ImGui::OpenPopup("file-actions");
   }
-  ImGui::SameLine();
-  if (ImGui::Button(shell_state_.bottom_panel_visible ? "Hide panel"
-                                                      : "Show panel")) {
-    shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
-    persist_shell_state();
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("File actions and lease controls");
   }
-  if (!editor_status_.empty()) {
-    ImGui::SameLine();
-    ImGui::TextUnformatted(editor_status_.c_str());
-  } else if (!editor_->error().empty()) {
-    ImGui::SameLine();
-    const auto error = std::string(editor_->error());
-    ImGui::TextUnformatted(error.c_str());
-  }
-  if (!editor_mutation_allowed()) {
-    ImGui::SameLine();
-    ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
-                       "edit refused: another session holds a lease");
-  }
-  if (!review_diff_open_ && options_.repository_path) {
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Take lease")) {
+  if (ImGui::BeginPopup("file-actions")) {
+    ImGui::BeginDisabled(review_diff_open_ || !options_.repository_path);
+    if (ImGui::MenuItem("Take lease")) {
       take_editor_lease();
     }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Release lease")) {
+    if (ImGui::MenuItem("Release lease")) {
       release_editor_lease();
     }
+    ImGui::EndDisabled();
+    if (ImGui::MenuItem("Collaboration details")) {
+      panels_.focus(PanelId::multiplayer);
+      shell_state_.sidebar_visible = true;
+      persist_shell_state();
+    }
+    ImGui::EndPopup();
   }
-  if (multiplayer_) {
-    ImGui::Separator();
-    ImGui::TextUnformatted("Presence");
-    auto presence_count = std::size_t{};
-    for (const auto &value : multiplayer_->presence) {
-      if (value.session == multiplayer_session_) {
-        continue;
-      }
-      ImGui::TextUnformatted(multiplayer_presence_text(value).c_str());
-      ++presence_count;
-    }
-    if (presence_count == 0) {
-      ImGui::TextDisabled("No other active sessions");
-    }
-    ImGui::TextUnformatted("Attribution gutter");
-    const auto cursor_line = editor_->cursor().line + 1;
-    const auto first = cursor_line > 2 ? cursor_line - 2 : 1;
-    const auto last = cursor_line + 2;
-    for (const auto &value : multiplayer_->attribution) {
-      if (value.line >= first && value.line <= last) {
-        ImGui::TextUnformatted(multiplayer_attribution_text(value).c_str());
-      }
-    }
-    for (const auto &value : multiplayer_->leases) {
-      ImGui::TextUnformatted(multiplayer_lease_text(value).c_str());
-    }
+  draw_editor_toolbar();
+  if (!editor_mutation_allowed()) {
+    ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
+                       "Read-only: another person holds a lease");
   }
-  if (editor_graph_) {
-    const auto status = editor_graph_status(graph_snapshot);
-    ImGui::TextWrapped("%s", status.c_str());
-    if (!graph_snapshot.query_error.empty()) {
-      ImGui::TextColored(ImVec4(0.75F, 0.12F, 0.12F, 1.0F), "%s",
-                         graph_snapshot.query_error.c_str());
-    }
-    if (graph_snapshot.hover) {
-      ImGui::TextWrapped("%s", graph_snapshot.hover->signature.c_str());
-      if (!graph_snapshot.hover->documentation.empty()) {
-        ImGui::TextWrapped("%s", graph_snapshot.hover->documentation.c_str());
-      }
+  if (graph_snapshot.hover) {
+    detail_text(graph_snapshot.hover->signature);
+    if (!graph_snapshot.hover->documentation.empty()) {
+      detail_text(graph_snapshot.hover->documentation);
     }
   }
   if (find_open_) {
@@ -5331,8 +5715,6 @@ void App::draw_editor() {
   draw_list->AddRectFilled(position,
                            ImVec2(position.x + size.x, position.y + size.y),
                            packed_color(palette.surface));
-  draw_list->AddRect(position, ImVec2(position.x + size.x, position.y + size.y),
-                     packed_color(palette.border_subtle));
 
   editor_x_ = position.x;
   editor_y_ = position.y;
@@ -5366,9 +5748,8 @@ void App::draw_editor() {
   if (editor_focused_ || input_.drop_target() == DropTarget::editor) {
     const auto thickness =
         input_.drop_target() == DropTarget::editor ? 3.0F : 2.0F;
-    draw_list->AddRect(position,
-                       ImVec2(position.x + size.x, position.y + size.y),
-                       packed_color(palette.focus), 0.0F, 0, thickness);
+    draw_list->AddLine(position, ImVec2(position.x + size.x, position.y),
+                       packed_color(palette.focus), thickness);
   }
 
   if (hovered) {
@@ -5399,7 +5780,11 @@ void App::draw_editor() {
                          editor_->display_path() &&
                      item.location.range.start_line == line;
             });
-        if (diagnostic != graph_snapshot.diagnostics.end()) {
+        if (ImGui::GetIO().MousePos.x < editor_x_ + 16.0F) {
+          attribution_line_ = line;
+          ImGui::OpenPopup("line-attribution");
+          handled_gutter = true;
+        } else if (diagnostic != graph_snapshot.diagnostics.end()) {
           editor_->set_cursor({line, diagnostic->location.range.start_column});
           panels_.focus(PanelId::diagnostics);
           panels_.clear_focus_request();
@@ -5435,13 +5820,19 @@ void App::draw_editor() {
           0.0F,
           std::floor((ImGui::GetIO().MousePos.y - editor_y_) / line_height_)));
       const auto line = std::min(scroll_line_ + row, editor_->line_count() - 1);
-      const auto attribution = std::ranges::find(
-          graph_snapshot.attribution, line, &AttributionSnapshot::line);
-      if (attribution != graph_snapshot.attribution.end()) {
-        ImGui::SetTooltip("%s · %s", attribution->actor.c_str(),
-                          attribution->agent ? "agent" : "human");
+      if (!ImGui::IsPopupOpen("line-attribution")) {
+        ImGui::BeginTooltip();
+        draw_line_attribution(line);
+        ImGui::TextDisabled("Click the author marker for copy controls");
+        ImGui::EndTooltip();
       }
     }
+  }
+  if (ImGui::BeginPopup("line-attribution")) {
+    if (attribution_line_) {
+      draw_line_attribution(*attribution_line_);
+    }
+    ImGui::EndPopup();
   }
   update_text_input_area();
   draw_composition();
@@ -5449,29 +5840,27 @@ void App::draw_editor() {
 }
 
 void App::draw_diagnostics_panel(const EditorGraphSnapshot &graph_snapshot) {
+  ImGui::Checkbox("Repository details", &repository_details_open_);
+  draw_repository_details(graph_snapshot);
+  for (const auto &diagnostic : structural_diagnostics_) {
+    detail_text(diagnostic);
+  }
   if (screenshot_mode()) {
     const auto palette =
         effective_palette(applied_dark_theme_, applied_high_contrast_);
-    ImGui::TextUnformatted("Diagnostics (3)");
     ImGui::TextColored(imgui_color(palette.danger),
                        "error: expected ';' after return statement");
     ImGui::TextUnformatted("warning: unused result from save_app_shell_state");
-    ImGui::TextDisabled("info: 47 graph queries are current");
+    ImGui::TextDisabled("info: consider adding a return type");
     return;
   }
   auto visible_diagnostics = graph_snapshot.diagnostics;
   visible_diagnostics.insert(visible_diagnostics.end(),
                              graph_snapshot.build_diagnostics.begin(),
                              graph_snapshot.build_diagnostics.end());
-  ImGui::Text("Diagnostics (%zu)", visible_diagnostics.size());
   if (!graph_snapshot.query_error.empty()) {
     ImGui::TextWrapped("Could not update diagnostics: %s",
                        graph_snapshot.query_error.c_str());
-  }
-  if (graph_snapshot.edit_to_diagnostic_ms > 0.0) {
-    ImGui::SameLine();
-    ImGui::TextDisabled("edit to first result %.3f ms",
-                        graph_snapshot.edit_to_diagnostic_ms);
   }
   for (std::size_t index = 0; index < visible_diagnostics.size(); ++index) {
     const auto &diagnostic = visible_diagnostics[index];
@@ -5487,11 +5876,6 @@ void App::draw_diagnostics_panel(const EditorGraphSnapshot &graph_snapshot) {
                            diagnostic.location.range.start_column});
       ensure_cursor_visible();
     }
-  }
-  if (visible_diagnostics.empty() && graph_snapshot.completions.empty() &&
-      graph_snapshot.query_error.empty()) {
-    ImGui::TextWrapped(
-        "%s", panels_.descriptor(PanelId::diagnostics).empty_state.data());
   }
   if (!graph_snapshot.completions.empty()) {
     ImGui::Separator();
@@ -5525,7 +5909,6 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
       "build-panel",
       ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F)),
       ImGuiChildFlags_Border);
-  ImGui::TextUnformatted("Build, test and deploy");
   if (screenshot_mode()) {
     const auto palette =
         effective_palette(applied_dark_theme_, applied_high_contrast_);
@@ -5566,8 +5949,22 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
     ImGui::TextUnformatted(snapshot.build_result.c_str());
   }
   for (const auto &action : snapshot.build_actions) {
-    ImGui::Text("%s: %s", action.identity.c_str(),
+    ImGui::PushID(action.identity.c_str());
+    const auto opaque = action.identity.starts_with("blake3:") ||
+                        compact_identifiers(action.identity) != action.identity;
+    ImGui::Text("%s: %s", opaque ? "Build action" : action.identity.c_str(),
                 build_action_state_name(action.state).data());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Details")) {
+      ImGui::OpenPopup("action-details");
+    }
+    if (ImGui::BeginPopup("action-details")) {
+      identifier_detail("Action", action.identity);
+      for (const auto &dependency : action.dependencies) {
+        identifier_detail("Requires", dependency);
+      }
+      ImGui::EndPopup();
+    }
     if (!action.worker.empty()) {
       ImGui::SameLine();
       ImGui::TextDisabled("worker %s", action.worker.c_str());
@@ -5580,16 +5977,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
       ImGui::SameLine();
       ImGui::TextDisabled("%s", action.scheduling_choice.c_str());
     }
-    if (!action.dependencies.empty()) {
-      auto dependencies = std::string{};
-      for (const auto &dependency : action.dependencies) {
-        if (!dependencies.empty()) {
-          dependencies += ", ";
-        }
-        dependencies += dependency;
-      }
-      ImGui::TextDisabled("requires %s", dependencies.c_str());
-    }
+    ImGui::PopID();
   }
   if (!snapshot.tests.empty()) {
     ImGui::Separator();
@@ -5661,7 +6049,7 @@ void App::draw_activity_bar() {
                             ImGui::GetStyleColorVec4(ImGuiCol_Header));
     }
     if (ImGui::Button(
-            descriptor.icon.data(),
+            ("##activity-" + std::string(panel_id_name(id))).c_str(),
             ImVec2(activity_bar_width - design::space2, design::control_md))) {
       if (selected && placement == PanelPlacement::sidebar) {
         shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
@@ -5677,6 +6065,8 @@ void App::draw_activity_bar() {
       }
       persist_shell_state();
     }
+    item_icon(panel_icon(id),
+              (activity_bar_width - design::space2 - 16.0F) * 0.5F);
     if (selected) {
       ImGui::PopStyleColor();
     }
@@ -5723,17 +6113,14 @@ void App::draw_panel_menu(PanelId id) {
 }
 
 void App::draw_panel_header(PanelId id) {
-  const auto &descriptor = panels_.descriptor(id);
-  const auto &state = panels_.panel_state(id);
-  ImGui::PushID(panel_id_name(id).data());
-  ImGui::Text("%s  %s", descriptor.icon.data(), descriptor.title.data());
-  if (state.busy) {
-    ImGui::SameLine();
-    ImGui::TextDisabled("Working…");
+  if (panels_.layout(id).placement != PanelPlacement::sidebar) {
+    return;
   }
-  const auto button_width = ImGui::CalcTextSize("...").x + design::space4;
-  ImGui::SameLine(
-      std::max(ImGui::GetContentRegionMax().x - button_width, 0.0F));
+  ImGui::PushID(panel_id_name(id).data());
+  const auto label = "      " + panel_label(id);
+  ImGui::TextUnformatted(label.c_str());
+  item_icon(panel_icon(id));
+  ImGui::SameLine();
   if (ImGui::SmallButton("...")) {
     ImGui::OpenPopup("panel-placement");
   }
@@ -5752,19 +6139,19 @@ void App::draw_panel(PanelId id) {
     if (screenshot_mode()) {
       ImGui::TextDisabled("orama/liquify");
       ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-      if (ImGui::TreeNode("[dir] src  [offline]")) {
-        ImGui::Selectable("[C++] app.cpp  [modified]", true);
-        ImGui::Selectable("[C++] app_state.cpp  [in change]");
-        ImGui::Selectable("[C++] editor_buffer.cpp");
+      if (directory_item("src  [offline]")) {
+        file_item("app.cpp  [modified]", NavigationFileKind::cpp_source, true);
+        file_item("app_state.cpp  [in change]", NavigationFileKind::cpp_source);
+        file_item("editor_buffer.cpp", NavigationFileKind::cpp_source);
         ImGui::TreePop();
       }
       ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-      if (ImGui::TreeNode("[dir] docs  [not here]")) {
-        ImGui::Selectable("[dir] ui  [conflicted]");
+      if (directory_item("docs  [not here]")) {
+        file_item("ui  [conflicted]", NavigationFileKind::directory);
         ImGui::TreePop();
       }
-      ImGui::Selectable("[cmake] CMakeLists.txt  [online only]");
-      ImGui::Selectable("[md] README.md");
+      file_item("CMakeLists.txt  [online only]", NavigationFileKind::cmake);
+      file_item("README.md", NavigationFileKind::markdown);
     } else if (repository_) {
       draw_repository_tree();
     } else {
@@ -5873,7 +6260,7 @@ void App::draw_panel(PanelId id) {
                                    : EditorGraphSnapshot{});
     break;
   case PanelId::multiplayer:
-    ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
+    draw_multiplayer_details();
     break;
   case PanelId::diagnostics:
     draw_diagnostics_panel(editor_graph_ ? editor_graph_->snapshot()
@@ -6004,13 +6391,16 @@ void App::draw_editor_area() {
         continue;
       }
       auto open = true;
-      const auto &descriptor = panels_.descriptor(id);
-      const auto label = std::string(descriptor.icon) + "  " +
-                         std::string(descriptor.title) + "###panel-" +
+      const auto label = "      " + panel_label(id) + "###panel-" +
                          std::string(panel_id_name(id));
       const auto flags =
           panels_.focus_requested(id) ? ImGuiTabItemFlags_SetSelected : 0;
       const auto selected = ImGui::BeginTabItem(label.c_str(), &open, flags);
+      item_icon(panel_icon(id));
+      if (ImGui::BeginPopupContextItem()) {
+        draw_panel_menu(id);
+        ImGui::EndPopup();
+      }
       if (panels_.focus_requested(id)) {
         panels_.clear_focus_request();
       }
@@ -6034,36 +6424,47 @@ void App::draw_editor_area() {
 
 void App::draw_bottom_panel() {
   const auto active = panels_.active(PanelPlacement::bottom);
+  auto first = true;
   for (const auto id : panels_.panels_at(PanelPlacement::bottom)) {
     if (!panels_.layout(id).visible) {
       continue;
     }
-    const auto selected = active == id;
-    if (selected) {
-      ImGui::PushStyleColor(ImGuiCol_Header,
-                            ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+    const auto label = "      " + panel_label(id);
+    const auto width = ImGui::CalcTextSize(label.c_str()).x + 16.0F;
+    if (!first && ImGui::GetContentRegionAvail().x > width) {
+      ImGui::SameLine();
     }
-    const auto &descriptor = panels_.descriptor(id);
-    const auto label =
-        std::string(descriptor.icon) + "  " + std::string(descriptor.title);
-    if (ImGui::Selectable(label.c_str(), selected, 0, ImVec2(0.0F, 24.0F))) {
+    first = false;
+    if (ImGui::Selectable(label.c_str(), active == id, 0,
+                          ImVec2(width, 24.0F))) {
       panels_.focus(id);
       panels_.clear_focus_request();
       persist_shell_state();
     }
-    if (selected) {
-      ImGui::PopStyleColor();
+    item_icon(panel_icon(id));
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("%s · Right-click for panel placement",
+                        panels_.descriptor(id).title.data());
     }
-    ImGui::SameLine();
+    if (ImGui::BeginPopupContextItem()) {
+      draw_panel_menu(id);
+      ImGui::EndPopup();
+    }
   }
-  ImGui::NewLine();
+  ImGui::Separator();
   if (active) {
+    ImGui::BeginChild("panel-content");
+    if (*active == PanelId::diagnostics) {
+      const auto position = ImGui::GetCursorScreenPos();
+      const auto available = ImGui::GetContentRegionAvail();
+      diagnostics_viewport_ = {position.x, position.y, available.x,
+                               available.y};
+    }
     draw_panel(*active);
+    ImGui::EndChild();
     if (panels_.focus_requested(*active)) {
       panels_.clear_focus_request();
     }
-  } else {
-    ImGui::TextWrapped("No panel is docked in the bottom area.");
   }
 }
 
@@ -6082,10 +6483,16 @@ void App::draw_floating_panels() {
       panels_.clear_focus_request();
     }
     auto open = true;
-    const auto &descriptor = panels_.descriptor(id);
-    const auto title = std::string(descriptor.title) + "###floating-" +
-                       std::string(panel_id_name(id));
+    const auto title =
+        panel_label(id) + "###floating-" + std::string(panel_id_name(id));
     if (ImGui::Begin(title.c_str(), &open, ImGuiWindowFlags_NoSavedSettings)) {
+      if (ImGui::SmallButton("...##floating-placement")) {
+        ImGui::OpenPopup("floating-placement");
+      }
+      if (ImGui::BeginPopup("floating-placement")) {
+        draw_panel_menu(id);
+        ImGui::EndPopup();
+      }
       draw_panel(id);
     }
     const auto position = ImGui::GetWindowPos();
@@ -6208,9 +6615,15 @@ void App::draw_welcome() {
   ImGui::Spacing();
 
   if (first_run_.session()) {
-    ImGui::Text("Lake session: %s", first_run_.session()->actor.c_str());
+    if (ImGui::SmallButton("Signed in to lake")) {
+      ImGui::OpenPopup("identity-details");
+    }
+    if (ImGui::BeginPopup("identity-details")) {
+      identifier_detail("Identity", first_run_.session()->actor);
+      ImGui::EndPopup();
+    }
     ImGui::SameLine();
-    ImGui::TextDisabled("%s", first_run_.session()->custody.c_str());
+    ImGui::TextDisabled("Local custody available");
     ImGui::SameLine();
     if (ImGui::SmallButton("Sign out")) {
       first_run_.sign_out();
@@ -6254,7 +6667,17 @@ void App::draw_welcome() {
       }
       ImGui::TextDisabled("%s", recent.path.string().c_str());
       ImGui::TableSetColumnIndex(1);
-      ImGui::TextWrapped("%s", recent.last_change.c_str());
+      if (recent.last_change.starts_with("blake3:")) {
+        if (ImGui::SmallButton("Change details")) {
+          ImGui::OpenPopup("recent-change");
+        }
+        if (ImGui::BeginPopup("recent-change")) {
+          identifier_detail("Change", recent.last_change);
+          ImGui::EndPopup();
+        }
+      } else {
+        detail_text(recent.last_change);
+      }
       ImGui::TextDisabled("%s", recent.last_changed_at.c_str());
       ImGui::TableSetColumnIndex(2);
       ImGui::TextUnformatted(recent.branch.c_str());
@@ -6273,118 +6696,122 @@ void App::draw_welcome() {
 void App::draw_status_bar() {
   const auto graph =
       editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
-  auto input = StatusBarInput{
-      .repository_open = repository_ != nullptr,
-      .daemon_running = editor_graph_ != nullptr,
-      .daemon_available = editor_graph_ != nullptr,
-      .sync_running = sync_was_running_,
-      .hydration_running =
-          hydration_was_running_ ||
-          (repository_ && repository_->loading_directory_count() > 0),
-      .build_running = graph.build_running,
-      .offline = repository_ && repository_->offline(),
-      .pending_uploads = repository_ ? repository_->pending_uploads() : 0,
-      .hydration_debt = repository_ ? repository_->hydration_debt() : 0,
-      .remote_bytes = repository_ ? repository_->remote_bytes() : 0,
-      .presence_count = repository_ ? repository_->presence_count() : 0,
-      .notification_count = panels_.notifications().size(),
-      .build_result = graph.build_result,
-      .current_change = repository_ ? std::string{repository_->current_change()}
-                                    : std::string{},
-      .branch =
-          repository_ ? std::string{repository_->branch()} : std::string{},
-      .session =
-          first_run_.session() ? first_run_.session()->actor : std::string{},
-  };
-  if (screenshot_mode() && editor_) {
-    input.repository_open = true;
-    input.daemon_running = true;
-    input.daemon_available = true;
-    input.build_result = "passed";
-    input.presence_count = 3;
-    input.current_change = "blake3:7f2a921bf67e";
-    input.branch = "issue-36-first-run";
-    input.session = "taap:1:ed25519:7YQ2M4";
+  if (!ImGui::BeginTable("status", 3, ImGuiTableFlags_SizingStretchProp)) {
+    return;
   }
-
-  const auto repository_name =
-      repository_ ? repository_->name() : std::string{"liquify"};
-  if (repository_ && ImGui::SmallButton(repository_name.c_str())) {
+  ImGui::TableSetupColumn("Repository", ImGuiTableColumnFlags_WidthStretch,
+                          1.0F);
+  ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 1.4F);
+  ImGui::TableSetupColumn("Position and details",
+                          ImGuiTableColumnFlags_WidthFixed, 190.0F);
+  ImGui::TableNextRow();
+  ImGui::TableSetColumnIndex(0);
+  const auto name = repository_ ? repository_->name() : std::string{"liquify"};
+  if (ImGui::SmallButton(name.c_str()) && repository_) {
     first_run_.return_to_welcome();
-  } else if (!repository_) {
-    ImGui::TextUnformatted(repository_name.c_str());
   }
-  const auto segments = status_bar_segments(input);
-  for (const auto &segment : segments) {
+  if (repository_ && !repository_->branch().empty()) {
     ImGui::SameLine();
-    if (segment.ends_with("notifications") &&
-        panels_.latest_notification() != nullptr) {
-      if (ImGui::SmallButton(segment.c_str())) {
-        const auto *notification = panels_.latest_notification();
-        panels_.focus(notification->panel);
-        const auto placement = panels_.layout(notification->panel).placement;
-        shell_state_.sidebar_visible = placement == PanelPlacement::sidebar
-                                           ? true
-                                           : shell_state_.sidebar_visible;
-        shell_state_.bottom_panel_visible =
-            placement == PanelPlacement::bottom
-                ? true
-                : shell_state_.bottom_panel_visible;
+    ImGui::TextUnformatted(std::string(repository_->branch()).c_str());
+  }
+  ImGui::TableSetColumnIndex(1);
+  auto state = std::string{};
+  if (editor_ && !editor_->error().empty()) {
+    state = editor_->error();
+  } else if (graph.build_running) {
+    state = "Building…";
+  } else if (sync_was_running_) {
+    state = "Syncing…";
+  } else if (hydration_was_running_) {
+    state = "Loading files…";
+  } else if (!editor_status_.empty()) {
+    state = editor_status_;
+  } else if (!graph.query_error.empty()) {
+    state = "Operation failed · see Diagnostics";
+  } else if (repository_ && repository_->offline() &&
+             repository_->pending_uploads() > 0) {
+    state = "Offline · saved changes waiting to sync";
+  }
+  if (!state.empty()) {
+    auto visible = compact_identifiers(state);
+    const auto width = ImGui::GetContentRegionAvail().x;
+    while (visible.size() > 4 &&
+           ImGui::CalcTextSize(visible.c_str()).x > width) {
+      // Remove a complete UTF-8 code point before appending the ellipsis.
+      auto last = visible.size() - 1;
+      while (last > 0 &&
+             (static_cast<unsigned char>(visible[last]) & 0xc0) == 0x80) {
+        --last;
       }
-    } else if (segment == "Sign in") {
-      if (ImGui::SmallButton(segment.c_str())) {
-        begin_sign_in();
+      visible.resize(last);
+    }
+    ImGui::TextUnformatted(visible.c_str());
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("%s", state.c_str());
+    }
+  } else if (multiplayer_) {
+    const auto others = std::ranges::count_if(
+        multiplayer_->presence, [this](const auto &value) {
+          return value.session != multiplayer_session_;
+        });
+    if (others > 0) {
+      const auto label = std::to_string(others) + " collaborating";
+      if (ImGui::SmallButton(label.c_str())) {
+        panels_.focus(PanelId::multiplayer);
+        shell_state_.sidebar_visible = true;
+        persist_shell_state();
       }
-    } else {
-      ImGui::TextDisabled("%s", segment.c_str());
     }
   }
+  ImGui::TableSetColumnIndex(2);
   if (editor_) {
     const auto cursor = editor_->cursor();
-    ImGui::SameLine();
     ImGui::TextDisabled("Ln %zu:%zu", cursor.line + 1, cursor.byte + 1);
     ImGui::SameLine();
-    ImGui::TextDisabled("%zu cursors | %s:%zu | %s", editor_->cursors().size(),
-                        editor_->preferences().indent_style == IndentStyle::tabs
-                            ? "Tabs"
-                            : "Spaces",
-                        editor_->preferences().indent_size,
-                        editor_->preferences().soft_wrap ? "Wrap" : "No wrap");
   }
-  if (const auto *notification = panels_.latest_notification()) {
-    ImGui::PushID(notification->id.c_str());
-    if (notification->active && notification->total > 0) {
-      ImGui::SameLine();
-      const auto fraction = static_cast<float>(notification->completed) /
-                            static_cast<float>(notification->total);
-      ImGui::ProgressBar(fraction, ImVec2(72.0F, 0.0F), "");
+  if (ImGui::SmallButton("Details")) {
+    ImGui::OpenPopup("status-details");
+  }
+  if (ImGui::BeginPopup("status-details")) {
+    if (ImGui::MenuItem("Repository diagnostics")) {
+      repository_details_open_ = true;
+      panels_.focus(PanelId::diagnostics);
+      shell_state_.bottom_panel_visible = true;
+      persist_shell_state();
     }
-    if (notification->active && notification->cancellable) {
-      ImGui::SameLine();
-      if (ImGui::SmallButton("Cancel")) {
-        static_cast<void>(panels_.request_cancel(notification->id));
+    if (ImGui::MenuItem("Cycle theme")) {
+      cycle_theme();
+    }
+    if (editor_) {
+      ImGui::TextDisabled(
+          "%zu cursors | %s:%zu | %s", editor_->cursors().size(),
+          editor_->preferences().indent_style == IndentStyle::tabs ? "Tabs"
+                                                                   : "Spaces",
+          editor_->preferences().indent_size,
+          editor_->preferences().soft_wrap ? "Wrap" : "No wrap");
+    }
+    if (const auto *notification = panels_.latest_notification()) {
+      if (ImGui::MenuItem("Show latest notification")) {
+        panels_.focus(notification->panel);
+        shell_state_.sidebar_visible = true;
+        shell_state_.bottom_panel_visible = true;
       }
-    } else if (!notification->active) {
-      ImGui::SameLine();
-      if (ImGui::SmallButton("Dismiss")) {
+      if (notification->active && notification->cancellable &&
+          ImGui::MenuItem("Cancel operation")) {
+        static_cast<void>(panels_.request_cancel(notification->id));
+      } else if (!notification->active &&
+                 ImGui::MenuItem("Dismiss notification")) {
         panels_.dismiss_notification(notification->id);
       }
     }
-    ImGui::PopID();
+    ImGui::EndPopup();
   }
-  const auto preference = options_.forced_theme.value_or(shell_state_.theme);
-  const auto theme =
-      preference == ThemePreference::system
-          ? "Theme: system"
-          : (preference == ThemePreference::dark ? "Theme: dark"
-                                                 : "Theme: light");
-  ImGui::SameLine();
-  if (ImGui::SmallButton(theme)) {
-    cycle_theme();
-  }
+  ImGui::EndTable();
 }
 
 void App::draw_contents() {
+  const auto status_bar_height =
+      ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0F;
   const auto available = ImGui::GetContentRegionAvail();
   const auto *screenshot =
       options_.screenshot_state
@@ -7120,8 +7547,9 @@ private:
   static void check_geometry(App &app, const ScreenshotImage &image,
                              const char *stage) {
     const auto &io = ImGui::GetIO();
-    const auto shell = dark_pixels(image, 700.0F, 35.0F, 180.0F, 40.0F,
-                                   io.DisplayFramebufferScale);
+    const auto &toolbar = app.toolbar_rectangle_;
+    const auto shell = dark_pixels(image, toolbar.x, toolbar.y, toolbar.width,
+                                   toolbar.height, io.DisplayFramebufferScale);
     const auto editor = dark_pixels(
         image, app.editor_x_ + app.editor_width_ * 0.65F,
         app.editor_y_ + app.line_height_ * 15, app.editor_width_ * 0.30F,
@@ -7133,8 +7561,10 @@ private:
         io.DisplaySize.y, image.width, image.height,
         io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y, shell,
         editor);
+    require(toolbar.width > 0.0F && toolbar.height > 0.0F,
+            "the shell did not report toolbar bounds");
     require(shell > 100,
-            "shell controls missing from the right side of the drawable");
+            "shell controls did not draw in their reported bounds");
     require(editor > 100,
             "source glyphs missing in the right side of the editor");
   }

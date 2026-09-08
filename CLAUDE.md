@@ -46,10 +46,9 @@ changes live, keeps telemetry off by default, and never places credential values
 UI. SDL composition supports
 CJK input methods and dead keys; rich and plain clipboard forms, file drops, visible keyboard
 focus, macOS accessibility labels, high contrast and the OS reduced-motion preference cover the
-shell. C and C++ stubs
-status channel reports daemon, sync, hydration, build, presence, current change, branch,
-notifications and identity session. macOS exposes the command groups and Cmd bindings through the
-native menu bar. The same registry provides a fuzzy palette with recent commands and resolved
+shell. The status bar reports actionable build, sync, hydration and failure state; collaboration,
+identity, change and validation details open only through their explicit affordances. macOS exposes
+the command groups and Cmd bindings through the native menu bar. The same registry provides a fuzzy palette with recent commands and resolved
 bindings, typed `.liquid` keymap overrides with conflict reporting, plugin commands, and headless
 `--command` invocation. The searchable settings surface reads user and repository `.liquid` files,
 applies appearance, editor, keymap, AI and lake changes live, keeps telemetry off by default, and
@@ -61,7 +60,8 @@ declarations from closed files without retaining full parse trees. Graph-backed 
 over error-tolerant incremental trees for open overlays, resolve through closed-file
 stubs or compiler symbol records, and read build diagnostics by translation unit. The editor
 surface renders those diagnostics inline and in a panel, exposes definition, hover and completion
-demands, and reports daemon drip triggers and the validation backlog. Syntax-node selection,
+demands, and exposes daemon drip triggers and the validation backlog in Diagnostics details.
+Syntax-node selection,
 cross-file rename and C/C++ extract-function are serialized on the editor worker and applied as
 fingerprinted node edits with one drip per changed file and one liquid operation for the complete
 multi-file application. The headless `--apply-edits` command uses the same canonical CBOR records

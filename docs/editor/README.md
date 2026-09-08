@@ -122,10 +122,10 @@ that returns an error or invalid view model displays that error in its own row w
 plugin panels. The native boundary and configuration are recorded in
 [`../plugins/README.md`](../plugins/README.md).
 
-The status line is formatted from `liquid::daemon_status`: the last workspace drip's invalidated
-paths, the sum of target cursor distances as the validation backlog, daemon availability and the
-pending repository drip count returned by the last editor save. Recursive repository navigation
-loads directory trees lazily as recorded in [`../app-shell/README.md`](../app-shell/README.md).
+The status line presents actionable build, sync, hydration and failure state. The last workspace
+drip's invalidated paths, validation backlog, daemon availability and pending repository drip
+count are in Diagnostics details. Recursive repository navigation loads directory trees lazily as
+recorded in [`../app-shell/README.md`](../app-shell/README.md).
 
 ## Build measurement
 

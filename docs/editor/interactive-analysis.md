@@ -78,8 +78,9 @@ Buffer open, close and edit operations are serialized on the worker. Cursor and 
 demands run concurrently with that worker, allowing the next edit to invalidate an active query
 instead of waiting for it. Results carry monotonically increasing request generations; a late
 answer cannot replace a newer hover, completion, definition or diagnostic result. The render
-thread copies one `EditorGraphSnapshot` containing those answers, graph statistics, daemon status,
-repository drip count and the measured edit-to-diagnostic duration.
+thread copies one `EditorGraphSnapshot` containing those answers, graph statistics and daemon
+status. The normal reading path exposes only actionable graph state. Repository drip counters and
+the measured edit-to-diagnostic duration are available through Diagnostics details.
 
 `publish_build_diagnostics` is the producer boundary for the build path: it writes the
 translation-unit diagnostic input before requesting the editor diagnostic query. Inline build
