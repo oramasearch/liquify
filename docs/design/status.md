@@ -37,8 +37,12 @@ recorded in [`../ui/accessibility.md`](../ui/accessibility.md).
 The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
 its gate verifies source hashes and rejects stale generated output. Those roles drive the system,
 light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom
-panel, floating panels and status bar. One registry supplies panel metadata, commands, placement,
-focus, state and notifications; each surface moves among dock areas, floats and re-docks. Divider
+panel, floating panels and status bar. One frame-level drawable scale applies to shell and
+retained editor logical coordinates; retained drawing respects ImGui popup order. Native GPU
+window regression covers resize, fonts, hit testing and occlusion ([the coordinate
+contract](../ui/app-shell.md#logical-coordinates-and-native-pixels)). One registry supplies panel
+metadata, commands, placement, focus, state and notifications; each surface moves among dock
+areas, floats and re-docks. Divider
 sizes and complete panel layouts persist per repository and can be reset. The status bar reports
 daemon, sync, hydration, build, presence, current change, branch, notifications and identity.
 macOS installs native

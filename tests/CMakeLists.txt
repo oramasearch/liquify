@@ -54,6 +54,14 @@ add_test(NAME liquify-independent-cli-compat
     --revision 7ff6ed82f93b916ef206c5776e2761b19536d8f3
     --cli "${LIQUIFY_COMPAT_CLI}")
 set_tests_properties(liquify-independent-cli-compat PROPERTIES RUN_SERIAL TRUE)
+if(LIQUIFY_NATIVE_WINDOW_TESTS)
+  add_executable(liquify-native-window-test test_native_window.cpp)
+  target_link_libraries(liquify-native-window-test PRIVATE liquify-app)
+  add_test(NAME liquify-native-window
+    COMMAND liquify-native-window-test ${CMAKE_CURRENT_BINARY_DIR}/native-window)
+  set_tests_properties(liquify-native-window PROPERTIES
+    LABELS "native;display" RUN_SERIAL TRUE TIMEOUT 180)
+endif()
 
 add_test(
   NAME liquify-print-tree-unreadable

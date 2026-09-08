@@ -36,6 +36,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(LIQUIFY_BUILD_TESTS "Build the test suite" ON)
+option(LIQUIFY_NATIVE_WINDOW_TESTS "Test real windows (requires a desktop session)" ${APPLE})
 
 # Release numbers are provisional; identify the actual IDE and library artifacts.
 find_package(Git REQUIRED)
@@ -237,6 +238,9 @@ add_custom_command(TARGET liquify POST_BUILD
           "$<TARGET_FILE_DIR:liquify>/frontends/$<TARGET_FILE_NAME:liquid-frontend-tree-sitter>")
 
 if(LIQUIFY_BUILD_TESTS)
+  if(LIQUIFY_NATIVE_WINDOW_TESTS)
+    target_compile_definitions(liquify-app PRIVATE LIQUIFY_NATIVE_WINDOW_TESTS)
+  endif()
   FetchContent_Declare(googletest
     URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)

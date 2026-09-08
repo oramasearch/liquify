@@ -47,6 +47,10 @@ registered headless invocation, generated-file checks, and that an unreadable re
 makes `--print-tree` exit non-zero with liquid's error. Screenshot cases render the editor and a
 panel through SDL's dummy video driver and software renderer and inspect stable pixel regions.
 `version`, the unit tests and `--screenshot` run without a display; `--smoke` needs one.
+`LIQUIFY_NATIVE_WINDOW_TESTS` enables the separate GPU window regression (on by default on macOS).
+Its macOS proof requires a logged-in Retina desktop. Use `ctest -LE native` for the headless
+subset; that subset is not a replacement for the native proof. See
+[the coordinate contract](../ui/app-shell.md#logical-coordinates-and-native-pixels).
 
 ## Run
 

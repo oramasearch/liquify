@@ -31,10 +31,13 @@ forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
 embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The
 light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel,
-floating panels and status bar from those roles. One plain-C++ registry owns every panel's
-metadata, commands, placement, focus, state and notifications; panels move among dock areas, float
-and re-dock, repository-local state persists the complete layout, and reset restores defaults. One
-status channel reports build, saved-drip sync, repository hydration and assistant progress. macOS
+floating panels and status bar from those roles. Shell and retained editor share logical
+coordinates with one frame-level drawable scale; native GPU window tests cover geometry and
+popup occlusion. Font texture failures stop rendering with a visible native error. One plain-C++
+registry owns every panel's metadata, commands, placement, focus, state and notifications; panels
+move among dock areas, float and re-dock, repository-local state persists the complete layout, and
+reset restores defaults. One status channel reports build, saved-drip sync, repository hydration
+and assistant progress. macOS
 exposes the command groups and Cmd bindings through the native menu bar. The searchable settings
 surface reads user and repository `.liquid` files, applies appearance, editor, keymap, AI and lake
 changes live, keeps telemetry off by default, and never places credential values in its model or

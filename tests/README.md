@@ -115,3 +115,11 @@ command-palette, panel-system and settings states through SDL's dummy video driv
 output and uses
 `ui_pixel_assert.hpp` to prove that a highlighted line, panel title and count badge occupy their
 expected regions.
+
+`test_native_window.cpp` runs the native window driver in `src/app.cpp`, preserving the single
+SDL/ImGui translation unit. The driver uses the screenshot suite's in-memory source fixture rather
+than a CLI-created repository because liquify#54 tracks the current store-format compatibility.
+The separate CTest case `liquify-native-window` checks scale 2 and density 1 on macOS, resize,
+display moves, font rebuild, logical mouse hits and exact palette/floating-panel occlusion. It
+requires a desktop and writes live framebuffer PNGs under the build tree. See [the
+contract](../docs/ui/app-shell.md).

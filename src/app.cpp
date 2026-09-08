@@ -21,6 +21,9 @@
 #include "imgui_impl_sdlrenderer3.h"
 #include "misc/cpp/imgui_stdlib.h"
 #include <SDL3/SDL.h>
+#ifdef LIQUIFY_NATIVE_WINDOW_TESTS
+#include "imgui_internal.h"
+#endif
 
 #if defined(__APPLE__) && defined(__OBJC__)
 #import <AppKit/AppKit.h>
@@ -1603,7 +1606,9 @@ bool App::invoke_command(std::string_view name) {
   return true;
 }
 
-bool App::init() {
+bool App::init() { return init_window(true); }
+
+bool App::init_window(bool high_pixel_density) {
   const auto *screenshot =
       options_.screenshot_state
           ? find_screenshot_state(*options_.screenshot_state)
@@ -1642,7 +1647,8 @@ bool App::init() {
       options_.title + " " + std::string(version_string());
   const auto window_flags =
       screenshot == nullptr
-          ? SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+          ? SDL_WINDOW_RESIZABLE |
+                (high_pixel_density ? SDL_WINDOW_HIGH_PIXEL_DENSITY : 0)
           : SDL_WINDOW_HIDDEN;
   window_ = SDL_CreateWindow(title.c_str(), window_width, window_height,
                              window_flags);
@@ -1675,11 +1681,10 @@ bool App::init() {
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
   io.IniFilename = nullptr;
   display_scale_ = screenshot == nullptr
-                       ? std::max(SDL_GetWindowDisplayScale(window_), 1.0F)
+                       ? std::max(SDL_GetWindowPixelDensity(window_), 1.0F)
                        : 1.0F;
   if (screenshot != nullptr) {
     io.DisplayFramebufferScale = ImVec2(1.0F, 1.0F);
-    SDL_SetRenderScale(renderer_, 1.0F, 1.0F);
   }
   load_font_atlas(display_scale_);
   reduced_motion_ = system_reduced_motion();
@@ -1691,6 +1696,10 @@ bool App::init() {
   }
   ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
   ImGui_ImplSDLRenderer3_Init(renderer_);
+  initialized_ = true;
+  if (!upload_font_atlas()) {
+    return false;
+  }
   SDL_StartTextInput(window_);
   configure_commands();
   if (screenshot != nullptr &&
@@ -1769,6 +1778,52 @@ void App::load_font_atlas(float scale) {
     }
   }
   io.FontDefault = io.Fonts->Fonts[ui_font_index_];
+  // Atlas repacking changes UVs even when logical glyph metrics stay the same.
+  if (text_layer_ && editor_) {
+    text_layer_->reset(editor_->line_count());
+  }
+}
+
+bool App::fail_rendering(std::string message) {
+  rendering_failed_ = true;
+  quit_ = true;
+  std::fprintf(stderr, "liquify: %s\n", message.c_str());
+  if (!screenshot_mode()) {
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "liquify rendering error",
+                             message.c_str(), window_);
+  }
+  return false;
+}
+
+bool App::upload_font_atlas() {
+  auto &atlas = *ImGui::GetIO().Fonts;
+  SDL_ClearError();
+  const auto created =
+      atlas.Build() && ImGui_ImplSDLRenderer3_CreateFontsTexture();
+  auto *texture = reinterpret_cast<SDL_Texture *>(atlas.TexID);
+  // The pinned backend checks allocation but ignores upload/configuration
+  // results.
+  const auto uploaded =
+      created && texture != nullptr &&
+      SDL_UpdateTexture(texture, nullptr, atlas.TexPixelsRGBA32,
+                        atlas.TexWidth * 4) &&
+      SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) &&
+      SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+  if (uploaded) {
+    return true;
+  }
+  const auto reason = std::string(SDL_GetError());
+  const auto message =
+      "Could not upload the font atlas (" + std::to_string(atlas.TexWidth) +
+      " x " + std::to_string(atlas.TexHeight) + ") to the " +
+      SDL_GetRendererName(renderer_) + " renderer. " +
+      (reason.empty() ? "Font rasterization or texture creation failed."
+                      : reason) +
+      " Reduce UI/editor font sizes in settings.liquid and restart liquify. "
+      "If this persists, include this message and display scale in a bug "
+      "report.";
+  ImGui_ImplSDLRenderer3_DestroyFontsTexture();
+  return fail_rendering(message);
 }
 
 void App::apply_theme() {
@@ -5098,6 +5153,17 @@ void App::draw_editor() {
   visible_lines_ =
       std::max<std::size_t>(1, static_cast<std::size_t>(size.y / line_height_));
   editor_visible_ = true;
+  draw_list->PushClipRect(
+      position, ImVec2(position.x + size.x, position.y + size.y), true);
+  draw_list->AddCallback(
+      [](const ImDrawList *, const ImDrawCmd *command) {
+        auto *app = static_cast<App *>(command->UserCallbackData);
+        const auto clip = command->ClipRect;
+        app->render_editor({clip.x, clip.y, clip.z - clip.x, clip.w - clip.y});
+      },
+      this);
+  draw_list->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+  draw_list->PopClipRect();
   const auto item_focused = ImGui::IsItemFocused();
   if (item_focused) {
     editor_focused_ = true;
@@ -6221,20 +6287,11 @@ void App::draw_contents() {
                     ImGuiChildFlags_Border);
   draw_status_bar();
   ImGui::EndChild();
-
-  draw_floating_panels();
-  draw_command_palette();
-  draw_navigation_popups();
-  draw_repository_action_popup();
-  draw_navigation_results();
-  draw_settings();
-  draw_review_comment_popup();
-  draw_structural_editing();
 }
 
-void App::render_editor() {
-  if (settings_popup_visible_ || !editor_visible_ || !editor_ ||
-      editor_width_ <= 0.0F || editor_height_ <= 0.0F) {
+void App::render_editor(InputRectangle clip_bounds) {
+  if (!editor_visible_ || !editor_ || editor_width_ <= 0.0F ||
+      editor_height_ <= 0.0F) {
     return;
   }
   const auto maximum_scroll = editor_->line_count() > visible_lines_
@@ -6242,14 +6299,11 @@ void App::render_editor() {
                                   : 0;
   scroll_line_ = std::min(scroll_line_, maximum_scroll);
 
-  float old_scale_x = 1.0F;
-  float old_scale_y = 1.0F;
-  SDL_GetRenderScale(renderer_, &old_scale_x, &old_scale_y);
-  const auto framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale;
-  SDL_SetRenderScale(renderer_, framebuffer_scale.x, framebuffer_scale.y);
-  const SDL_Rect clip{static_cast<int>(editor_x_), static_cast<int>(editor_y_),
-                      static_cast<int>(editor_width_),
-                      static_cast<int>(editor_height_)};
+  const SDL_Rect clip{
+      static_cast<int>(std::ceil(clip_bounds.x)),
+      static_cast<int>(std::ceil(clip_bounds.y)),
+      std::max(0, static_cast<int>(std::floor(clip_bounds.width))),
+      std::max(0, static_cast<int>(std::floor(clip_bounds.height)))};
   SDL_SetRenderClipRect(renderer_, &clip);
   const auto graph_snapshot =
       editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
@@ -6320,11 +6374,9 @@ void App::render_editor() {
       editor_y_, editor_width_, editor_height_, scroll_line_, line_height_,
       cell_width_, horizontal_scroll_, review_lines, comment_lines,
       settings_.editor.whitespace);
-  SDL_SetRenderClipRect(renderer_, nullptr);
-  SDL_SetRenderScale(renderer_, old_scale_x, old_scale_y);
 }
 
-void App::frame() {
+void App::frame(bool present) {
   poll_repository_lifecycle();
   poll_sign_in();
   poll_editor_graph();
@@ -6342,13 +6394,20 @@ void App::frame() {
   }
   update_window_title();
   poll_multiplayer();
-  if (fonts_rebuild_requested_) {
+  ImGui_ImplSDL3_NewFrame();
+  const auto framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale;
+  const auto density =
+      std::max({framebuffer_scale.x, framebuffer_scale.y, 1.0F});
+  if (fonts_rebuild_requested_ || density != display_scale_) {
     ImGui_ImplSDLRenderer3_DestroyFontsTexture();
+    display_scale_ = density;
     load_font_atlas(display_scale_);
     fonts_rebuild_requested_ = false;
+    if (!upload_font_atlas()) {
+      return;
+    }
   }
   ImGui_ImplSDLRenderer3_NewFrame();
-  ImGui_ImplSDL3_NewFrame();
   if (screenshot_mode()) {
     ImGui::GetIO().DeltaTime = 1.0F;
   }
@@ -6363,6 +6422,14 @@ void App::frame() {
                    ImGuiWindowFlags_NoSavedSettings);
   draw_contents();
   ImGui::End();
+  draw_floating_panels();
+  draw_command_palette();
+  draw_navigation_popups();
+  draw_repository_action_popup();
+  draw_navigation_results();
+  draw_settings();
+  draw_review_comment_popup();
+  draw_structural_editing();
 
   ImGui::Render();
   const auto palette =
@@ -6373,15 +6440,24 @@ void App::frame() {
       static_cast<std::uint8_t>(palette.canvas.blue * 255.0F),
       static_cast<std::uint8_t>(palette.canvas.alpha * 255.0F));
   SDL_RenderClear(renderer_);
+  // All vertices, clipping and input are logical; SDL applies the drawable
+  // ratio once.
+  if (!SDL_SetRenderScale(renderer_, framebuffer_scale.x,
+                          framebuffer_scale.y)) {
+    fail_rendering("Could not set the window drawable scale: " +
+                   std::string(SDL_GetError()));
+    return;
+  }
   ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
-  render_editor();
   if (screenshot_mode()) {
     ++screenshot_frames_rendered_;
     if (screenshot_frames_rendered_ >= 2) {
       capture_screenshot();
     }
   }
-  SDL_RenderPresent(renderer_);
+  if (present) {
+    SDL_RenderPresent(renderer_);
+  }
 }
 
 void App::prepare_smoke_frame(int frame) {
@@ -6431,17 +6507,6 @@ int App::run() {
       if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
           event.window.windowID == SDL_GetWindowID(window_)) {
         quit_ = true;
-      }
-      if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED &&
-          event.window.windowID == SDL_GetWindowID(window_)) {
-        const auto next_scale =
-            std::max(SDL_GetWindowDisplayScale(window_), 1.0F);
-        if (next_scale != display_scale_) {
-          ImGui_ImplSDLRenderer3_DestroyFontsTexture();
-          display_scale_ = next_scale;
-          load_font_atlas(display_scale_);
-          ImGui_ImplSDLRenderer3_CreateFontsTexture();
-        }
       }
       if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
           event.window.windowID == SDL_GetWindowID(window_)) {
@@ -6588,7 +6653,7 @@ int App::run() {
   if (options_.smoke) {
     print_smoke_metrics();
   }
-  return screenshot_failed_ ? 1 : 0;
+  return screenshot_failed_ || rendering_failed_ ? 1 : 0;
 }
 
 void App::shutdown() {
@@ -6612,5 +6677,343 @@ void App::shutdown() {
   window_ = nullptr;
   initialized_ = false;
 }
+
+#ifdef LIQUIFY_NATIVE_WINDOW_TESTS
+// The display test stays here to preserve the single SDL/ImGui translation
+// unit.
+class NativeWindowTest {
+public:
+  static int run(const std::filesystem::path &output, bool high_density) {
+    try {
+      App app({.forced_theme = ThemePreference::light});
+      require(app.init_window(high_density),
+              "native window initialization failed");
+      require(std::string_view(SDL_GetCurrentVideoDriver()) != "dummy",
+              "native proof requires a desktop video driver");
+      require(std::string_view(SDL_GetRendererName(app.renderer_)) !=
+                  "software",
+              "native proof requires a GPU renderer");
+      app.reset_panel_layout();
+      for (const auto panel :
+           app.panels_.panels_at(PanelPlacement::editor_tab)) {
+        app.panels_.set_visible(panel, false);
+      }
+      ImGui::GetIO().ConfigInputTextCursorBlink = false;
+      SDL_SetWindowSize(app.window_, 1280, 800);
+      SDL_SyncWindow(app.window_);
+      app.shell_state_.bottom_panel_visible = false;
+      app.shell_state_.editor_split = false;
+      app.shell_state_.sidebar_visible = true;
+      // #54: The native renderer test uses the screenshot suite's in-memory
+      // source fixture. An external liquid CLI can produce a newer store format
+      // than the libliquid pin, and repository loading is outside this
+      // rendering regression.
+      app.first_run_.repository_opened(
+          {.path = "native-window-fixture", .name = "native-window-fixture"});
+      auto source = screenshot_text();
+      for (int line = 0; line < 100; ++line) {
+        source += "// Native window rendering: " + std::string(180, 'M') + "\n";
+      }
+      app.editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
+          "native-window-source", "src/main.cpp", source));
+      app.layouts_ = std::make_unique<TextLayoutCache>();
+      app.layouts_->reset(std::string(app.editor_->blob_id()),
+                          app.editor_->line_count());
+      app.text_layer_ = std::make_unique<RetainedTextLayer>();
+      app.text_layer_->reset(app.editor_->line_count());
+      app.editor_focused_ = true;
+      const auto prefix = output / (high_density ? "density-2" : "density-1");
+      capture(app);
+      focus_source_tab(app);
+      auto image = capture(app);
+      save(prefix.string() + "-editor.png", image);
+      const auto scale = ImGui::GetIO().DisplayFramebufferScale;
+#if defined(__APPLE__)
+      require(scale.x == (high_density ? 2.0F : 1.0F),
+              "macOS proof requires an actual scale-2 display and a density-1 "
+              "control window");
+#endif
+      check_geometry(app, image, "initial");
+      check_hit(app);
+      SDL_SetWindowSize(app.window_, 1510, 930);
+      SDL_SyncWindow(app.window_);
+      image = capture(app);
+      save(prefix.string() + "-resized.png", image);
+      check_geometry(app, image, "resized");
+      check_hit(app);
+      app.settings_.fonts.ui_size = 16;
+      app.settings_.fonts.editor_size = 16;
+      app.apply_settings_live(true);
+      image = capture(app);
+      save(prefix.string() + "-fonts.png", image);
+      check_geometry(app, image, "font rebuild");
+      check_hit(app);
+      check_displays(app);
+      check_overlays(app, prefix);
+      return 0;
+    } catch (const std::exception &error) {
+      std::fprintf(stderr, "native-window: FAIL %s\n", error.what());
+      return 1;
+    }
+  }
+
+private:
+  static void require(bool condition, const std::string &message) {
+    if (!condition) {
+      throw std::runtime_error(message);
+    }
+  }
+
+  static ScreenshotImage capture(App &app) {
+    for (int frame = 0; frame < 5; ++frame) {
+      SDL_Event event;
+      while (SDL_PollEvent(&event)) {
+        ImGui_ImplSDL3_ProcessEvent(&event);
+      }
+      app.frame(false);
+      if (frame < 4) {
+        SDL_RenderPresent(app.renderer_);
+        SDL_Delay(20);
+      }
+    }
+    auto *pixels = SDL_RenderReadPixels(app.renderer_, nullptr);
+    require(pixels != nullptr, "native framebuffer readback failed");
+    auto *rgba = SDL_ConvertSurface(pixels, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(pixels);
+    require(rgba != nullptr, "native framebuffer conversion failed");
+    ScreenshotImage image;
+    image.width = rgba->w;
+    image.height = rgba->h;
+    const auto *data = static_cast<const std::uint8_t *>(rgba->pixels);
+    for (int row = 0; row < rgba->h; ++row) {
+      image.rgba.insert(image.rgba.end(), data + row * rgba->pitch,
+                        data + row * rgba->pitch + rgba->w * 4);
+    }
+    SDL_DestroySurface(rgba);
+    SDL_RenderPresent(app.renderer_);
+    return image;
+  }
+
+  static void save(const std::filesystem::path &path,
+                   const ScreenshotImage &image) {
+    const auto written = write_png(path, image);
+    require(written.has_value(),
+            "could not write native evidence: " + path.string());
+  }
+
+  static std::size_t dark_pixels(const ScreenshotImage &image, float x, float y,
+                                 float width, float height, ImVec2 scale) {
+    std::size_t count = 0;
+    const auto left = std::max(0, static_cast<int>(x * scale.x));
+    const auto top = std::max(0, static_cast<int>(y * scale.y));
+    const auto right = std::min(static_cast<int>(image.width),
+                                static_cast<int>((x + width) * scale.x));
+    const auto bottom = std::min(static_cast<int>(image.height),
+                                 static_cast<int>((y + height) * scale.y));
+    for (int row = top; row < bottom; ++row) {
+      for (int column = left; column < right; ++column) {
+        const auto offset = (row * image.width + column) * 4;
+        if (image.rgba[offset] < 230 && image.rgba[offset + 1] < 230 &&
+            image.rgba[offset + 2] < 230) {
+          ++count;
+        }
+      }
+    }
+    return count;
+  }
+
+  static void check_geometry(App &app, const ScreenshotImage &image,
+                             const char *stage) {
+    const auto &io = ImGui::GetIO();
+    const auto shell = dark_pixels(image, 700.0F, 35.0F, 180.0F, 40.0F,
+                                   io.DisplayFramebufferScale);
+    const auto editor = dark_pixels(
+        image, app.editor_x_ + app.editor_width_ * 0.65F,
+        app.editor_y_ + app.line_height_ * 15, app.editor_width_ * 0.30F,
+        app.line_height_ * 10, io.DisplayFramebufferScale);
+    std::printf(
+        "native-window: %s renderer=%s logical=%.0fx%.0f drawable=%ux%u "
+        "scale=%.1fx%.1f shell_pixels=%zu editor_pixels=%zu\n",
+        stage, SDL_GetRendererName(app.renderer_), io.DisplaySize.x,
+        io.DisplaySize.y, image.width, image.height,
+        io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y, shell,
+        editor);
+    require(shell > 100,
+            "shell controls missing from the right side of the drawable");
+    require(editor > 100,
+            "source glyphs missing in the right side of the editor");
+  }
+
+  static void check_hit(App &app) {
+    constexpr std::size_t target_line = 15;
+    constexpr auto target_column = 20.2F;
+    const auto &layout =
+        app.layouts_->line(target_line, app.editor_->line(target_line));
+    const auto target_byte = layout.byte_for_column(
+        target_column, app.editor_->line(target_line).size());
+    const auto x = app.editor_x_ + editor_gutter_width + editor_padding +
+                   app.cell_width_ * target_column;
+    const auto y = app.editor_y_ + app.line_height_ * 15.5F;
+    app.position_cursor(x, y, false);
+    const auto cursor = app.editor_->cursor();
+    std::printf(
+        "native-window: hit expected=%zu:%zu actual=%zu:%zu position=%.1f,%.1f "
+        "scroll=%.1f\n",
+        target_line, target_byte, cursor.line, cursor.byte, x, y,
+        app.horizontal_scroll_);
+    require(
+        cursor.line == target_line && cursor.byte == target_byte,
+        "logical mouse hit did not resolve through the displayed text layout");
+  }
+
+  static void focus_source_tab(App &app) {
+    auto &bars = ImGui::GetCurrentContext()->TabBars;
+    for (int index = 0; index < bars.GetMapSize(); ++index) {
+      auto *bar = bars.TryGetMapData(index);
+      if (bar == nullptr) {
+        continue;
+      }
+      for (auto &tab : bar->Tabs) {
+        if (!std::string_view(ImGui::TabBarGetTabName(bar, &tab))
+                 .ends_with("###active-editor")) {
+          continue;
+        }
+        const auto x = bar->BarRect.Min.x + tab.Offset + tab.Width * 0.5F;
+        const auto y = bar->BarRect.GetCenter().y;
+        SDL_Event event{};
+        event.type = SDL_EVENT_MOUSE_MOTION;
+        event.motion.windowID = SDL_GetWindowID(app.window_);
+        event.motion.x = x;
+        event.motion.y = y;
+        SDL_PushEvent(&event);
+        event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        event.button.windowID = SDL_GetWindowID(app.window_);
+        event.button.button = SDL_BUTTON_LEFT;
+        event.button.down = true;
+        event.button.x = x;
+        event.button.y = y;
+        SDL_PushEvent(&event);
+        capture(app);
+        event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        event.button.down = false;
+        SDL_PushEvent(&event);
+        capture(app);
+        require(app.editor_visible_,
+                "source tab click did not expose the editor");
+        return;
+      }
+    }
+    require(false, "source tab was not created");
+  }
+
+  static void check_displays(App &app) {
+    int count = 0;
+    auto *displays = SDL_GetDisplays(&count);
+    require(displays != nullptr, "could not enumerate native displays");
+    for (int index = 0; index < count; ++index) {
+      SDL_SetWindowPosition(app.window_,
+                            SDL_WINDOWPOS_CENTERED_DISPLAY(displays[index]),
+                            SDL_WINDOWPOS_CENTERED_DISPLAY(displays[index]));
+      SDL_SyncWindow(app.window_);
+      const auto image = capture(app);
+      check_geometry(app, image, "display move");
+    }
+    SDL_free(displays);
+  }
+
+  static void replace_buffer(App &app, const std::string &text) {
+    app.editor_ = std::make_unique<EditorBuffer>(
+        EditorBuffer::from_text("native-occlusion", "src/main.cpp", text));
+    app.layouts_->reset("native-occlusion", app.editor_->line_count());
+    app.text_layer_->reset(app.editor_->line_count());
+  }
+
+  static void compare_overlay(const ScreenshotImage &with_source,
+                              const ScreenshotImage &without_source,
+                              std::string_view name, ImVec2 position,
+                              ImVec2 size) {
+    const auto scale = ImGui::GetIO().DisplayFramebufferScale;
+    std::size_t changed = 0;
+    auto first_x = with_source.width;
+    auto first_y = with_source.height;
+    auto last_x = 0U;
+    auto last_y = 0U;
+    for (int y = static_cast<int>((position.y + 80) * scale.y);
+         y < static_cast<int>((position.y + size.y - 30) * scale.y); ++y) {
+      for (int x = static_cast<int>((position.x + 30) * scale.x);
+           x < static_cast<int>((position.x + size.x - 30) * scale.x); ++x) {
+        if (x < 0 || y < 0 || x >= with_source.width ||
+            y >= with_source.height) {
+          continue;
+        }
+        const auto offset = (y * with_source.width + x) * 4;
+        for (int channel = 0; channel < 3; ++channel) {
+          if (with_source.rgba[offset + channel] !=
+              without_source.rgba[offset + channel]) {
+            ++changed;
+            first_x = std::min(first_x, static_cast<std::uint32_t>(x));
+            first_y = std::min(first_y, static_cast<std::uint32_t>(y));
+            last_x = std::max(last_x, static_cast<std::uint32_t>(x));
+            last_y = std::max(last_y, static_cast<std::uint32_t>(y));
+          }
+        }
+      }
+    }
+    if (changed == 0) {
+      std::printf("native-window: overlay=%.*s changed_channels=0\n",
+                  static_cast<int>(name.size()), name.data());
+    } else {
+      std::printf("native-window: overlay=%.*s changed_channels=%zu "
+                  "bounds=%u,%u..%u,%u\n",
+                  static_cast<int>(name.size()), name.data(), changed, first_x,
+                  first_y, last_x, last_y);
+    }
+    require(changed == 0, "retained source paints over " + std::string(name));
+  }
+
+  static void check_overlays(App &app, const std::filesystem::path &prefix) {
+    const auto source = std::string(app.editor_->text());
+    app.command_palette_open_ = true;
+    auto with_source = capture(app);
+    save(prefix.string() + "-palette.png", with_source);
+    auto *window = ImGui::FindWindowByName("Command palette");
+    require(window != nullptr && window->Active,
+            "command palette did not open");
+    const auto palette_position = window->Pos;
+    const auto palette_size = window->Size;
+    replace_buffer(app, "");
+    auto without_source = capture(app);
+    save(prefix.string() + "-palette-empty-editor.png", without_source);
+    compare_overlay(with_source, without_source, "Command palette",
+                    palette_position, palette_size);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+    capture(app);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+    capture(app);
+    replace_buffer(app, source);
+    app.panels_.move(PanelId::diagnostics, PanelPlacement::floating);
+    app.panels_.update_floating_rect(
+        PanelId::diagnostics,
+        {app.editor_x_ + 10, app.editor_y_ + 30, 600, 350});
+    app.panels_.focus(PanelId::diagnostics);
+    with_source = capture(app);
+    save(prefix.string() + "-floating.png", with_source);
+    window = ImGui::FindWindowByName("Diagnostics###floating-diagnostics");
+    require(window != nullptr && window->Active,
+            "floating diagnostics did not open");
+    const auto floating_position = window->Pos;
+    const auto floating_size = window->Size;
+    replace_buffer(app, "");
+    without_source = capture(app);
+    save(prefix.string() + "-floating-empty-editor.png", without_source);
+    compare_overlay(with_source, without_source, "Floating diagnostics",
+                    floating_position, floating_size);
+  }
+};
+
+int test_native_window(const std::filesystem::path &output, bool high_density) {
+  return NativeWindowTest::run(output, high_density);
+}
+#endif
 
 } // namespace liquify
