@@ -100,6 +100,27 @@ The [pre-fix](screenshots/native-window-retina-before.png) and [fixed](screensho
 Retina captures are native GPU framebuffer readbacks, not `--screenshot` output. The fixed capture
 shows the shell and `src/main.cpp` across the full drawable.
 
+## Default-window hierarchy
+
+The normal editor window reserves its reading path for content, direct controls, and state a
+person can act on. The toolbar labels its File, Build, View, and Mode groups. Navigation and panel
+tabs use drawn type or panel icons with text tooltips, and a panel title and count appear once in
+its tab. The retained editor consumes the rest of its pane rather than drawing a second empty
+focus frame around short files.
+
+Attribution is a line-gutter marker: hover or click it to inspect and copy the full author,
+session, and change values. The Multiplayer panel holds collaboration records; the File actions
+menu holds lease operations. Diagnostics has an explicit Repository details control for drip,
+validation, timing, and identity records. Identifiers in customer-facing details retain their
+scheme and abbreviate their payload to eight characters until copied. The status bar uses a
+table-sized row and a Details menu so its controls remain visible at narrow heights.
+
+Native evidence for this change is [before](screenshots/issue-61-before.png) and
+[after](screenshots/issue-61-after.png). The toolbar and diagnostics assertions read the bounds
+the shell reports after layout, rather than assuming fixed pixel positions. The full rationale,
+relocation record, and live-window acceptance are in
+[`what-the-window-shows.md`](what-the-window-shows.md).
+
 ## macOS conventions
 
 On macOS, CMake compiles `src/app.cpp` as Objective-C++ so it remains the only SDL/ImGui

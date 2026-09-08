@@ -65,6 +65,7 @@ public:
   bool init();
   // Run the frame loop; returns the process exit code.
   int run();
+  [[nodiscard]] auto diagnostics_viewport() const -> InputRectangle;
 
 private:
   friend class NativeBufferRegression;
@@ -80,7 +81,11 @@ private:
   void draw_panel(PanelId id);
   void draw_panel_header(PanelId id);
   void draw_panel_menu(PanelId id);
+  [[nodiscard]] auto panel_label(PanelId id) const -> std::string;
   void draw_diagnostics_panel(const EditorGraphSnapshot &snapshot);
+  void draw_repository_details(const EditorGraphSnapshot &snapshot);
+  void draw_multiplayer_details();
+  void draw_line_attribution(std::size_t line);
   void draw_status_bar();
   void draw_welcome();
   void draw_clone_dialog();
@@ -93,6 +98,8 @@ private:
   void draw_review_panel();
   void draw_review_comment_popup();
   void draw_editor();
+  void draw_editor_toolbar();
+  void draw_editor_modes();
   void draw_build_panel(const EditorGraphSnapshot &snapshot);
   void render_editor(InputRectangle clip);
   void open_editor(std::string path, std::string blob_id,
@@ -239,6 +246,8 @@ private:
   float editor_y_{};
   float editor_width_{};
   float editor_height_{};
+  InputRectangle toolbar_rectangle_{};
+  InputRectangle diagnostics_viewport_{};
   float line_height_{};
   float cell_width_{};
   InputRectangle repository_drop_rectangle_;
@@ -337,6 +346,8 @@ private:
   bool settings_open_{};
   bool settings_popup_visible_{};
   bool find_open_{};
+  bool repository_details_open_{};
+  std::optional<std::size_t> attribution_line_;
   bool quick_open_open_{};
   bool symbol_search_open_{};
   bool open_recent_open_{};

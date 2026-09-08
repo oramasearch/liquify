@@ -63,6 +63,13 @@ intended signal. The editor-view assertion separately proves its themed gutter a
 and thirty-four named states. The panel behavior and layout model are documented in
 [`panels.md`](panels.md).
 
+`Screenshot.PanelRendersDiagnostics` uses the Diagnostics viewport reported by the running shell,
+not a fixed screen coordinate. `liquify-native-window` likewise measures controls inside the
+toolbar bounds reported after layout. These checks continue to fail when either target is
+deliberately omitted, while allowing information design to move controls and panels. The default
+window rule and the details affordances are in
+[`what-the-window-shows.md`](what-the-window-shows.md).
+
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced
 format. PNG chunks, CRC checks and scanline validation are implemented in-tree; the existing zlib
 dependency compresses and expands image data.

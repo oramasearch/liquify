@@ -27,6 +27,9 @@ and opens no connection while off. `design/` carries the stamped Orama DTCG snap
 native roles and embedded IBM Plex assets. The light/dark application shell hosts every surface
 through one panel registry; dock, editor-tab and floating placement plus focus persist per
 repository, layouts reset to their defaults, and one channel reports long-operation progress.
+The default window keeps source reading, direct controls and actionable state visible; attribution,
+presence, identity and repository telemetry open from deliberate gutter, panel and details
+affordances ([what the window shows](docs/ui/what-the-window-shows.md)).
 Native macOS menus remain available. Searchable `.liquid` settings combine user preferences with
 repository overrides and apply theme, fonts, editor behavior, keymaps, optional AI and lake
 accounts live; telemetry remains off by default and credentials are masked. The shared command

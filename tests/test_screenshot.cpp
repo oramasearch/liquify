@@ -33,6 +33,32 @@ auto render_state(std::string_view state) -> ScreenshotImage {
   return std::move(*image);
 }
 
+struct DiagnosticsScreenshot {
+  ScreenshotImage image;
+  InputRectangle viewport;
+};
+
+auto render_diagnostics() -> DiagnosticsScreenshot {
+  const auto output = std::filesystem::path(LIQUIFY_TEST_OUTPUT_DIR) /
+                      "diagnostics-light-test.png";
+  auto options = AppOptions{};
+  options.screenshot_state = "diagnostics-light";
+  options.screenshot_output = output;
+  options.max_frames = 2;
+  auto app = App(std::move(options));
+  if (!app.init()) {
+    ADD_FAILURE() << "screenshot app initialization failed";
+    return {};
+  }
+  EXPECT_EQ(app.run(), 0);
+  auto image = read_png(output);
+  if (!image) {
+    ADD_FAILURE() << image.error();
+    return {};
+  }
+  return {std::move(*image), app.diagnostics_viewport()};
+}
+
 TEST(Screenshot, EditorRendersSelectedSource) {
   const auto image = render_state("editor-cpp-light");
   EXPECT_EQ(image.width, screenshot_width);
@@ -42,10 +68,15 @@ TEST(Screenshot, EditorRendersSelectedSource) {
 }
 
 TEST(Screenshot, PanelRendersDiagnostics) {
-  const auto image = render_state("diagnostics-light");
-  EXPECT_TRUE(test::region_contains_color(image, {330, 503, 930, 34},
-                                          {237, 245, 255, 255}, 1, 10'000));
-  EXPECT_TRUE(test::region_contains_color(image, {330, 590, 450, 30},
+  const auto rendered = render_diagnostics();
+  const auto viewport =
+      test::PixelRegion{static_cast<std::uint32_t>(rendered.viewport.x),
+                        static_cast<std::uint32_t>(rendered.viewport.y),
+                        static_cast<std::uint32_t>(rendered.viewport.width),
+                        static_cast<std::uint32_t>(rendered.viewport.height)};
+  EXPECT_GT(viewport.width, 0U);
+  EXPECT_GT(viewport.height, 0U);
+  EXPECT_TRUE(test::region_contains_color(rendered.image, viewport,
                                           {186, 27, 35, 255}, 40, 2));
 }
 

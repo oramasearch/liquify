@@ -24,7 +24,8 @@ in `liquify/first-run.json`. Identity persistence contains only the public actor
 custody description. Tokens and private key material are never written to this file.
 
 The bottom status bar is derived from a separately tested model. It always accounts for daemon,
-sync, hydration, build, presence, current change, branch, notifications, and identity session.
+actionable sync, hydration, build, and failure state. Identity, current-change, validation, timing,
+and collaboration records are available from deliberate details, panel, and gutter affordances.
 When no repository is active it also says so explicitly.
 
 Repository summaries come from libliquid's repository status, refs, change log, active presence,

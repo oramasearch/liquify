@@ -1,9 +1,11 @@
 # Public application headers
 
-`app.hpp` exposes the application lifecycle using plain C++ options. Rendering implementation
-and the native-window test driver remain in `src/app.cpp`; a private friend lets that driver
-exercise real frames and read their framebuffer before presentation.
-See the [coordinate contract](../../docs/ui/app-shell.md).
+`app.hpp` exposes the application lifecycle and reported Diagnostics viewport using plain C++
+options and geometry. Rendering implementation and the native-window test driver remain in
+`src/app.cpp`; a private friend lets that driver exercise real frames and read their framebuffer
+before presentation. The screenshot test uses the reported viewport instead of fixed panel
+coordinates. See the [coordinate contract](../../docs/ui/app-shell.md) and
+[default-window hierarchy](../../docs/ui/what-the-window-shows.md).
 
 # Public IDE interfaces
 
