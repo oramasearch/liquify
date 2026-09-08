@@ -45,10 +45,60 @@ Contrast enables it automatically. macOS Reduce Motion removes hover transition 
 
 IBM Plex Sans is loaded at 11, 12, 14, 16, 20, 24, and 32 logical pixels. IBM Plex Mono is loaded
 at 12, 14, and 16 logical pixels and backs both retained editor geometry and the secondary split.
-A platform font's common CJK ranges are merged into the UI and editor faces when available.
-Dear ImGui's rasterizer density follows `SDL_GetWindowDisplayScale()` at startup and after a
-display-scale event, keeping the logical scale while rebuilding sharper glyphs for dense screens.
+Font rasterizer density follows the window's pixel density at the frame boundary. Moving the
+window or changing font settings rebuilds the atlas and invalidates every retained glyph's UV
+coordinates, including when the logical font size is unchanged.
 The source and token gate are described in [`design-system.md`](design-system.md).
+
+## Logical coordinates and native pixels
+
+Shell layout, retained editor vertices, glyph advances, clipping rectangles, pointer hit testing,
+drop targets and composition rectangles all use window logical coordinates. `App::frame` sets
+SDL's renderer scale once from ImGui's drawable-to-window ratio after the platform backend has
+updated it; that scale remains active through shell drawing, retained drawing and presentation.
+The pinned renderer backend detects this scale and passes logical clipping rectangles to SDL,
+which scales both geometry and clipping exactly once. No editor-local scale restoration occurs.
+A density-2 window therefore has twice as many pixels on each axis while retaining the same
+logical controls and click positions; density 1 uses the identical contract.
+
+Retained editor drawing is an ImGui draw callback in the editor window's command list. Its clip
+is the intersection of the editor rectangle and the enclosing ImGui clip. The following reset
+callback restores renderer state for subsequent ImGui commands. Composition, tooltips, modal
+backdrops, modal contents and floating panels consequently retain ImGui's normal paint order;
+source text and the gutter cannot be painted over a later window.
+
+Atlas creation, upload, filtering and blend configuration are checked at startup and after every
+rebuild. A failure stops rendering and reports the renderer, atlas dimensions and SDL error in
+stderr and a native error dialog, with instructions to reduce font sizes or restart the app.
+The pinned backend does not check its upload result, so liquify performs a checked upload before
+allowing a frame to use the texture.
+
+## Native window regression
+
+`liquify-native-window` is a separate CTest executable enabled by `LIQUIFY_NATIVE_WINDOW_TESTS`
+(default on macOS). It requires a real desktop and GPU renderer; a missing display, dummy driver
+or software renderer fails rather than substituting headless evidence. The existing screenshot
+matrix remains a set of visual unit tests.
+
+```sh
+ctest --test-dir build -R '^liquify-native-window$' --output-on-failure
+```
+
+The test starts an ordinary visible `App` window and uses the deterministic screenshot suite's
+in-memory `src/main.cpp` fixture. It deliberately avoids the current liquid CLI repository path
+because its store-format compatibility is tracked in liquify#54; repository loading is outside
+this rendering regression. It reads the native GPU framebuffer immediately before presenting it,
+checks shell controls and source glyphs on the right, resizes the window, rebuilds fonts, moves
+among attached displays and resolves logical pointer coordinates through the displayed text layout.
+It compares the palette and a floating panel interior with and without source underneath:
+every channel must match. Evidence PNGs are written to `build/tests/native-window/`. On macOS the
+default high-density window must report scale 2; a separate native density-1 control window
+exercises the same frame code without changing the production high-DPI default. Run this case on
+a Retina desktop; `version` and the remaining unit tests remain display-independent.
+
+The [pre-fix](screenshots/native-window-retina-before.png) and [fixed](screenshots/native-window-retina-after.png)
+Retina captures are native GPU framebuffer readbacks, not `--screenshot` output. The fixed capture
+shows the shell and `src/main.cpp` across the full drawable.
 
 ## macOS conventions
 

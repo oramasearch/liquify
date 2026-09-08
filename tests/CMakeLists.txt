@@ -41,6 +41,15 @@ target_include_directories(liquify-tests PRIVATE
 include(GoogleTest)
 gtest_discover_tests(liquify-tests)
 
+if(LIQUIFY_NATIVE_WINDOW_TESTS)
+  add_executable(liquify-native-window-test test_native_window.cpp)
+  target_link_libraries(liquify-native-window-test PRIVATE liquify-app)
+  add_test(NAME liquify-native-window
+    COMMAND liquify-native-window-test ${CMAKE_CURRENT_BINARY_DIR}/native-window)
+  set_tests_properties(liquify-native-window PROPERTIES
+    LABELS "native;display" RUN_SERIAL TRUE TIMEOUT 180)
+endif()
+
 add_test(
   NAME liquify-print-tree-unreadable
   COMMAND ${CMAKE_COMMAND}
