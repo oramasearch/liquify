@@ -20,7 +20,7 @@ bindings; repository rows expose open, rename, move, new-file, and reveal action
 The standard input mode is non-modal and a modal command/insert mode is available. Multi-cursor
 and column edits, repository indentation, liquid syntax/folds, collaboration gutters,
 search/replace and operation-log history are part of the editor view. Unreadable
-repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
+repositories retain liquid's error, with upgrade guidance for unsupported store formats, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
 reports frame and typing latency, and exits 0. Unreadable local repositories and unreachable lake
 clones have distinct retry states. `liquify --screenshot` renders fixed welcome, recovery,
 repository, navigation, settings, C++ editor, complete editor view and panel registry states in
@@ -82,6 +82,10 @@ launches a relocated copy from the mounted dmg. Tag releases publish those insta
 signed and unsigned SHA-256 records; macOS notarization runs when the App Store Connect credentials
 are available. Hand-built packaging remains in place until liquid's projection and
 platform-signing targets land.
+
+The liquid pin is `7ff6ed82f93b916ef206c5776e2761b19536d8f3`; CLI and IDE revisions plus supported
+store formats are displayed by `version`. The independent CLI → IDE → CLI compatibility test
+and supported lake revision are recorded in [`docs/build/store-compatibility.md`](docs/build/store-compatibility.md).
 
 ## Decisions — recorded
 

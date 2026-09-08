@@ -17,6 +17,7 @@
 #include "liquid/hash.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
+#include "repository_error.hpp"
 
 namespace liquify {
 namespace {
@@ -24,10 +25,7 @@ namespace {
 std::mutex repository_worker_mutex;
 
 auto error_message(const liquid::error &error) -> std::string {
-  if (error.context.empty()) {
-    return error.message;
-  }
-  return error.context + ": " + error.message;
+  return repository_error_message(error);
 }
 
 auto symbol_kind(liquid::symbol_kind kind) -> NavigationSymbolKind {

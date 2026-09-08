@@ -65,6 +65,17 @@ opens a liquid repository; `--print-tree`, `--apply-edits` and `--lake` are list
 of the build in [`docs/build/local.md`](docs/build/local.md). Linux requirements and the CI
 toolchains are in [`docs/build/ci.md`](docs/build/ci.md).
 
+Until versioned releases identify compatible builds, use these artifact combinations:
+
+| Artifact | Supported revision |
+|---|---|
+| Separately built liquid CLI and liquify's pinned libliquid | `7ff6ed82f93b916ef206c5776e2761b19536d8f3` |
+| Native lake service used for clone verification | `620c249c3e03c455b1392d4691488e7639d01ff6` |
+
+`liquify version` identifies the IDE and library revisions. The store compatibility rule,
+upgrade diagnostics, and independent CLI → IDE → CLI integration check are in
+[`docs/build/store-compatibility.md`](docs/build/store-compatibility.md).
+
 ## Documentation
 | Path | Role |
 |---|---|
