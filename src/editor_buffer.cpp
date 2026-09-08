@@ -143,6 +143,7 @@ EditorBuffer EditorBuffer::from_text(std::string blob_id,
   buffer.display_path_ = std::move(display_path);
   const auto normalised = normalise_newlines(text);
   buffer.lines_ = split_lines(normalised);
+  buffer.saved_text_ = normalised;
   return buffer;
 }
 
@@ -417,11 +418,12 @@ auto EditorBuffer::insertion_range() const -> TextSelection {
 
 auto EditorBuffer::replace(TextSelection range, std::string_view text)
     -> BufferChange {
-  range.begin = clamped(range.begin);
-  range.end = clamped(range.end);
-  if (range.end < range.begin) {
-    std::swap(range.begin, range.end);
-  }
+    remember_edit();
+    range.begin = clamped(range.begin);
+    range.end = clamped(range.end);
+    if (range.end < range.begin) {
+        std::swap(range.begin, range.end);
+    }
 
   const auto normalised = normalise_newlines(text);
   auto inserted = split_lines(normalised);
@@ -454,6 +456,7 @@ auto EditorBuffer::replace(TextSelection range, std::string_view text)
 
 auto EditorBuffer::replace_many(std::vector<TextSelection> ranges, std::string_view replacement)
     -> BufferChange {
+    remember_edit();
     struct PendingEdit {
         std::size_t start{};
         std::size_t end{};
@@ -681,6 +684,56 @@ auto EditorBuffer::replace_all(std::string_view query,
     return replace({TextPosition{}, {lines_.size() - 1, lines_.back().size()}}, replaced);
 }
 
+auto EditorBuffer::edit_state() const -> EditState {
+    return {lines_, cursor_, selection_anchor_, secondary_carets_, preferred_byte_};
+}
+
+void EditorBuffer::remember_edit() {
+    undo_.push_back(edit_state());
+    redo_.clear();
+}
+
+auto EditorBuffer::restore_edit(std::vector<EditState>& from, std::vector<EditState>& to)
+    -> std::optional<BufferChange> {
+    if (from.empty()) {
+        return std::nullopt;
+    }
+    const auto previous_lines = lines_.size();
+    to.push_back(edit_state());
+    auto state = std::move(from.back());
+    from.pop_back();
+    lines_ = std::move(state.lines);
+    cursor_ = state.cursor;
+    selection_anchor_ = state.anchor;
+    secondary_carets_ = std::move(state.secondary_carets);
+    preferred_byte_ = state.preferred_byte;
+    dirty_ = text() != saved_text_;
+    error_.clear();
+    ++revision_;
+    return BufferChange{0, previous_lines, lines_.size()};
+}
+
+auto EditorBuffer::undo() -> std::optional<BufferChange> {
+    return restore_edit(undo_, redo_);
+}
+
+auto EditorBuffer::redo() -> std::optional<BufferChange> {
+    return restore_edit(redo_, undo_);
+}
+
+auto EditorBuffer::refresh_saved_text(std::string_view saved) -> std::optional<BufferChange> {
+    if (dirty_) {
+        return std::nullopt;
+    }
+    if (text() == saved) {
+        return std::nullopt;
+    }
+    const auto change = replace({TextPosition{}, {lines_.size() - 1, lines_.back().size()}}, saved);
+    saved_text_ = text();
+    dirty_ = false;
+    return change;
+}
+
 auto EditorBuffer::save() -> bool {
   if (!repository_path_) {
     error_ = "buffer is not backed by a liquid repository";
@@ -715,6 +768,7 @@ auto EditorBuffer::save() -> bool {
     }
     pending_drips_ = pending_drips;
     dirty_ = false;
+    saved_text_ = text();
     return true;
   } catch (const std::exception &error) {
     error_ = error.what();
@@ -739,6 +793,7 @@ auto EditorBuffer::save(liquid::repository &repository) -> bool {
   }
   pending_drips_ = status->pending_drips;
   dirty_ = false;
+  saved_text_ = text();
   error_.clear();
   return true;
 }

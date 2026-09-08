@@ -88,8 +88,11 @@ public:
                                  FindOptions options = {}) -> std::optional<BufferChange>;
   [[nodiscard]] auto save() -> bool;
   [[nodiscard]] auto save(liquid::repository &repository) -> bool;
+  [[nodiscard]] auto undo() -> std::optional<BufferChange>;
+  [[nodiscard]] auto redo() -> std::optional<BufferChange>;
+  [[nodiscard]] auto refresh_saved_text(std::string_view text) -> std::optional<BufferChange>;
 
-private:
+  private:
   [[nodiscard]] auto replace(TextSelection range, std::string_view text)
       -> BufferChange;
   [[nodiscard]] auto replace_many(std::vector<TextSelection> ranges, std::string_view text)
@@ -112,6 +115,20 @@ private:
       TextPosition position;
       std::optional<TextPosition> anchor;
   };
+  struct EditState {
+      std::vector<std::string> lines;
+      TextPosition cursor;
+      std::optional<TextPosition> anchor;
+      std::vector<SecondaryCaret> secondary_carets;
+      std::size_t preferred_byte;
+  };
+  [[nodiscard]] auto edit_state() const -> EditState;
+  void remember_edit();
+  [[nodiscard]] auto restore_edit(std::vector<EditState>& from, std::vector<EditState>& to)
+      -> std::optional<BufferChange>;
+  std::vector<EditState> undo_;
+  std::vector<EditState> redo_;
+  std::string saved_text_;
   std::vector<SecondaryCaret> secondary_carets_;
   std::size_t preferred_byte_{};
   EditorPreferences preferences_{};

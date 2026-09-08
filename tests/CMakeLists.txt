@@ -41,6 +41,11 @@ target_include_directories(liquify-tests PRIVATE
 include(GoogleTest)
 gtest_discover_tests(liquify-tests)
 
+if(APPLE)
+  add_executable(liquify-native-buffer-regression native_buffer_regression.cpp)
+  target_link_libraries(liquify-native-buffer-regression PRIVATE liquify-app)
+endif()
+
 add_test(
   NAME liquify-print-tree-unreadable
   COMMAND ${CMAKE_COMMAND}

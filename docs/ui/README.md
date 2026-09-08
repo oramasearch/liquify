@@ -66,3 +66,6 @@ and thirty-four named states. The panel behavior and layout model are documented
 The PNG reader and writer in `src/screenshot.cpp` support the generated 8-bit RGBA, non-interlaced
 format. PNG chunks, CRC checks and scanline validation are implemented in-tree; the existing zlib
 dependency compresses and expands image data.
+
+The display-required dirty-buffer regression and lifetime policy are documented in
+[`buffers.md`](buffers.md). Native discard dialogs are verified by that regression.

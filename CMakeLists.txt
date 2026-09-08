@@ -216,6 +216,9 @@ add_custom_command(TARGET liquify POST_BUILD
           "$<TARGET_FILE_DIR:liquify>/frontends/$<TARGET_FILE_NAME:liquid-frontend-tree-sitter>")
 
 if(LIQUIFY_BUILD_TESTS)
+  if(APPLE)
+    target_compile_definitions(liquify-app PRIVATE LIQUIFY_NATIVE_BUFFER_REGRESSION)
+  endif()
   FetchContent_Declare(googletest
     URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)

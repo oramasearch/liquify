@@ -139,3 +139,67 @@ TEST(EditorBuffer, FindsAndReplacesAcrossTheBuffer) {
 }
 
 } // namespace
+
+TEST(EditorBuffer, UndoRedoRetainsSelectionsAndSaveBoundary) {
+    auto buffer = liquify::EditorBuffer::from_text("undo", "notes.txt", "alpha\nbeta");
+    buffer.set_cursor({0, 1});
+    buffer.set_cursor({0, 4}, true);
+    const auto selection = buffer.selection();
+    ASSERT_TRUE(buffer.insert_text("MARKER"));
+    const auto edited = buffer.text();
+    ASSERT_TRUE(buffer.undo());
+    EXPECT_EQ(buffer.text(), "alpha\nbeta");
+    EXPECT_EQ(buffer.selection(), selection);
+    EXPECT_FALSE(buffer.dirty());
+    ASSERT_TRUE(buffer.redo());
+    EXPECT_EQ(buffer.text(), edited);
+    EXPECT_TRUE(buffer.dirty());
+    ASSERT_TRUE(buffer.undo());
+    ASSERT_TRUE(buffer.insert_text("different"));
+    EXPECT_FALSE(buffer.redo());
+}
+
+TEST(EditorBuffer, UndoMultiCursorEditIsOneOperation) {
+    auto buffer = liquify::EditorBuffer::from_text("multi-undo", "notes.txt", "alpha\nbeta");
+    buffer.set_cursor({0, 2});
+    buffer.add_cursor({1, 2});
+    const auto cursors = buffer.cursors();
+    ASSERT_TRUE(buffer.insert_text("!"));
+    EXPECT_EQ(buffer.text(), "al!pha\nbe!ta");
+    ASSERT_TRUE(buffer.undo());
+    EXPECT_EQ(buffer.text(), "alpha\nbeta");
+    EXPECT_EQ(buffer.cursors(), cursors);
+    EXPECT_FALSE(buffer.undo());
+    ASSERT_TRUE(buffer.redo());
+    EXPECT_EQ(buffer.text(), "al!pha\nbe!ta");
+}
+
+TEST(EditorBuffer, SavingDoesNotEraseLocalUndo) {
+    TemporaryDirectory location;
+    auto repository = liquid::runtime::block_on(liquid::repository::create(location.path()));
+    ASSERT_TRUE(repository);
+    auto buffer = liquify::EditorBuffer::from_repository_text(location.path(), "notes.txt", "old");
+    buffer.move_end();
+    ASSERT_TRUE(buffer.insert_text(" new"));
+    ASSERT_TRUE(buffer.save(*repository));
+    ASSERT_TRUE(buffer.undo());
+    EXPECT_EQ(buffer.text(), "old");
+    EXPECT_TRUE(buffer.dirty());
+    ASSERT_TRUE(buffer.redo());
+    EXPECT_EQ(buffer.text(), "old new");
+    EXPECT_FALSE(buffer.dirty());
+}
+
+TEST(EditorBuffer, RefreshSavedTextPreservesDirtyWorkAndUndo) {
+    auto buffer = liquify::EditorBuffer::from_text("refresh", "notes.txt", "original");
+    ASSERT_TRUE(buffer.refresh_saved_text("persisted operation"));
+    EXPECT_FALSE(buffer.dirty());
+    ASSERT_TRUE(buffer.undo());
+    EXPECT_EQ(buffer.text(), "original");
+    EXPECT_TRUE(buffer.dirty());
+    EXPECT_FALSE(buffer.refresh_saved_text("external edit"));
+    EXPECT_EQ(buffer.text(), "original");
+    ASSERT_TRUE(buffer.redo());
+    EXPECT_EQ(buffer.text(), "persisted operation");
+    EXPECT_FALSE(buffer.dirty());
+}

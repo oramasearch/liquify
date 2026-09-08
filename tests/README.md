@@ -105,3 +105,9 @@ command-palette, panel-system and settings states through SDL's dummy video driv
 output and uses
 `ui_pixel_assert.hpp` to prove that a highlighted line, panel title and count badge occupy their
 expected regions.
+
+`native_buffer_regression.cpp` opens a native macOS window, sends native text/key/close events,
+and clicks real Save / Discard / Cancel buttons. It verifies dirty-buffer identity, selection and
+undo retention across file switches and all discard paths; run it separately from headless ctest
+as described in [`../docs/ui/buffers.md`](../docs/ui/buffers.md). Local buffer tests also cover
+selection and multi-cursor undo, redo invalidation and saving without clearing history.
