@@ -7,5 +7,7 @@ TEST(Version, StringMatchesStruct) {
     EXPECT_EQ(v.major, 0u);
     EXPECT_EQ(v.minor, 0u);
     EXPECT_EQ(v.patch, 1u);
-    EXPECT_EQ(liquify::version_string(), "0.0.1");
+    EXPECT_TRUE(liquify::version_string().starts_with("0.0.1+"));
+    EXPECT_EQ(liquify::liquid_revision().size(), 40U);
+    EXPECT_NE(liquify::build_description().find(liquify::liquid_revision()), std::string::npos);
 }

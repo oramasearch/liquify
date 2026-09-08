@@ -15,7 +15,17 @@ location history, and unique default bindings for every navigation action.
 repository created in the build tree. It requires a non-zero exit and the same liquid error on
 standard error. No repository fixture bytes are committed.
 
-`test_version.cpp` checks the public liquify version value and string.
+`test_version.cpp` checks the public liquify version value and revision-bearing build description.
+`test_repository_error.cpp` distinguishes unsupported object-map tags from missing, truncated,
+and corrupt maps and checks the upgrade guidance. `independent_cli_compat.py` is registered as
+`liquify-independent-cli-compat`: it builds a separate liquid CLI checkout or accepts an independently
+built artifact, creates the input through that CLI, runs the IDE and `compat_editor.cpp`, and
+reads the saved bytes back through the CLI's Git export. The same check covers an unsupported
+format and can include an independently cloned lake repository. See
+[`../docs/build/store-compatibility.md`](../docs/build/store-compatibility.md).
+On macOS, do not place `TMPDIR` under a deep absolute worktree path: liquid's daemon socket
+can exceed the platform path limit. See the compatibility page for the separate liquid#282
+FSEvents host-contention condition.
 
 `test_command.cpp` covers the complete built-in registry, fuzzy matching, recent-command order,
 platform primary modifiers, typed `.liquid` keymap parsing, overrides, unbinding, conflict
@@ -106,8 +116,17 @@ output and uses
 `ui_pixel_assert.hpp` to prove that a highlighted line, panel title and count badge occupy their
 expected regions.
 
-`native_buffer_regression.cpp` is registered with CTest on macOS. It opens a native window, sends native text/key/close events,
-and clicks real Save / Discard / Cancel buttons. It verifies dirty-buffer identity, selection and
-undo retention across file switches and all discard paths; run it separately from headless ctest
-as described in [`../docs/ui/buffers.md`](../docs/ui/buffers.md). Local buffer tests also cover
-selection and multi-cursor undo, redo invalidation and saving without clearing history.
+`test_native_window.cpp` runs the native window driver in `src/app.cpp`, preserving the single
+SDL/ImGui translation unit. The driver uses the screenshot suite's in-memory source fixture rather
+than a CLI-created repository because liquify#54 tracks the current store-format compatibility.
+The separate CTest case `liquify-native-window` checks scale 2 and density 1 on macOS, resize,
+display moves, font rebuild, logical mouse hits and exact palette/floating-panel occlusion. It
+requires a desktop and writes live framebuffer PNGs under the build tree. See [the
+contract](../docs/ui/app-shell.md).
+
+`native_buffer_regression.cpp` is registered with CTest on macOS. It opens a native window, sends
+native text/key/close events, and clicks real Save / Discard / Cancel buttons. It verifies
+dirty-buffer identity, selection and undo retention across file switches and all discard paths;
+run it separately from headless CTest as described in
+[`../docs/ui/buffers.md`](../docs/ui/buffers.md). Local buffer tests also cover selection and
+multi-cursor undo, redo invalidation and saving without clearing history.

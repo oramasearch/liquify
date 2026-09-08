@@ -13,16 +13,16 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 local TAAP identity and additional-window actions. Repositories switch without restarting.
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, indexes all paths and libliquid symbol records, annotates file
-kind plus drive and change state, and opens blobs into retained in-memory buffers keyed by path. Switching preserves text, selections
-and local undo; native Save / Discard / Cancel dialogs protect close, repository replacement and
-quit (see `docs/ui/buffers.md`). Save calls
-libliquid and produces a drip. Quick Open, Symbol Search, definitions, references, call hierarchy,
+kind plus drive and change state, and opens blobs into retained in-memory buffers keyed by path.
+Switching preserves text, selections and local undo; native Save / Discard / Cancel dialogs protect
+close, repository replacement and quit (see `docs/ui/buffers.md`). Save calls libliquid and produces
+a drip. Quick Open, Symbol Search, definitions, references, call hierarchy,
 breadcrumbs, recent locations, and back/forward share one navigation action registry with default
 bindings; repository rows expose open, rename, move, new-file, and reveal actions.
 The standard input mode is non-modal and a modal command/insert mode is available. Multi-cursor
 and column edits, repository indentation, liquid syntax/folds, collaboration gutters,
-search/replace and local edit history are part of the editor view. Unreadable
-repositories retain liquid's error, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
+search/replace, local edit history and operation-log history are part of the editor view. Unreadable
+repositories retain liquid's error, with upgrade guidance for unsupported store formats, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
 reports frame and typing latency, and exits 0. Unreadable local repositories and unreachable lake
 clones have distinct retry states. `liquify --screenshot` renders fixed welcome, recovery,
 repository, navigation, settings, C++ editor, complete editor view and panel registry states in
@@ -33,10 +33,13 @@ forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
 embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The
 light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel,
-floating panels and status bar from those roles. One plain-C++ registry owns every panel's
-metadata, commands, placement, focus, state and notifications; panels move among dock areas, float
-and re-dock, repository-local state persists the complete layout, and reset restores defaults. One
-status channel reports build, saved-drip sync, repository hydration and assistant progress. macOS
+floating panels and status bar from those roles. Shell and retained editor share logical
+coordinates with one frame-level drawable scale; native GPU window tests cover geometry and
+popup occlusion. Font texture failures stop rendering with a visible native error. One plain-C++
+registry owns every panel's metadata, commands, placement, focus, state and notifications; panels
+move among dock areas, float and re-dock, repository-local state persists the complete layout, and
+reset restores defaults. One status channel reports build, saved-drip sync, repository hydration
+and assistant progress. macOS
 exposes the command groups and Cmd bindings through the native menu bar. The searchable settings
 surface reads user and repository `.liquid` files, applies appearance, editor, keymap, AI and lake
 changes live, keeps telemetry off by default, and never places credential values in its model or
@@ -81,6 +84,10 @@ launches a relocated copy from the mounted dmg. Tag releases publish those insta
 signed and unsigned SHA-256 records; macOS notarization runs when the App Store Connect credentials
 are available. Hand-built packaging remains in place until liquid's projection and
 platform-signing targets land.
+
+The liquid pin is `7ff6ed82f93b916ef206c5776e2761b19536d8f3`; CLI and IDE revisions plus supported
+store formats are displayed by `version`. The independent CLI → IDE → CLI compatibility test
+and supported lake revision are recorded in [`docs/build/store-compatibility.md`](docs/build/store-compatibility.md).
 
 ## Decisions — recorded
 

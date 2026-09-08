@@ -24,7 +24,7 @@ thread, renders its root entries, loads nested trees on expansion, and opens blo
 editable in-memory buffer per path; switching retains text, selection and local undo. Native
 Save / Discard / Cancel dialogs protect close, repository replacement and quit
 ([`../ui/buffers.md`](../ui/buffers.md)); save writes through libliquid as a drip. Unreadable repositories show
-liquid's error and make `--print-tree` exit non-zero. A background index classifies every path,
+liquid's error, adding upgrade guidance for unsupported formats, and make `--print-tree` exit non-zero. A background index classifies every path,
 adds libliquid drive and repository change annotations, and retains libliquid symbol records.
 Quick Open, Symbol Search, definitions, references, available call relationships, breadcrumbs,
 recent locations, history traversal, and repository context actions share one registered default-key
@@ -39,8 +39,12 @@ recorded in [`../ui/accessibility.md`](../ui/accessibility.md).
 The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
 its gate verifies source hashes and rejects stale generated output. Those roles drive the system,
 light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom
-panel, floating panels and status bar. One registry supplies panel metadata, commands, placement,
-focus, state and notifications; each surface moves among dock areas, floats and re-docks. Divider
+panel, floating panels and status bar. One frame-level drawable scale applies to shell and
+retained editor logical coordinates; retained drawing respects ImGui popup order. Native GPU
+window regression covers resize, fonts, hit testing and occlusion ([the coordinate
+contract](../ui/app-shell.md#logical-coordinates-and-native-pixels)). One registry supplies panel
+metadata, commands, placement, focus, state and notifications; each surface moves among dock
+areas, floats and re-docks. Divider
 sizes and complete panel layouts persist per repository and can be reset. The status bar reports
 daemon, sync, hydration, build, presence, current change, branch, notifications and identity.
 macOS installs native
@@ -60,12 +64,16 @@ in [`../ui/README.md`](../ui/README.md).
 
 The editor supports multi-cursor and rectangular edits, repository-configured indentation,
 soft-wrap and fold row models, liquid tree-sitter syntax, bracket matching, line/diagnostic/
-attribution/presence/Drive gutters, buffer and repository search/replace, and per-buffer undo/redo. Liquid retains its repository operation history API. Its interaction, worker and screenshot contracts are in
+attribution/presence/Drive gutters, buffer and repository search/replace, per-buffer undo/redo,
+and repository operation history. Its interaction, worker and screenshot contracts are in
 [`../ui/editor.md`](../ui/editor.md).
 
 ## The liquid pin
 
-liquid is pinned at `modules/liquid`. The pin includes liquid's compact-checkpoint repository
+liquid is pinned at `modules/liquid` to `7ff6ed82f93b916ef206c5776e2761b19536d8f3`.
+An independent CLI → IDE → CLI integration check exercises repository creation, file listing,
+editor save, read-back, and unsupported-format guidance; the artifact combinations are in
+[`../build/store-compatibility.md`](../build/store-compatibility.md). The pin includes liquid's compact-checkpoint repository
 format, Phase 2 and 3 APIs, the persisted demand-driven query graph, tree-diff and
 record-enumeration APIs, the per-checkout daemon, registered frontend modules with per-definition
 C/C++ actions, the C/C++ stub-tree query, text-anchor mapping, and the coroutine-native forge

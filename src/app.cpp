@@ -21,6 +21,9 @@
 #include "imgui_impl_sdlrenderer3.h"
 #include "misc/cpp/imgui_stdlib.h"
 #include <SDL3/SDL.h>
+#ifdef LIQUIFY_NATIVE_WINDOW_TESTS
+#include "imgui_internal.h"
+#endif
 
 #if defined(__APPLE__) && defined(__OBJC__)
 #import <AppKit/AppKit.h>
@@ -49,35 +52,35 @@
 
 #if defined(__APPLE__) && defined(__OBJC__)
 enum NativeMenuCommand : std::int32_t {
-    menu_save = 1,
-    menu_close,
-    menu_quit,
-    menu_palette,
-    menu_sidebar,
-    menu_panel,
-    menu_split,
-    menu_theme,
-    menu_contrast,
-    menu_copy,
-    menu_cut,
-    menu_paste,
-    menu_definition,
-    menu_hover,
-    menu_build,
-    menu_tests,
-    menu_deploy,
-    menu_next_hunk,
-    menu_previous_hunk,
-    menu_next_comment,
-    menu_expand_selection,
-    menu_shrink_selection,
-    menu_quick_open,
-    menu_symbol_search,
-    menu_references,
-    menu_call_hierarchy,
-    menu_open_recent,
-    menu_back,
-    menu_forward,
+  menu_save = 1,
+  menu_close,
+  menu_quit,
+  menu_palette,
+  menu_sidebar,
+  menu_panel,
+  menu_split,
+  menu_theme,
+  menu_contrast,
+  menu_copy,
+  menu_cut,
+  menu_paste,
+  menu_definition,
+  menu_hover,
+  menu_build,
+  menu_tests,
+  menu_deploy,
+  menu_next_hunk,
+  menu_previous_hunk,
+  menu_next_comment,
+  menu_expand_selection,
+  menu_shrink_selection,
+  menu_quick_open,
+  menu_symbol_search,
+  menu_references,
+  menu_call_hierarchy,
+  menu_open_recent,
+  menu_back,
+  menu_forward,
 };
 
 @interface LiquifyMenuTarget : NSObject
@@ -135,9 +138,10 @@ static void install_native_menu() {
                           keyEquivalent:@""];
   [application_menu addItem:about];
   [application_menu addItem:[NSMenuItem separatorItem]];
-  auto* quit = [[NSMenuItem alloc] initWithTitle:@"Quit liquify"
-                                          action:@selector(performLiquifyCommand:)
-                                   keyEquivalent:@"q"];
+  auto *quit =
+      [[NSMenuItem alloc] initWithTitle:@"Quit liquify"
+                                 action:@selector(performLiquifyCommand:)
+                          keyEquivalent:@"q"];
   [quit setTag:menu_quit];
   [quit setTarget:native_menu_target];
   [application_menu addItem:quit];
@@ -147,10 +151,9 @@ static void install_native_menu() {
   constexpr auto command = NSEventModifierFlagCommand;
   constexpr auto command_shift =
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
-  add_native_menu(
-      main_menu,
-      @"File",
-      {{@"Save", @"s", command, menu_save}, {@"Close File", @"w", command, menu_close}});
+  add_native_menu(main_menu, @"File",
+                  {{@"Save", @"s", command, menu_save},
+                   {@"Close File", @"w", command, menu_close}});
   add_native_menu(main_menu, @"Edit",
                   {{@"Copy", @"c", command, menu_copy},
                    {@"Cut", @"x", command, menu_cut},
@@ -1108,12 +1111,12 @@ App::App(AppOptions options) : options_(std::move(options)) {
     auto repository = std::make_unique<RepositoryView>(
         RepositoryView::open(*initial_repository));
     if (repository->error().empty()) {
-        if (activate_repository(std::move(repository))) {
-            first_run_.repository_opened(repository_summary());
-            persist_first_run();
-        } else if (repository_) {
-            first_run_.repository_opened(repository_summary());
-        }
+      if (activate_repository(std::move(repository))) {
+        first_run_.repository_opened(repository_summary());
+        persist_first_run();
+      } else if (repository_) {
+        first_run_.repository_opened(repository_summary());
+      }
     } else {
       first_run_.open_failed(*initial_repository,
                              std::string(repository->error()));
@@ -1122,14 +1125,14 @@ App::App(AppOptions options) : options_(std::move(options)) {
     panels_.restore(shell_state_.panel_layout);
   }
   if (options_.smoke) {
-      transient_editor_ = std::make_unique<EditorBuffer>(
-          EditorBuffer::from_text("smoke-50000", "smoke-50000.txt", smoke_text()));
-      editor_ = transient_editor_.get();
-      layouts_ = std::make_unique<TextLayoutCache>();
-      layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
-      text_layer_ = std::make_unique<RetainedTextLayer>();
-      text_layer_->reset(editor_->line_count());
-      editor_focused_ = true;
+    transient_editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
+        "smoke-50000", "smoke-50000.txt", smoke_text()));
+    editor_ = transient_editor_.get();
+    layouts_ = std::make_unique<TextLayoutCache>();
+    layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
+    text_layer_ = std::make_unique<RetainedTextLayer>();
+    text_layer_->reset(editor_->line_count());
+    editor_focused_ = true;
   }
   const auto *screenshot =
       options_.screenshot_state
@@ -1173,18 +1176,18 @@ App::App(AppOptions options) : options_(std::move(options)) {
   if (screenshot != nullptr && screenshot->view != ScreenshotView::welcome &&
       screenshot->view != ScreenshotView::repository_unreadable &&
       screenshot->view != ScreenshotView::lake_offline) {
-      transient_editor_ = std::make_unique<EditorBuffer>(
-          EditorBuffer::from_text("screenshot-main", "src/app.cpp", screenshot_text()));
-      editor_ = transient_editor_.get();
-      layouts_ = std::make_unique<TextLayoutCache>();
-      layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
-      text_layer_ = std::make_unique<RetainedTextLayer>();
-      text_layer_->reset(editor_->line_count());
-      editor_focused_ = true;
-      if (screenshot->view == ScreenshotView::accessibility) {
-          editor_->set_cursor({5, 9});
-          input_.update_composition("日本語", 2, 1);
-      }
+    transient_editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
+        "screenshot-main", "src/app.cpp", screenshot_text()));
+    editor_ = transient_editor_.get();
+    layouts_ = std::make_unique<TextLayoutCache>();
+    layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
+    text_layer_ = std::make_unique<RetainedTextLayer>();
+    text_layer_->reset(editor_->line_count());
+    editor_focused_ = true;
+    if (screenshot->view == ScreenshotView::accessibility) {
+      editor_->set_cursor({5, 9});
+      input_.update_composition("日本語", 2, 1);
+    }
     if (screenshot->view == ScreenshotView::review) {
       panels_.focus(PanelId::review);
     } else if (screenshot->view == ScreenshotView::editor_view) {
@@ -1254,98 +1257,98 @@ App::App(AppOptions options) : options_(std::move(options)) {
 }
 
 bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
-    if (!confirm_discard("Switch repository")) {
-        return false;
-    }
-    if (repository_) {
-        persist_shell_state();
-    }
-    if (repository_operation_is_clone_) {
-        options_.lake_url = pending_lake_url_;
-    }
-    editor_ = nullptr;
-    open_buffers_.clear();
-    transient_editor_.reset();
-    analysis_buffer_open_ = false;
-    analysis_text_.clear();
-    navigation_history_ = NavigationHistory{};
-    layouts_.reset();
-    text_layer_.reset();
-    editor_graph_.reset();
-    review_.reset();
-    assistant_.reset();
-    plugin_host_.reset();
-    plugin_failures_.clear();
-    plugin_panels_.clear();
-    multiplayer_.reset();
-    multiplayer_refresh_ = {};
-    next_multiplayer_refresh_ = {};
-    find_query_.clear();
-    replace_query_.clear();
-    buffer_matches_.clear();
-    find_match_index_ = 0;
-    column_selection_anchor_.reset();
-    repository_ = std::move(repository);
-    options_.repository_path = repository_->path();
-    if (!screenshot_mode()) {
-        auto loaded_settings = load_settings(options_.repository_path);
-        settings_ = std::move(loaded_settings.settings);
-        settings_diagnostics_ = std::move(loaded_settings.diagnostics);
-    }
-    settings_scope_ = SettingsScope::repository;
+  if (!confirm_discard("Switch repository")) {
+    return false;
+  }
+  if (repository_) {
+    persist_shell_state();
+  }
+  if (repository_operation_is_clone_) {
+    options_.lake_url = pending_lake_url_;
+  }
+  editor_ = nullptr;
+  open_buffers_.clear();
+  transient_editor_.reset();
+  analysis_buffer_open_ = false;
+  analysis_text_.clear();
+  navigation_history_ = NavigationHistory{};
+  layouts_.reset();
+  text_layer_.reset();
+  editor_graph_.reset();
+  review_.reset();
+  assistant_.reset();
+  plugin_host_.reset();
+  plugin_failures_.clear();
+  plugin_panels_.clear();
+  multiplayer_.reset();
+  multiplayer_refresh_ = {};
+  next_multiplayer_refresh_ = {};
+  find_query_.clear();
+  replace_query_.clear();
+  buffer_matches_.clear();
+  find_match_index_ = 0;
+  column_selection_anchor_.reset();
+  repository_ = std::move(repository);
+  options_.repository_path = repository_->path();
+  if (!screenshot_mode()) {
+    auto loaded_settings = load_settings(options_.repository_path);
+    settings_ = std::move(loaded_settings.settings);
+    settings_diagnostics_ = std::move(loaded_settings.diagnostics);
+  }
+  settings_scope_ = SettingsScope::repository;
 
-    auto loaded_state = load_app_shell_state(*options_.repository_path);
-    shell_state_ = loaded_state.state;
-    shell_state_.theme = settings_.theme;
-    if (!loaded_state.error.empty()) {
-        editor_status_ = std::move(loaded_state.error);
-    } else {
-        editor_status_.clear();
-    }
-    panels_ = PanelRegistry{};
-    panels_.restore(shell_state_.panel_layout);
+  auto loaded_state = load_app_shell_state(*options_.repository_path);
+  shell_state_ = loaded_state.state;
+  shell_state_.theme = settings_.theme;
+  if (!loaded_state.error.empty()) {
+    editor_status_ = std::move(loaded_state.error);
+  } else {
+    editor_status_.clear();
+  }
+  panels_ = PanelRegistry{};
+  panels_.restore(shell_state_.panel_layout);
 
-    auto plugins = load_configured_plugins(*options_.repository_path);
-    if (!plugins) {
-        plugin_host_ = std::make_shared<PluginHost>();
-        auto message = plugins.error().message;
-        if (!plugins.error().context.empty()) {
-            message += ": " + plugins.error().context;
-        }
-        plugin_failures_.push_back({{}, std::move(message)});
-    } else {
-        plugin_host_ = std::move(plugins->host);
-        plugin_failures_ = std::move(plugins->failures);
+  auto plugins = load_configured_plugins(*options_.repository_path);
+  if (!plugins) {
+    plugin_host_ = std::make_shared<PluginHost>();
+    auto message = plugins.error().message;
+    if (!plugins.error().context.empty()) {
+      message += ": " + plugins.error().context;
     }
-    editor_graph_ = std::make_unique<EditorGraph>(
-        *options_.repository_path, plugin_host_, syntax_frontend_path());
+    plugin_failures_.push_back({{}, std::move(message)});
+  } else {
+    plugin_host_ = std::move(plugins->host);
+    plugin_failures_ = std::move(plugins->failures);
+  }
+  editor_graph_ = std::make_unique<EditorGraph>(
+      *options_.repository_path, plugin_host_, syntax_frontend_path());
 
-    auto config = AiConfig{.enabled = settings_.ai.enabled,
-                           .context_bytes = settings_.ai.context_bytes,
-                           .model = settings_.ai.model,
-                           .max_tokens = settings_.ai.max_tokens};
-    ai_context_bytes_ = config.context_bytes;
-    auto key = ConfiguredSecret{};
-    if (config.enabled) {
-        key = anthropic_api_key();
+  auto config = AiConfig{.enabled = settings_.ai.enabled,
+                         .context_bytes = settings_.ai.context_bytes,
+                         .model = settings_.ai.model,
+                         .max_tokens = settings_.ai.max_tokens};
+  ai_context_bytes_ = config.context_bytes;
+  auto key = ConfiguredSecret{};
+  if (config.enabled) {
+    key = anthropic_api_key();
+  }
+  const auto secret = key.value;
+  assistant_ = std::make_unique<Assistant>(config, key.configured, [secret] {
+    return std::make_unique<AnthropicProvider>(secret);
+  });
+  if (options_.lake_url) {
+    try {
+      const auto *token = std::getenv("LIQUID_TOKEN");
+      review_ = std::make_unique<ReviewController>(
+          *options_.repository_path, *options_.lake_url,
+          token == nullptr ? std::string{} : std::string{token});
+      review_->request_list();
+    } catch (const std::exception &error) {
+      editor_status_ = std::string{"review configuration: "} + error.what();
     }
-    const auto secret = key.value;
-    assistant_ = std::make_unique<Assistant>(
-        config, key.configured, [secret] { return std::make_unique<AnthropicProvider>(secret); });
-    if (options_.lake_url) {
-        try {
-            const auto* token = std::getenv("LIQUID_TOKEN");
-            review_ = std::make_unique<ReviewController>(*options_.repository_path,
-                                                         *options_.lake_url,
-                                                         token == nullptr ? std::string{}
-                                                                          : std::string{token});
-            review_->request_list();
-        } catch (const std::exception& error) {
-            editor_status_ = std::string{"review configuration: "} + error.what();
-        }
-    }
-    configure_commands();
-    return true;
+  }
+  configure_commands();
+  return true;
 }
 
 auto App::repository_summary() const -> RepositorySummary {
@@ -1430,12 +1433,12 @@ void App::poll_repository_lifecycle() {
                                std::string{repository->error()});
       }
     } else {
-        if (activate_repository(std::move(repository))) {
-            first_run_.repository_opened(repository_summary());
-            persist_first_run();
-        } else if (repository_) {
-            first_run_.repository_opened(repository_summary());
-        }
+      if (activate_repository(std::move(repository))) {
+        first_run_.repository_opened(repository_summary());
+        persist_first_run();
+      } else if (repository_) {
+        first_run_.repository_opened(repository_summary());
+      }
     }
   } catch (const std::exception &error) {
     if (repository_operation_is_clone_) {
@@ -1597,49 +1600,51 @@ bool App::invoke_command(std::string_view name) {
   if (name == "file.save") {
     save_editor();
   } else if (name == "file.close") {
-      close_editor();
+    close_editor();
   } else if (name == "edit.undo" || name == "edit.redo") {
-      undo_editor(name == "edit.redo");
+    undo_editor(name == "edit.redo");
   } else if (name == "edit.command-palette") {
-      command_palette_open_ = true;
+    command_palette_open_ = true;
   } else if (name == "settings.open") {
-      settings_open_ = true;
+    settings_open_ = true;
   } else if (name == "view.toggle-sidebar") {
-      shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
-      persist_shell_state();
+    shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
+    persist_shell_state();
   } else if (name == "view.toggle-bottom-panel") {
-      shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
-      persist_shell_state();
+    shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
+    persist_shell_state();
   } else if (name == "view.toggle-editor-split") {
-      shell_state_.editor_split = !shell_state_.editor_split;
-      persist_shell_state();
+    shell_state_.editor_split = !shell_state_.editor_split;
+    persist_shell_state();
   } else if (name == "view.cycle-theme") {
-      cycle_theme();
+    cycle_theme();
   } else if (name == "go.definition") {
-      request_definition();
+    request_definition();
   } else if (name == "go.hover") {
-      request_hover();
+    request_hover();
   } else if (name == "go.completion") {
-      request_completion();
+    request_completion();
   } else if (name == "run.build") {
-      request_build();
+    request_build();
   } else if (name == "run.tests") {
-      request_tests();
+    request_tests();
   } else if (name == "run.deploy") {
-      request_deploy();
+    request_deploy();
   } else if (name == "assistant.toggle") {
-      toggle_assistant();
+    toggle_assistant();
   } else if (name == "panel.reset-layout") {
-      reset_panel_layout();
+    reset_panel_layout();
   } else if (name == "help.version") {
-      editor_status_ = "liquify " + std::string(version_string());
+    editor_status_ = "liquify " + std::string(version_string());
   } else {
-      execute_panel_command(name);
+    execute_panel_command(name);
   }
   return true;
 }
 
-bool App::init() {
+bool App::init() { return init_window(true); }
+
+bool App::init_window(bool high_pixel_density) {
   const auto *screenshot =
       options_.screenshot_state
           ? find_screenshot_state(*options_.screenshot_state)
@@ -1678,7 +1683,8 @@ bool App::init() {
       options_.title + " " + std::string(version_string());
   const auto window_flags =
       screenshot == nullptr
-          ? SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+          ? SDL_WINDOW_RESIZABLE |
+                (high_pixel_density ? SDL_WINDOW_HIGH_PIXEL_DENSITY : 0)
           : SDL_WINDOW_HIDDEN;
   window_ = SDL_CreateWindow(title.c_str(), window_width, window_height,
                              window_flags);
@@ -1711,11 +1717,10 @@ bool App::init() {
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
   io.IniFilename = nullptr;
   display_scale_ = screenshot == nullptr
-                       ? std::max(SDL_GetWindowDisplayScale(window_), 1.0F)
+                       ? std::max(SDL_GetWindowPixelDensity(window_), 1.0F)
                        : 1.0F;
   if (screenshot != nullptr) {
     io.DisplayFramebufferScale = ImVec2(1.0F, 1.0F);
-    SDL_SetRenderScale(renderer_, 1.0F, 1.0F);
   }
   load_font_atlas(display_scale_);
   reduced_motion_ = system_reduced_motion();
@@ -1727,6 +1732,10 @@ bool App::init() {
   }
   ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
   ImGui_ImplSDLRenderer3_Init(renderer_);
+  initialized_ = true;
+  if (!upload_font_atlas()) {
+    return false;
+  }
   SDL_StartTextInput(window_);
   configure_commands();
   if (screenshot != nullptr &&
@@ -1805,6 +1814,52 @@ void App::load_font_atlas(float scale) {
     }
   }
   io.FontDefault = io.Fonts->Fonts[ui_font_index_];
+  // Atlas repacking changes UVs even when logical glyph metrics stay the same.
+  if (text_layer_ && editor_) {
+    text_layer_->reset(editor_->line_count());
+  }
+}
+
+bool App::fail_rendering(std::string message) {
+  rendering_failed_ = true;
+  quit_ = true;
+  std::fprintf(stderr, "liquify: %s\n", message.c_str());
+  if (!screenshot_mode()) {
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "liquify rendering error",
+                             message.c_str(), window_);
+  }
+  return false;
+}
+
+bool App::upload_font_atlas() {
+  auto &atlas = *ImGui::GetIO().Fonts;
+  SDL_ClearError();
+  const auto created =
+      atlas.Build() && ImGui_ImplSDLRenderer3_CreateFontsTexture();
+  auto *texture = reinterpret_cast<SDL_Texture *>(atlas.TexID);
+  // The pinned backend checks allocation but ignores upload/configuration
+  // results.
+  const auto uploaded =
+      created && texture != nullptr &&
+      SDL_UpdateTexture(texture, nullptr, atlas.TexPixelsRGBA32,
+                        atlas.TexWidth * 4) &&
+      SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) &&
+      SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+  if (uploaded) {
+    return true;
+  }
+  const auto reason = std::string(SDL_GetError());
+  const auto message =
+      "Could not upload the font atlas (" + std::to_string(atlas.TexWidth) +
+      " x " + std::to_string(atlas.TexHeight) + ") to the " +
+      SDL_GetRendererName(renderer_) + " renderer. " +
+      (reason.empty() ? "Font rasterization or texture creation failed."
+                      : reason) +
+      " Reduce UI/editor font sizes in settings.liquid and restart liquify. "
+      "If this persists, include this message and display scale in a bug "
+      "report.";
+  ImGui_ImplSDLRenderer3_DestroyFontsTexture();
+  return fail_rendering(message);
 }
 
 void App::apply_theme() {
@@ -2046,165 +2101,172 @@ void App::capture_screenshot() {
 }
 
 bool App::confirm_discard(std::string_view action, bool active_only) {
-    auto dirty = std::vector<EditorBuffer*>{};
-    auto message = std::string{"Save changes before continuing?\n\n"};
-    for (auto& [path, open] : open_buffers_) {
-        if (open.buffer->dirty() && (!active_only || open.buffer.get() == editor_)) {
-            dirty.push_back(open.buffer.get());
-            message += path + "\n";
-        }
+  auto dirty = std::vector<EditorBuffer *>{};
+  auto message = std::string{"Save changes before continuing?\n\n"};
+  for (auto &[path, open] : open_buffers_) {
+    if (open.buffer->dirty() &&
+        (!active_only || open.buffer.get() == editor_)) {
+      dirty.push_back(open.buffer.get());
+      message += path + "\n";
     }
-    if (dirty.empty()) {
-        return true;
-    }
-    if (!window_) {
-        editor_status_ = "a native window is required to confirm unsaved changes";
-        return false;
-    }
-    const SDL_MessageBoxButtonData buttons[] = {
-        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Save"},
-        {0, 2, "Discard"},
-        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel"},
-    };
-    const auto title = std::string(action);
-    const SDL_MessageBoxData dialog = {SDL_MESSAGEBOX_WARNING,
-                                       window_,
-                                       title.c_str(),
-                                       message.c_str(),
-                                       static_cast<int>(std::size(buttons)),
-                                       buttons,
-                                       nullptr};
-    auto selected = 0;
-    if (!SDL_ShowMessageBox(&dialog, &selected)) {
-        editor_status_ = std::string{"unable to confirm unsaved changes: "} + SDL_GetError();
-        return false;
-    }
-    if (selected == 2) {
-        return true;
-    }
-    if (selected != 1) {
-        return false;
-    }
-    for (auto* buffer : dirty) {
-        if (!save_buffer(*buffer)) {
-            const auto error = std::string(buffer->display_path()) + ": " + editor_status_;
-            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Save failed", error.c_str(), window_);
-            return false;
-        }
-    }
+  }
+  if (dirty.empty()) {
     return true;
+  }
+  if (!window_) {
+    editor_status_ = "a native window is required to confirm unsaved changes";
+    return false;
+  }
+  const SDL_MessageBoxButtonData buttons[] = {
+      {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Save"},
+      {0, 2, "Discard"},
+      {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Cancel"},
+  };
+  const auto title = std::string(action);
+  const SDL_MessageBoxData dialog = {SDL_MESSAGEBOX_WARNING,
+                                     window_,
+                                     title.c_str(),
+                                     message.c_str(),
+                                     static_cast<int>(std::size(buttons)),
+                                     buttons,
+                                     nullptr};
+  auto selected = 0;
+  if (!SDL_ShowMessageBox(&dialog, &selected)) {
+    editor_status_ =
+        std::string{"unable to confirm unsaved changes: "} + SDL_GetError();
+    return false;
+  }
+  if (selected == 2) {
+    return true;
+  }
+  if (selected != 1) {
+    return false;
+  }
+  for (auto *buffer : dirty) {
+    if (!save_buffer(*buffer)) {
+      const auto error =
+          std::string(buffer->display_path()) + ": " + editor_status_;
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Save failed",
+                               error.c_str(), window_);
+      return false;
+    }
+  }
+  return true;
 }
 
 void App::close_editor() {
-    if (!editor_ || !confirm_discard("Close file", true)) {
-        return;
-    }
-    const auto path = std::string(editor_->display_path());
-    auto* closing = editor_;
-    if (editor_graph_ && !review_diff_open_) {
-        editor_graph_->close_buffer(std::filesystem::path(path));
-    }
-    editor_ = nullptr;
-    const auto found = open_buffers_.find(path);
-    if (found != open_buffers_.end() && found->second.buffer.get() == closing) {
-        open_buffers_.erase(found);
-    }
-    transient_editor_.reset();
-    layouts_.reset();
-    text_layer_.reset();
-    analysis_buffer_open_ = false;
-    analysis_text_.clear();
-    review_diff_open_ = false;
-    editor_focused_ = false;
-    if (!open_buffers_.empty()) {
-        open_editor(open_buffers_.begin()->first, "retained");
-    }
+  if (!editor_ || !confirm_discard("Close file", true)) {
+    return;
+  }
+  const auto path = std::string(editor_->display_path());
+  auto *closing = editor_;
+  if (editor_graph_ && !review_diff_open_) {
+    editor_graph_->close_buffer(std::filesystem::path(path));
+  }
+  editor_ = nullptr;
+  const auto found = open_buffers_.find(path);
+  if (found != open_buffers_.end() && found->second.buffer.get() == closing) {
+    open_buffers_.erase(found);
+  }
+  transient_editor_.reset();
+  layouts_.reset();
+  text_layer_.reset();
+  analysis_buffer_open_ = false;
+  analysis_text_.clear();
+  review_diff_open_ = false;
+  editor_focused_ = false;
+  if (!open_buffers_.empty()) {
+    open_editor(open_buffers_.begin()->first, "retained");
+  }
 }
 
 void App::request_quit() {
-    if (confirm_discard("Quit liquify")) {
-        quit_ = true;
-    }
+  if (confirm_discard("Quit liquify")) {
+    quit_ = true;
+  }
 }
 
 void App::undo_editor(bool redo) {
-    if (!editor_ || review_diff_open_ || !editor_mutation_allowed()) {
-        return;
-    }
-    const auto change = redo ? editor_->redo() : editor_->undo();
-    if (change) {
-        apply_change(change->first_line, change->erased_lines, change->inserted_lines);
-    }
+  if (!editor_ || review_diff_open_ || !editor_mutation_allowed()) {
+    return;
+  }
+  const auto change = redo ? editor_->redo() : editor_->undo();
+  if (change) {
+    apply_change(change->first_line, change->erased_lines,
+                 change->inserted_lines);
+  }
 }
 
-void App::refresh_saved_buffer(const std::string& path) {
-    const auto found = open_buffers_.find(path);
-    if (found == open_buffers_.end() || found->second.buffer->dirty() ||
-        !options_.repository_path) {
-        return;
+void App::refresh_saved_buffer(const std::string &path) {
+  const auto found = open_buffers_.find(path);
+  if (found == open_buffers_.end() || found->second.buffer->dirty() ||
+      !options_.repository_path) {
+    return;
+  }
+  auto loaded =
+      EditorBuffer::open(*options_.repository_path, path, "saved:" + path);
+  if (!loaded.error().empty()) {
+    editor_status_ = std::string(loaded.error());
+    return;
+  }
+  auto &buffer = *found->second.buffer;
+  const auto change = buffer.refresh_saved_text(loaded.text());
+  if (change && &buffer == editor_) {
+    apply_change(change->first_line, change->erased_lines,
+                 change->inserted_lines);
+  } else if (change && editor_graph_) {
+    const auto language = stub_language_for_path(path);
+    if (language) {
+      editor_graph_->open_buffer(path, *language, buffer.text());
     }
-    auto loaded = EditorBuffer::open(*options_.repository_path, path, "saved:" + path);
-    if (!loaded.error().empty()) {
-        editor_status_ = std::string(loaded.error());
-        return;
-    }
-    auto& buffer = *found->second.buffer;
-    const auto change = buffer.refresh_saved_text(loaded.text());
-    if (change && &buffer == editor_) {
-        apply_change(change->first_line, change->erased_lines, change->inserted_lines);
-    } else if (change && editor_graph_) {
-        const auto language = stub_language_for_path(path);
-        if (language) {
-            editor_graph_->open_buffer(path, *language, buffer.text());
-        }
-    }
+  }
 }
 
 void App::remember_editor_view() {
-    if (!editor_) {
-        return;
-    }
-    const auto found = open_buffers_.find(std::string(editor_->display_path()));
-    if (found != open_buffers_.end() && found->second.buffer.get() == editor_) {
-        found->second.scroll_line = scroll_line_;
-        found->second.horizontal_scroll = horizontal_scroll_;
-    }
+  if (!editor_) {
+    return;
+  }
+  const auto found = open_buffers_.find(std::string(editor_->display_path()));
+  if (found != open_buffers_.end() && found->second.buffer.get() == editor_) {
+    found->second.scroll_line = scroll_line_;
+    found->second.horizontal_scroll = horizontal_scroll_;
+  }
 }
 
 void App::open_editor(std::string path, std::string blob_id,
                       bool record_history) {
-    if (!options_.repository_path) {
-        return;
+  if (!options_.repository_path) {
+    return;
+  }
+  path = std::filesystem::path(path).lexically_normal().generic_string();
+  auto found = open_buffers_.find(path);
+  if (found != open_buffers_.end() && found->second.buffer.get() == editor_) {
+    repository_focused_ = false;
+    editor_focused_ = true;
+    return;
+  }
+  if (found == open_buffers_.end()) {
+    auto buffer = std::make_unique<EditorBuffer>(EditorBuffer::open(
+        *options_.repository_path, path, std::move(blob_id)));
+    if (!buffer->error().empty()) {
+      editor_status_ = std::string(buffer->error());
+      return;
     }
-    path = std::filesystem::path(path).lexically_normal().generic_string();
-    auto found = open_buffers_.find(path);
-    if (found != open_buffers_.end() && found->second.buffer.get() == editor_) {
-        repository_focused_ = false;
-        editor_focused_ = true;
-        return;
+    found = open_buffers_.emplace(path, OpenBuffer{std::move(buffer)}).first;
+  }
+  remember_editor_view();
+  if (record_history) {
+    if (const auto current = current_navigation_location()) {
+      navigation_history_.replace_current(*current);
     }
-    if (found == open_buffers_.end()) {
-        auto buffer = std::make_unique<EditorBuffer>(
-            EditorBuffer::open(*options_.repository_path, path, std::move(blob_id)));
-        if (!buffer->error().empty()) {
-            editor_status_ = std::string(buffer->error());
-            return;
-        }
-        found = open_buffers_.emplace(path, OpenBuffer{std::move(buffer)}).first;
-    }
-    remember_editor_view();
-    if (record_history) {
-        if (const auto current = current_navigation_location()) {
-            navigation_history_.replace_current(*current);
-        }
   }
   editor_ = found->second.buffer.get();
   const auto cursor = editor_->cursor();
   const auto location = NavigationLocation{path, cursor.line, cursor.byte};
   if (record_history) {
-      navigation_history_.visit(location);
+    navigation_history_.visit(location);
   } else {
-      navigation_history_.replace_current(location);
+    navigation_history_.replace_current(location);
   }
   repository_focused_ = false;
   analysis_buffer_open_ = false;
@@ -2267,8 +2329,9 @@ void App::open_navigation_location(const NavigationLocation &location,
   }
   open_editor(location.path.generic_string(), std::move(blob), record_history);
   if (!editor_ || !editor_->error().empty() ||
-      editor_->display_path() != location.path.lexically_normal().generic_string()) {
-      return;
+      editor_->display_path() !=
+          location.path.lexically_normal().generic_string()) {
+    return;
   }
   editor_->set_cursor({static_cast<std::size_t>(location.line),
                        static_cast<std::size_t>(location.column)});
@@ -2431,8 +2494,8 @@ void App::show_review_diff(const ReviewSnapshot &review) {
     text += review_diff_lines_[index].text;
   }
   const auto title = "Review " + review.selected->id + " — text diff";
-  transient_editor_ = std::make_unique<EditorBuffer>(
-      EditorBuffer::from_text("review:" + review.selected->id, title, std::move(text)));
+  transient_editor_ = std::make_unique<EditorBuffer>(EditorBuffer::from_text(
+      "review:" + review.selected->id, title, std::move(text)));
   editor_ = transient_editor_.get();
   layouts_ = std::make_unique<TextLayoutCache>();
   layouts_->reset(std::string(editor_->blob_id()), editor_->line_count());
@@ -2610,61 +2673,64 @@ void App::apply_change(std::size_t first_line, std::size_t erased_lines,
 }
 
 void App::save_editor() {
-    if (editor_ && !review_diff_open_) {
-        static_cast<void>(save_buffer(*editor_));
-    }
+  if (editor_ && !review_diff_open_) {
+    static_cast<void>(save_buffer(*editor_));
+  }
 }
 
-bool App::save_buffer(EditorBuffer& buffer) {
-    if (settings_.editor.format_on_save &&
-        std::filesystem::path(buffer.display_path()).extension() == ".liquid") {
-        auto document = liquid::parse_configuration(buffer.text(), buffer.display_path());
-        if (!document) {
-            editor_status_ = document.error().message;
-            return false;
-        }
-        auto formatted = liquid::format_configuration(*document);
-        if (!formatted) {
-            editor_status_ = formatted.error().message;
-            return false;
-        }
-        if (*formatted != buffer.text()) {
-            buffer.select_all();
-            const auto change = buffer.insert_text(*formatted);
-            if (change && &buffer == editor_) {
-                apply_change(change->first_line, change->erased_lines, change->inserted_lines);
-            }
-        }
+bool App::save_buffer(EditorBuffer &buffer) {
+  if (settings_.editor.format_on_save &&
+      std::filesystem::path(buffer.display_path()).extension() == ".liquid") {
+    auto document =
+        liquid::parse_configuration(buffer.text(), buffer.display_path());
+    if (!document) {
+      editor_status_ = document.error().message;
+      return false;
     }
-    const auto build_running = editor_graph_ && editor_graph_->snapshot().build_running;
-    auto saved = false;
-    if (options_.repository_path) {
-        auto repository_options = liquid::repository_options{};
-        repository_options.session = multiplayer_session_;
-        auto repository = liquid::runtime::block_on(
-            liquid::repository::open(*options_.repository_path, repository_options));
-        if (!repository) {
-            editor_status_ = repository.error().message;
-            return false;
-        }
-        saved = buffer.save(*repository);
-    } else {
-        saved = buffer.save();
+    auto formatted = liquid::format_configuration(*document);
+    if (!formatted) {
+      editor_status_ = formatted.error().message;
+      return false;
     }
-    if (!saved) {
-        editor_status_ = std::string(buffer.error());
-        return false;
+    if (*formatted != buffer.text()) {
+      buffer.select_all();
+      const auto change = buffer.insert_text(*formatted);
+      if (change && &buffer == editor_) {
+        apply_change(change->first_line, change->erased_lines,
+                     change->inserted_lines);
+      }
     }
-    editor_status_ = "saved as a drip";
-    if (editor_graph_) {
-        editor_graph_->note_saved_drip(buffer.pending_drips());
-        editor_graph_->refresh_status();
-        if (build_running) {
-            request_build();
-            editor_status_ = "saved as a drip; build replanned";
-        }
+  }
+  const auto build_running =
+      editor_graph_ && editor_graph_->snapshot().build_running;
+  auto saved = false;
+  if (options_.repository_path) {
+    auto repository_options = liquid::repository_options{};
+    repository_options.session = multiplayer_session_;
+    auto repository = liquid::runtime::block_on(liquid::repository::open(
+        *options_.repository_path, repository_options));
+    if (!repository) {
+      editor_status_ = repository.error().message;
+      return false;
     }
-    return true;
+    saved = buffer.save(*repository);
+  } else {
+    saved = buffer.save();
+  }
+  if (!saved) {
+    editor_status_ = std::string(buffer.error());
+    return false;
+  }
+  editor_status_ = "saved as a drip";
+  if (editor_graph_) {
+    editor_graph_->note_saved_drip(buffer.pending_drips());
+    editor_graph_->refresh_status();
+    if (build_running) {
+      request_build();
+      editor_status_ = "saved as a drip; build replanned";
+    }
+  }
+  return true;
 }
 
 void App::sync_editor_graph() {
@@ -3059,8 +3125,8 @@ void App::poll_editor_graph() {
                        " refused=" + std::to_string(refused);
       structural_preview_open_ = false;
       structural_preview_.clear();
-      for (const auto& item : snapshot.structural_result->applied) {
-          refresh_saved_buffer(item.path.generic_string());
+      for (const auto &item : snapshot.structural_result->applied) {
+        refresh_saved_buffer(item.path.generic_string());
       }
     }
   }
@@ -3238,12 +3304,12 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
   const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
   const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
   if (command_matches(settings_, "file.close", "Primary+W", key, modifiers)) {
-      close_editor();
-      return;
+    close_editor();
+    return;
   }
   if (primary && key == SDLK_Q) {
-      request_quit();
-      return;
+    request_quit();
+    return;
   }
   if (command_matches(settings_, "settings.open", "Primary+,", key,
                       modifiers)) {
@@ -3357,8 +3423,8 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     return;
   }
   if (primary && key == SDLK_Z) {
-      undo_editor(shift);
-      return;
+    undo_editor(shift);
+    return;
   }
   if (primary && key == SDLK_L) {
     editor_->select(SelectionKind::line);
@@ -5280,6 +5346,17 @@ void App::draw_editor() {
   visible_lines_ =
       std::max<std::size_t>(1, static_cast<std::size_t>(size.y / line_height_));
   editor_visible_ = true;
+  draw_list->PushClipRect(
+      position, ImVec2(position.x + size.x, position.y + size.y), true);
+  draw_list->AddCallback(
+      [](const ImDrawList *, const ImDrawCmd *command) {
+        auto *app = static_cast<App *>(command->UserCallbackData);
+        const auto clip = command->ClipRect;
+        app->render_editor({clip.x, clip.y, clip.z - clip.x, clip.w - clip.y});
+      },
+      this);
+  draw_list->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+  draw_list->PopClipRect();
   const auto item_focused = ImGui::IsItemFocused();
   if (item_focused) {
     editor_focused_ = true;
@@ -6403,20 +6480,11 @@ void App::draw_contents() {
                     ImGuiChildFlags_Border);
   draw_status_bar();
   ImGui::EndChild();
-
-  draw_floating_panels();
-  draw_command_palette();
-  draw_navigation_popups();
-  draw_repository_action_popup();
-  draw_navigation_results();
-  draw_settings();
-  draw_review_comment_popup();
-  draw_structural_editing();
 }
 
-void App::render_editor() {
-  if (settings_popup_visible_ || !editor_visible_ || !editor_ ||
-      editor_width_ <= 0.0F || editor_height_ <= 0.0F) {
+void App::render_editor(InputRectangle clip_bounds) {
+  if (!editor_visible_ || !editor_ || editor_width_ <= 0.0F ||
+      editor_height_ <= 0.0F) {
     return;
   }
   const auto maximum_scroll = editor_->line_count() > visible_lines_
@@ -6424,14 +6492,11 @@ void App::render_editor() {
                                   : 0;
   scroll_line_ = std::min(scroll_line_, maximum_scroll);
 
-  float old_scale_x = 1.0F;
-  float old_scale_y = 1.0F;
-  SDL_GetRenderScale(renderer_, &old_scale_x, &old_scale_y);
-  const auto framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale;
-  SDL_SetRenderScale(renderer_, framebuffer_scale.x, framebuffer_scale.y);
-  const SDL_Rect clip{static_cast<int>(editor_x_), static_cast<int>(editor_y_),
-                      static_cast<int>(editor_width_),
-                      static_cast<int>(editor_height_)};
+  const SDL_Rect clip{
+      static_cast<int>(std::ceil(clip_bounds.x)),
+      static_cast<int>(std::ceil(clip_bounds.y)),
+      std::max(0, static_cast<int>(std::floor(clip_bounds.width))),
+      std::max(0, static_cast<int>(std::floor(clip_bounds.height)))};
   SDL_SetRenderClipRect(renderer_, &clip);
   const auto graph_snapshot =
       editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
@@ -6502,11 +6567,9 @@ void App::render_editor() {
       editor_y_, editor_width_, editor_height_, scroll_line_, line_height_,
       cell_width_, horizontal_scroll_, review_lines, comment_lines,
       settings_.editor.whitespace);
-  SDL_SetRenderClipRect(renderer_, nullptr);
-  SDL_SetRenderScale(renderer_, old_scale_x, old_scale_y);
 }
 
-void App::frame() {
+void App::frame(bool present) {
   poll_repository_lifecycle();
   poll_sign_in();
   poll_editor_graph();
@@ -6524,13 +6587,20 @@ void App::frame() {
   }
   update_window_title();
   poll_multiplayer();
-  if (fonts_rebuild_requested_) {
+  ImGui_ImplSDL3_NewFrame();
+  const auto framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale;
+  const auto density =
+      std::max({framebuffer_scale.x, framebuffer_scale.y, 1.0F});
+  if (fonts_rebuild_requested_ || density != display_scale_) {
     ImGui_ImplSDLRenderer3_DestroyFontsTexture();
+    display_scale_ = density;
     load_font_atlas(display_scale_);
     fonts_rebuild_requested_ = false;
+    if (!upload_font_atlas()) {
+      return;
+    }
   }
   ImGui_ImplSDLRenderer3_NewFrame();
-  ImGui_ImplSDL3_NewFrame();
   if (screenshot_mode()) {
     ImGui::GetIO().DeltaTime = 1.0F;
   }
@@ -6545,6 +6615,14 @@ void App::frame() {
                    ImGuiWindowFlags_NoSavedSettings);
   draw_contents();
   ImGui::End();
+  draw_floating_panels();
+  draw_command_palette();
+  draw_navigation_popups();
+  draw_repository_action_popup();
+  draw_navigation_results();
+  draw_settings();
+  draw_review_comment_popup();
+  draw_structural_editing();
 
   ImGui::Render();
   const auto palette =
@@ -6555,15 +6633,24 @@ void App::frame() {
       static_cast<std::uint8_t>(palette.canvas.blue * 255.0F),
       static_cast<std::uint8_t>(palette.canvas.alpha * 255.0F));
   SDL_RenderClear(renderer_);
+  // All vertices, clipping and input are logical; SDL applies the drawable
+  // ratio once.
+  if (!SDL_SetRenderScale(renderer_, framebuffer_scale.x,
+                          framebuffer_scale.y)) {
+    fail_rendering("Could not set the window drawable scale: " +
+                   std::string(SDL_GetError()));
+    return;
+  }
   ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
-  render_editor();
   if (screenshot_mode()) {
     ++screenshot_frames_rendered_;
     if (screenshot_frames_rendered_ >= 2) {
       capture_screenshot();
     }
   }
-  SDL_RenderPresent(renderer_);
+  if (present) {
+    SDL_RenderPresent(renderer_);
+  }
 }
 
 void App::prepare_smoke_frame(int frame) {
@@ -6608,11 +6695,11 @@ int App::run() {
     while (SDL_PollEvent(&event)) {
       ImGui_ImplSDL3_ProcessEvent(&event);
       if (event.type == SDL_EVENT_QUIT) {
-          request_quit();
+        request_quit();
       }
       if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
           event.window.windowID == SDL_GetWindowID(window_)) {
-          request_quit();
+        request_quit();
       }
       if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED &&
           event.window.windowID == SDL_GetWindowID(window_)) {
@@ -6655,11 +6742,11 @@ int App::run() {
       if (event.type == SDL_EVENT_USER) {
         switch (event.user.code) {
         case menu_close:
-            close_editor();
-            break;
+          close_editor();
+          break;
         case menu_quit:
-            request_quit();
-            break;
+          request_quit();
+          break;
         case menu_save:
           save_editor();
           break;
@@ -6751,11 +6838,11 @@ int App::run() {
       }
 #endif
       if (quit_) {
-          break;
+        break;
       }
     }
     if (quit_) {
-        break;
+      break;
     }
 
     prepare_smoke_frame(frames);
@@ -6776,13 +6863,13 @@ int App::run() {
 
     ++frames;
     if (options_.max_frames > 0 && frames >= options_.max_frames) {
-        break;
+      break;
     }
   }
   if (options_.smoke) {
     print_smoke_metrics();
   }
-  return screenshot_failed_ ? 1 : 0;
+  return screenshot_failed_ || rendering_failed_ ? 1 : 0;
 }
 
 void App::shutdown() {
@@ -6809,76 +6896,419 @@ void App::shutdown() {
 
 #ifdef LIQUIFY_NATIVE_BUFFER_REGRESSION
 void NativeBufferRegression::text(std::string_view value) {
-    auto event = SDL_Event{};
-    event.type = SDL_EVENT_TEXT_INPUT;
-    event.text.text = value.data();
-    SDL_PushEvent(&event);
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_TEXT_INPUT;
+  event.text.text = value.data();
+  SDL_PushEvent(&event);
 }
 
 void NativeBufferRegression::key(char value, bool shift) {
-    auto event = SDL_Event{};
-    event.type = SDL_EVENT_KEY_DOWN;
-    event.key.key = static_cast<SDL_Keycode>(value);
-    event.key.mod = SDL_KMOD_GUI;
-    if (shift) {
-        event.key.mod |= SDL_KMOD_SHIFT;
-    }
-    SDL_PushEvent(&event);
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_KEY_DOWN;
+  event.key.key = static_cast<SDL_Keycode>(value);
+  event.key.mod = SDL_KMOD_GUI;
+  if (shift) {
+    event.key.mod |= SDL_KMOD_SHIFT;
+  }
+  SDL_PushEvent(&event);
 }
 
-void NativeBufferRegression::close_window(App& app) {
-    auto event = SDL_Event{};
-    event.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
-    event.window.windowID = SDL_GetWindowID(app.window_);
-    SDL_PushEvent(&event);
+void NativeBufferRegression::close_window(App &app) {
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+  event.window.windowID = SDL_GetWindowID(app.window_);
+  SDL_PushEvent(&event);
 }
 
-void NativeBufferRegression::describe_window(App& app) {
-    std::printf("Native window: driver=%s scale=%.1f visible=%s\n",
-                SDL_GetCurrentVideoDriver(),
-                SDL_GetWindowDisplayScale(app.window_),
-                (SDL_GetWindowFlags(app.window_) & SDL_WINDOW_HIDDEN) ? "no" : "yes");
+void NativeBufferRegression::describe_window(App &app) {
+  std::printf(
+      "Native window: driver=%s scale=%.1f visible=%s\n",
+      SDL_GetCurrentVideoDriver(), SDL_GetWindowDisplayScale(app.window_),
+      (SDL_GetWindowFlags(app.window_) & SDL_WINDOW_HIDDEN) ? "no" : "yes");
 }
 
 void NativeBufferRegression::answer_dialog(std::string_view label) {
-    const auto separator = label.find('|');
-    const auto remaining = separator == std::string_view::npos
-                               ? std::string{}
-                               : std::string(label.substr(separator + 1));
-    label = label.substr(0, separator);
-    auto* title = [[NSString alloc] initWithBytes:label.data()
-                                           length:label.size()
-                                         encoding:NSUTF8StringEncoding];
-    // Click the actual native alert button after the modal run loop starts.
-    dispatch_after(
-        dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-          auto* modal = [NSApp modalWindow];
-          auto* pending = [NSMutableArray array];
-          if (modal != nil) {
-              [pending addObject:[modal contentView]];
-              if ([modal attachedSheet] != nil) {
-                  [pending addObject:[[modal attachedSheet] contentView]];
-              }
+  const auto separator = label.find('|');
+  const auto remaining = separator == std::string_view::npos
+                             ? std::string{}
+                             : std::string(label.substr(separator + 1));
+  label = label.substr(0, separator);
+  auto *title = [[NSString alloc] initWithBytes:label.data()
+                                         length:label.size()
+                                       encoding:NSUTF8StringEncoding];
+  // Click the actual native alert button after the modal run loop starts.
+  dispatch_after(
+      dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC),
+      dispatch_get_main_queue(), ^{
+        auto *modal = [NSApp modalWindow];
+        auto *pending = [NSMutableArray array];
+        if (modal != nil) {
+          [pending addObject:[modal contentView]];
+          if ([modal attachedSheet] != nil) {
+            [pending addObject:[[modal attachedSheet] contentView]];
           }
-          while ([pending count] != 0) {
-              NSView* view = [pending lastObject];
-              [pending removeLastObject];
-              if ([view isKindOfClass:[NSButton class]] &&
-                  [[(NSButton*)view title] isEqualToString:title]) {
-                  std::printf("Native dialog: clicked %s\n", [title UTF8String]);
-                  if (!remaining.empty()) {
-                      answer_dialog(remaining);
-                  }
-                  [(NSButton*)view performClick:nil];
-                  [title release];
-                  return;
-              }
-              [pending addObjectsFromArray:[view subviews]];
+        }
+        while ([pending count] != 0) {
+          NSView *view = [pending lastObject];
+          [pending removeLastObject];
+          if ([view isKindOfClass:[NSButton class]] &&
+              [[(NSButton *)view title] isEqualToString:title]) {
+            std::printf("Native dialog: clicked %s\n", [title UTF8String]);
+            if (!remaining.empty()) {
+              answer_dialog(remaining);
+            }
+            [(NSButton *)view performClick:nil];
+            [title release];
+            return;
           }
-          std::fprintf(stderr, "FAIL: native dialog button %s was not found\n", [title UTF8String]);
-          [title release];
-          std::exit(1);
-        });
+          [pending addObjectsFromArray:[view subviews]];
+        }
+        std::fprintf(stderr, "FAIL: native dialog button %s was not found\n",
+                     [title UTF8String]);
+        [title release];
+        std::exit(1);
+      });
+}
+#endif
+
+#ifdef LIQUIFY_NATIVE_WINDOW_TESTS
+// The display test stays here to preserve the single SDL/ImGui translation
+// unit.
+class NativeWindowTest {
+public:
+  static int run(const std::filesystem::path &output, bool high_density) {
+    try {
+      App app({.forced_theme = ThemePreference::light});
+      require(app.init_window(high_density),
+              "native window initialization failed");
+      require(std::string_view(SDL_GetCurrentVideoDriver()) != "dummy",
+              "native proof requires a desktop video driver");
+      require(std::string_view(SDL_GetRendererName(app.renderer_)) !=
+                  "software",
+              "native proof requires a GPU renderer");
+      app.reset_panel_layout();
+      for (const auto panel :
+           app.panels_.panels_at(PanelPlacement::editor_tab)) {
+        app.panels_.set_visible(panel, false);
+      }
+      ImGui::GetIO().ConfigInputTextCursorBlink = false;
+      SDL_SetWindowSize(app.window_, 1280, 800);
+      SDL_SyncWindow(app.window_);
+      app.shell_state_.bottom_panel_visible = false;
+      app.shell_state_.editor_split = false;
+      app.shell_state_.sidebar_visible = true;
+      // #54: The native renderer test uses the screenshot suite's in-memory
+      // source fixture. An external liquid CLI can produce a newer store
+      // format than the libliquid pin, and repository loading is outside this
+      // rendering regression.
+      app.first_run_.repository_opened(
+          {.path = "native-window-fixture", .name = "native-window-fixture"});
+      auto source = screenshot_text();
+      for (int line = 0; line < 100; ++line) {
+        source += "// Native window rendering: " + std::string(180, 'M') + "\n";
+      }
+      app.transient_editor_ =
+          std::make_unique<EditorBuffer>(EditorBuffer::from_text(
+              "native-window-source", "src/main.cpp", source));
+      app.editor_ = app.transient_editor_.get();
+      app.layouts_ = std::make_unique<TextLayoutCache>();
+      app.layouts_->reset(std::string(app.editor_->blob_id()),
+                          app.editor_->line_count());
+      app.text_layer_ = std::make_unique<RetainedTextLayer>();
+      app.text_layer_->reset(app.editor_->line_count());
+      app.editor_focused_ = true;
+      const auto prefix = output / (high_density ? "density-2" : "density-1");
+      capture(app);
+      focus_source_tab(app);
+      auto image = capture(app);
+      save(prefix.string() + "-editor.png", image);
+      const auto scale = ImGui::GetIO().DisplayFramebufferScale;
+#if defined(__APPLE__)
+      require(scale.x == (high_density ? 2.0F : 1.0F),
+              "macOS proof requires an actual scale-2 display and a density-1 "
+              "control window");
+#endif
+      check_geometry(app, image, "initial");
+      check_hit(app);
+      SDL_SetWindowSize(app.window_, 1510, 930);
+      SDL_SyncWindow(app.window_);
+      image = capture(app);
+      save(prefix.string() + "-resized.png", image);
+      check_geometry(app, image, "resized");
+      check_hit(app);
+      app.settings_.fonts.ui_size = 16;
+      app.settings_.fonts.editor_size = 16;
+      app.apply_settings_live(true);
+      image = capture(app);
+      save(prefix.string() + "-fonts.png", image);
+      check_geometry(app, image, "font rebuild");
+      check_hit(app);
+      check_displays(app);
+      check_overlays(app, prefix);
+      return 0;
+    } catch (const std::exception &error) {
+      std::fprintf(stderr, "native-window: FAIL %s\n", error.what());
+      return 1;
+    }
+  }
+
+private:
+  static void require(bool condition, const std::string &message) {
+    if (!condition) {
+      throw std::runtime_error(message);
+    }
+  }
+
+  static ScreenshotImage capture(App &app) {
+    for (int frame = 0; frame < 5; ++frame) {
+      SDL_Event event;
+      while (SDL_PollEvent(&event)) {
+        ImGui_ImplSDL3_ProcessEvent(&event);
+      }
+      app.frame(false);
+      if (frame < 4) {
+        SDL_RenderPresent(app.renderer_);
+        SDL_Delay(20);
+      }
+    }
+    auto *pixels = SDL_RenderReadPixels(app.renderer_, nullptr);
+    require(pixels != nullptr, "native framebuffer readback failed");
+    auto *rgba = SDL_ConvertSurface(pixels, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(pixels);
+    require(rgba != nullptr, "native framebuffer conversion failed");
+    ScreenshotImage image;
+    image.width = rgba->w;
+    image.height = rgba->h;
+    const auto *data = static_cast<const std::uint8_t *>(rgba->pixels);
+    for (int row = 0; row < rgba->h; ++row) {
+      image.rgba.insert(image.rgba.end(), data + row * rgba->pitch,
+                        data + row * rgba->pitch + rgba->w * 4);
+    }
+    SDL_DestroySurface(rgba);
+    SDL_RenderPresent(app.renderer_);
+    return image;
+  }
+
+  static void save(const std::filesystem::path &path,
+                   const ScreenshotImage &image) {
+    const auto written = write_png(path, image);
+    require(written.has_value(),
+            "could not write native evidence: " + path.string());
+  }
+
+  static std::size_t dark_pixels(const ScreenshotImage &image, float x, float y,
+                                 float width, float height, ImVec2 scale) {
+    std::size_t count = 0;
+    const auto left = std::max(0, static_cast<int>(x * scale.x));
+    const auto top = std::max(0, static_cast<int>(y * scale.y));
+    const auto right = std::min(static_cast<int>(image.width),
+                                static_cast<int>((x + width) * scale.x));
+    const auto bottom = std::min(static_cast<int>(image.height),
+                                 static_cast<int>((y + height) * scale.y));
+    for (int row = top; row < bottom; ++row) {
+      for (int column = left; column < right; ++column) {
+        const auto offset = (row * image.width + column) * 4;
+        if (image.rgba[offset] < 230 && image.rgba[offset + 1] < 230 &&
+            image.rgba[offset + 2] < 230) {
+          ++count;
+        }
+      }
+    }
+    return count;
+  }
+
+  static void check_geometry(App &app, const ScreenshotImage &image,
+                             const char *stage) {
+    const auto &io = ImGui::GetIO();
+    const auto shell = dark_pixels(image, 700.0F, 35.0F, 180.0F, 40.0F,
+                                   io.DisplayFramebufferScale);
+    const auto editor = dark_pixels(
+        image, app.editor_x_ + app.editor_width_ * 0.65F,
+        app.editor_y_ + app.line_height_ * 15, app.editor_width_ * 0.30F,
+        app.line_height_ * 10, io.DisplayFramebufferScale);
+    std::printf(
+        "native-window: %s renderer=%s logical=%.0fx%.0f drawable=%ux%u "
+        "scale=%.1fx%.1f shell_pixels=%zu editor_pixels=%zu\n",
+        stage, SDL_GetRendererName(app.renderer_), io.DisplaySize.x,
+        io.DisplaySize.y, image.width, image.height,
+        io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y, shell,
+        editor);
+    require(shell > 100,
+            "shell controls missing from the right side of the drawable");
+    require(editor > 100,
+            "source glyphs missing in the right side of the editor");
+  }
+
+  static void check_hit(App &app) {
+    constexpr std::size_t target_line = 15;
+    constexpr auto target_column = 20.2F;
+    const auto &layout =
+        app.layouts_->line(target_line, app.editor_->line(target_line));
+    const auto target_byte = layout.byte_for_column(
+        target_column, app.editor_->line(target_line).size());
+    const auto x = app.editor_x_ + editor_gutter_width + editor_padding +
+                   app.cell_width_ * target_column;
+    const auto y = app.editor_y_ + app.line_height_ * 15.5F;
+    app.position_cursor(x, y, false);
+    const auto cursor = app.editor_->cursor();
+    std::printf("native-window: hit expected=%zu:%zu actual=%zu:%zu "
+                "position=%.1f,%.1f "
+                "scroll=%.1f\n",
+                target_line, target_byte, cursor.line, cursor.byte, x, y,
+                app.horizontal_scroll_);
+    require(cursor.line == target_line && cursor.byte == target_byte,
+            "logical mouse hit did not resolve through the displayed text "
+            "layout");
+  }
+
+  static void focus_source_tab(App &app) {
+    auto &bars = ImGui::GetCurrentContext()->TabBars;
+    for (int index = 0; index < bars.GetMapSize(); ++index) {
+      auto *bar = bars.TryGetMapData(index);
+      if (bar == nullptr) {
+        continue;
+      }
+      for (auto &tab : bar->Tabs) {
+        if (!std::string_view(ImGui::TabBarGetTabName(bar, &tab))
+                 .ends_with("###active-editor")) {
+          continue;
+        }
+        const auto x = bar->BarRect.Min.x + tab.Offset + tab.Width * 0.5F;
+        const auto y = bar->BarRect.GetCenter().y;
+        SDL_Event event{};
+        event.type = SDL_EVENT_MOUSE_MOTION;
+        event.motion.windowID = SDL_GetWindowID(app.window_);
+        event.motion.x = x;
+        event.motion.y = y;
+        SDL_PushEvent(&event);
+        event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        event.button.windowID = SDL_GetWindowID(app.window_);
+        event.button.button = SDL_BUTTON_LEFT;
+        event.button.down = true;
+        event.button.x = x;
+        event.button.y = y;
+        SDL_PushEvent(&event);
+        capture(app);
+        event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        event.button.down = false;
+        SDL_PushEvent(&event);
+        capture(app);
+        require(app.editor_visible_,
+                "source tab click did not expose the editor");
+        return;
+      }
+    }
+    require(false, "source tab was not created");
+  }
+
+  static void check_displays(App &app) {
+    int count = 0;
+    auto *displays = SDL_GetDisplays(&count);
+    require(displays != nullptr, "could not enumerate native displays");
+    for (int index = 0; index < count; ++index) {
+      SDL_SetWindowPosition(app.window_,
+                            SDL_WINDOWPOS_CENTERED_DISPLAY(displays[index]),
+                            SDL_WINDOWPOS_CENTERED_DISPLAY(displays[index]));
+      SDL_SyncWindow(app.window_);
+      const auto image = capture(app);
+      check_geometry(app, image, "display move");
+    }
+    SDL_free(displays);
+  }
+
+  static void replace_buffer(App &app, const std::string &text) {
+    app.transient_editor_ = std::make_unique<EditorBuffer>(
+        EditorBuffer::from_text("native-occlusion", "src/main.cpp", text));
+    app.editor_ = app.transient_editor_.get();
+    app.layouts_->reset("native-occlusion", app.editor_->line_count());
+    app.text_layer_->reset(app.editor_->line_count());
+  }
+
+  static void compare_overlay(const ScreenshotImage &with_source,
+                              const ScreenshotImage &without_source,
+                              std::string_view name, ImVec2 position,
+                              ImVec2 size) {
+    const auto scale = ImGui::GetIO().DisplayFramebufferScale;
+    std::size_t changed = 0;
+    auto first_x = with_source.width;
+    auto first_y = with_source.height;
+    auto last_x = 0U;
+    auto last_y = 0U;
+    for (int y = static_cast<int>((position.y + 80) * scale.y);
+         y < static_cast<int>((position.y + size.y - 30) * scale.y); ++y) {
+      for (int x = static_cast<int>((position.x + 30) * scale.x);
+           x < static_cast<int>((position.x + size.x - 30) * scale.x); ++x) {
+        if (x < 0 || y < 0 || x >= with_source.width ||
+            y >= with_source.height) {
+          continue;
+        }
+        const auto offset = (y * with_source.width + x) * 4;
+        for (int channel = 0; channel < 3; ++channel) {
+          if (with_source.rgba[offset + channel] !=
+              without_source.rgba[offset + channel]) {
+            ++changed;
+            first_x = std::min(first_x, static_cast<std::uint32_t>(x));
+            first_y = std::min(first_y, static_cast<std::uint32_t>(y));
+            last_x = std::max(last_x, static_cast<std::uint32_t>(x));
+            last_y = std::max(last_y, static_cast<std::uint32_t>(y));
+          }
+        }
+      }
+    }
+    if (changed == 0) {
+      std::printf("native-window: overlay=%.*s changed_channels=0\n",
+                  static_cast<int>(name.size()), name.data());
+    } else {
+      std::printf("native-window: overlay=%.*s changed_channels=%zu "
+                  "bounds=%u,%u..%u,%u\n",
+                  static_cast<int>(name.size()), name.data(), changed, first_x,
+                  first_y, last_x, last_y);
+    }
+    require(changed == 0, "retained source paints over " + std::string(name));
+  }
+
+  static void check_overlays(App &app, const std::filesystem::path &prefix) {
+    const auto source = std::string(app.editor_->text());
+    app.command_palette_open_ = true;
+    auto with_source = capture(app);
+    save(prefix.string() + "-palette.png", with_source);
+    auto *window = ImGui::FindWindowByName("Command palette");
+    require(window != nullptr && window->Active,
+            "command palette did not open");
+    const auto palette_position = window->Pos;
+    const auto palette_size = window->Size;
+    replace_buffer(app, "");
+    auto without_source = capture(app);
+    save(prefix.string() + "-palette-empty-editor.png", without_source);
+    compare_overlay(with_source, without_source, "Command palette",
+                    palette_position, palette_size);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+    capture(app);
+    ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+    capture(app);
+    replace_buffer(app, source);
+    app.panels_.move(PanelId::diagnostics, PanelPlacement::floating);
+    app.panels_.update_floating_rect(
+        PanelId::diagnostics,
+        {app.editor_x_ + 10, app.editor_y_ + 30, 600, 350});
+    app.panels_.focus(PanelId::diagnostics);
+    with_source = capture(app);
+    save(prefix.string() + "-floating.png", with_source);
+    window = ImGui::FindWindowByName("Diagnostics###floating-diagnostics");
+    require(window != nullptr && window->Active,
+            "floating diagnostics did not open");
+    const auto floating_position = window->Pos;
+    const auto floating_size = window->Size;
+    replace_buffer(app, "");
+    without_source = capture(app);
+    save(prefix.string() + "-floating-empty-editor.png", without_source);
+    compare_overlay(with_source, without_source, "Floating diagnostics",
+                    floating_position, floating_size);
+  }
+};
+
+int test_native_window(const std::filesystem::path &output, bool high_density) {
+  return NativeWindowTest::run(output, high_density);
 }
 #endif
 

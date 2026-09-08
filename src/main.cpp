@@ -25,7 +25,7 @@
 
 namespace {
 void usage() {
-  std::println("liquify {}", liquify::version_string());
+  std::println("{}", liquify::build_description());
   std::println("  liquify [PATH]              open the IDE, optionally on a "
                "liquid repository");
   std::println("  liquify --lake URL PATH     open repository reviews from a "
@@ -163,8 +163,7 @@ auto run_named_command(std::string_view name) -> int {
     return written == result->size() ? 0 : 1;
   }
   if (name == "help.version") {
-    std::println("liquify {} (libliquid {})", liquify::version_string(),
-                 liquid::version_string());
+    std::println("{}", liquify::build_description());
     return 0;
   }
   if (name == "help.command-reference") {
@@ -250,8 +249,7 @@ int main(int argc, char **argv) {
         std::println(stderr, "liquify: version accepts no other arguments");
         return 2;
       }
-      std::println("liquify {} (libliquid {})", liquify::version_string(),
-                   liquid::version_string());
+      std::println("{}", liquify::build_description());
       return 0;
     }
     if (arg == "--help" || arg == "-h") {
