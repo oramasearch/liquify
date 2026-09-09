@@ -10,7 +10,9 @@
   `CMAKE_CXX_COMPILER` overrides that.
 - OpenSSL (Corosio's TLS) and zlib (automerge-cpp's compression). Linux also needs pkg-config and
   the FUSE3 development files for liquid's VFS.
-- Submodules. liquid at `modules/liquid` is built in-tree, library-only, and linked as
+- Submodules, plus liquid. liquid is **not** a submodule here: it is a sibling module of
+  `liquid-bridge`, resolved by `LIQUIFY_LIQUID_SOURCE_DIR` (default `../liquid`). It is built
+  in-tree, library-only, and linked as
   `liquid::liquid`; it carries nested Capy, Corosio and automerge-cpp submodules. Corosio and
   Boost.HTTP at `modules/corosio` and `modules/http` are the separately pinned assistant transport.
   The tree-sitter runtime and its C and C++ grammars are pinned under `modules/tree-sitter*`.

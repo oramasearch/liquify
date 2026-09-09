@@ -38,13 +38,25 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(LIQUIFY_BUILD_TESTS "Build the test suite" ON)
 option(LIQUIFY_NATIVE_WINDOW_TESTS "Test real windows (requires a desktop session)" ${APPLE})
 
+# liquid is not vendored here. One pin, in liquid-bridge, is the single source of truth;
+# a second submodule pointer in this repo could disagree with it. The default is the
+# sibling checkout in that bridge (../liquid); CI and standalone builds pass the path.
+set(LIQUIFY_LIQUID_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../liquid"
+    CACHE PATH "Path to the liquid source tree providing libliquid")
+if(NOT EXISTS "${LIQUIFY_LIQUID_SOURCE_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR
+    "LIQUIFY_LIQUID_SOURCE_DIR does not contain a liquid source tree: ${LIQUIFY_LIQUID_SOURCE_DIR}\n"
+    "liquid is a sibling module of liquid-bridge, not a submodule of liquify. Build liquify from "
+    "the bridge checkout, or pass -DLIQUIFY_LIQUID_SOURCE_DIR=<path to oramasearch/liquid>.")
+endif()
+
 # Release numbers are provisional; identify the actual IDE and library artifacts.
 find_package(Git REQUIRED)
 foreach(component IN ITEMS LIQUIFY LIQUID)
   if(component STREQUAL "LIQUIFY")
     set(revision_directory "${CMAKE_CURRENT_SOURCE_DIR}")
   else()
-    set(revision_directory "${CMAKE_CURRENT_SOURCE_DIR}/modules/liquid")
+    set(revision_directory "${LIQUIFY_LIQUID_SOURCE_DIR}")
   endif()
   execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
     WORKING_DIRECTORY "${revision_directory}"
@@ -120,7 +132,7 @@ set(LIQUID_BUILD_CLI   OFF CACHE BOOL "" FORCE)
 set(LIQUID_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LIQUID_BUILD_BENCH OFF CACHE BOOL "" FORCE)
 set(LIQUID_GRAMMARS "c;c++" CACHE STRING "" FORCE)
-add_subdirectory(modules/liquid EXCLUDE_FROM_ALL)
+add_subdirectory("${LIQUIFY_LIQUID_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_liquid" EXCLUDE_FROM_ALL)
 
 # -----------------------------------------------------------------------------
 # tree-sitter — pinned parser runtime and generated C/C++ grammars.
@@ -143,7 +155,7 @@ target_link_libraries(tree-sitter-cpp-parser PUBLIC tree-sitter-runtime)
 # liquify
 # -----------------------------------------------------------------------------
 add_library(liquify-core STATIC
-  modules/liquid/src/encoding/cbor.cpp
+  "${LIQUIFY_LIQUID_SOURCE_DIR}/src/encoding/cbor.cpp"
   src/ai_config.cpp
   src/ai_provider.cpp
   src/assistant.cpp
@@ -174,7 +186,7 @@ target_compile_definitions(liquify-core PRIVATE
   LIQUIFY_LIQUID_REVISION="${LIQUID_REVISION}")
 target_include_directories(liquify-core
   PUBLIC include
-  PRIVATE modules/corosio/include modules/http/include modules/liquid/src)
+  PRIVATE modules/corosio/include modules/http/include "${LIQUIFY_LIQUID_SOURCE_DIR}/src")
 target_link_libraries(liquify-core
   PUBLIC liquid::liquid
   PRIVATE Boost::corosio Boost::corosio_openssl Boost::http Boost::json
@@ -193,7 +205,7 @@ set_target_properties(liquify-sample-plugin-objects PROPERTIES
   POSITION_INDEPENDENT_CODE ON
   VISIBILITY_INLINES_HIDDEN ON)
 target_include_directories(liquify-sample-plugin-objects PRIVATE
-  modules/liquid/include plugins/sample)
+  "${LIQUIFY_LIQUID_SOURCE_DIR}/include" plugins/sample)
 add_library(liquify-sample-plugin MODULE $<TARGET_OBJECTS:liquify-sample-plugin-objects>)
 set_target_properties(liquify-sample-plugin PROPERTIES
   PREFIX ""

@@ -27,7 +27,8 @@ reports frame and typing latency, and exits 0. Unreadable local repositories and
 clones have distinct retry states. `liquify --screenshot` renders fixed welcome, recovery,
 repository, navigation, settings, C++ editor, complete editor view and panel registry states in
 light and dark through a headless software renderer, with committed PNG proof and pixel-region
-tests. liquid is pinned at `modules/liquid` through its persisted demand-driven query graph,
+tests. liquid is consumed as a sibling module (`LIQUIFY_LIQUID_SOURCE_DIR`, default `../liquid`)
+through its persisted demand-driven query graph,
 text-anchor mapping, syntax modules, attribution, presence, operation history, and coroutine-native
 forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
@@ -104,10 +105,12 @@ and supported lake revision are recorded in [`docs/build/store-compatibility.md`
 4. **Starting UI stack: SDL3 3.2 + Dear ImGui 1.91 with the SDL_Renderer backend**, the stack
    Zetta's headed mode proves on all three desktop platforms. The retained editor decision is
    recorded below.
-5. **liquify is a client of libliquid.** liquid is a submodule at `modules/liquid`, built
-   library-only and linked as `liquid::liquid`. Everything liquify knows about repositories,
-   drips, builds and search comes through that API; liquify never reimplements it. Bump the pin
-   deliberately (one commit per bump, naming the liquid change it takes).
+5. **liquify is a client of libliquid.** liquid is **not** a submodule here: it is a sibling
+   module of `liquid-bridge`, resolved by `LIQUIFY_LIQUID_SOURCE_DIR` (default `../liquid`),
+   built library-only and linked as `liquid::liquid`. Everything liquify knows about
+   repositories, drips, builds and search comes through that API; liquify never reimplements
+   it. The pin lives in the bridge — bump it there, and move the `ref:` in
+   `.github/workflows/ci.yml` to match.
 6. **The editor buffer is a retained GPU text layer inside Dear ImGui** (Steve, 2026-09-05).
    SDL3 and ImGui remain the shell and panel toolkit; the buffer owns a glyph atlas and cached
    per-blob line layout. This records bridge decision 15 and closes liquify #2's question.
@@ -131,8 +134,9 @@ and supported lake revision are recorded in [`docs/build/store-compatibility.md`
   or daemon wait for liquid's Phases 1 and 4. Until then liquify is a shell.
 - `--smoke` is the display-required self-test; keep it working, and keep `version` and the
   unit tests runnable without a display.
-- `modules/liquid` is a pin, not a working copy: never commit liquid changes from inside
-  liquify. Change liquid in its own repo, push, then bump the pin here.
+- `../liquid` is a shared checkout, not liquify's working copy: never commit liquid changes
+  from inside liquify. Change liquid in its own repo, push, then bump the pin in
+  `liquid-bridge` (and the CI `ref:` here).
 - `src/ai_provider.cpp` is the only liquify network implementation. It uses the separately pinned
   Corosio and Boost.HTTP submodules on liquid's Capy runtime context. Do not add another network
   client or bypass the AI switch.

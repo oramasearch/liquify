@@ -144,7 +144,7 @@ returned its first diagnostic, proving that the diagnostic result did not wait f
 Measured on 2026-09-04 on the same machine as the retained-rendering baseline:
 
 ```text
-$ ./build/liquify-editor-graph-bench modules/liquid build/liquid-editor-measure-repository-2
+$ ./build/liquify-editor-graph-bench ../liquid build/liquid-editor-measure-repository-2
 editor graph: liquid_files=493 root_entries=17 repository_open_ms=221.276 root_read_ms=220.319 edit_to_diagnostic_ms=10.315 diagnostic_before_relink=true
 
 $ ./build/liquify --smoke 3000
@@ -166,7 +166,7 @@ uses the source file bytes as the naive whole-file context. Build benchmarks wit
 Measured on 2026-09-05 on the same machine as the editor measurements above:
 
 ```text
-$ ./build/liquify-ai-context-bench modules/liquid build/ai-context-state
+$ ./build/liquify-ai-context-bench ../liquid build/ai-context-state
 ai context: definition=repository references=20 bytes=3215 whole_file_bytes=275451 percent_of_whole_file=1.16718 assembly_us=69.522
 ```
 
@@ -183,7 +183,7 @@ change, builds the retained-layer diff rows, then maps 200 anchors in
 Measured on 2026-09-06 on the same macOS host as the editor measurements:
 
 ```text
-$ ./build/liquify-review-bench modules/liquid build/review-measure-repository-9-a
+$ ./build/liquify-review-bench ../liquid build/review-measure-repository-9-a
 review: liquid_files=50 diff_lines=9057 open_to_first_hunk_ms=11.377 comments=200 anchor_mapping_ms=3.95042 moved=200 approximate=0 deleted=0
 ```
 
@@ -202,7 +202,7 @@ Measured on 2026-09-06 on the same machine as the editor measurements above. The
 read immediately after the benchmark:
 
 ```text
-$ ./build/liquify-structural-edit-bench modules/liquid build/structural-measure-repository-5
+$ ./build/liquify-structural-edit-bench ../liquid build/structural-measure-repository-5
 structural edit: rename_symbol=unexpected references=667 applied=667 rename_ms=23684.745 extract_lines=36 extract_edits=11 extract_ms=123.852
 $ sysctl -n vm.loadavg
 { 92.44 87.23 82.73 }

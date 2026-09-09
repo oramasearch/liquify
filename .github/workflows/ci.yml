@@ -31,6 +31,17 @@ jobs:
           submodules: recursive
           token: ${{ secrets.ORAMA_SUBMODULES_TOKEN }}
 
+      - name: Check out the liquid source
+        # liquid is a sibling module of liquid-bridge, not a submodule of liquify. The bridge holds
+        # the one pin; bump this ref when the bridge bumps liquid.
+        uses: actions/checkout@v4
+        with:
+          repository: oramasearch/liquid
+          ref: aa60e8788b883f3e041706741650277fd5befdcb
+          path: _external/liquid
+          submodules: recursive
+          token: ${{ secrets.ORAMA_SUBMODULES_TOKEN }}
+
       - name: Install Linux toolchain and SDL dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -116,7 +127,8 @@ jobs:
           CXX: clang++-19
         run: |
           clang++-19 --version
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DLIQUIFY_LIQUID_SOURCE_DIR="${{ github.workspace }}/_external/liquid"
           cmake --build build
           ctest --test-dir build --output-on-failure
           ./build/liquify version
@@ -127,7 +139,8 @@ jobs:
         shell: bash
         run: |
           "$CXX" --version
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DLIQUIFY_LIQUID_SOURCE_DIR="${{ github.workspace }}/_external/liquid"
           cmake --build build
           ctest --test-dir build --output-on-failure
           ./build/liquify version
@@ -162,8 +175,10 @@ jobs:
           }
 
           & 'C:\Program Files\LLVM\bin\clang-cl.exe' --version
+          $liquidDir = '${{ github.workspace }}/_external/liquid' -replace '\\','/'
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
+            -DLIQUIFY_LIQUID_SOURCE_DIR="$liquidDir" `
             -DCMAKE_C_COMPILER='C:/Program Files/LLVM/bin/clang-cl.exe' `
             -DCMAKE_CXX_COMPILER='C:/Program Files/LLVM/bin/clang-cl.exe'
           cmake --build build

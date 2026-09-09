@@ -29,6 +29,8 @@ target_link_libraries(liquify-tests PRIVATE
 add_dependencies(liquify-tests liquify-sample-plugin)
 target_compile_definitions(liquify-tests PRIVATE LIQUIFY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_definitions(liquify-tests PRIVATE
+  LIQUIFY_LIQUID_DIR="${LIQUIFY_LIQUID_SOURCE_DIR}")
+target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_SAMPLE_PLUGIN="$<TARGET_FILE:liquify-sample-plugin>"
@@ -46,16 +48,16 @@ add_executable(liquify-compat-editor compat_editor.cpp)
 target_link_libraries(liquify-compat-editor PRIVATE liquify-core)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(LIQUIFY_COMPAT_CLI "" CACHE FILEPATH "Separately configured and built supported liquid CLI")
-# Read the pinned liquid revision from the submodule rather than repeating it
+# Read the pinned liquid revision from the liquid checkout rather than repeating it
 # here: a literal breaks this test on every deliberate pin bump, which teaches
 # the next person that a red compat test is normal.
 execute_process(
-  COMMAND ${GIT_EXECUTABLE} -C ${PROJECT_SOURCE_DIR}/modules/liquid rev-parse HEAD
+  COMMAND ${GIT_EXECUTABLE} -C "${LIQUIFY_LIQUID_SOURCE_DIR}" rev-parse HEAD
   OUTPUT_VARIABLE LIQUIFY_PINNED_LIQUID_REVISION
   OUTPUT_STRIP_TRAILING_WHITESPACE
   RESULT_VARIABLE LIQUIFY_PINNED_LIQUID_RESULT)
 if(NOT LIQUIFY_PINNED_LIQUID_RESULT EQUAL 0 OR NOT LIQUIFY_PINNED_LIQUID_REVISION)
-  message(FATAL_ERROR "could not read the pinned liquid revision from modules/liquid")
+  message(FATAL_ERROR "could not read the pinned liquid revision from ${LIQUIFY_LIQUID_SOURCE_DIR}")
 endif()
 add_test(NAME liquify-independent-cli-compat
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/independent_cli_compat.py

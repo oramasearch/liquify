@@ -113,7 +113,7 @@ $package = Get-AppxPackage OramaSearch.Liquify
 ## Projection follow-up
 
 Part B remains deferred while liquid #76 and #77 are open. Once both land, a dedicated follow-up
-issue will bump `modules/liquid`, build liquify under `liquid wrap`, replace the platform scripts
+issue will bump the bridge's liquid pin, build liquify under `liquid wrap`, replace the platform scripts
 with `liquid project macos-pkg|msix|appimage` and `liquid sign macos|windows`, and retain this tag
 release workflow. Those projected artifacts will carry liquid provenance. Auto-update, app-store
 submission, Snap, and another installer writer remain outside this issue.
