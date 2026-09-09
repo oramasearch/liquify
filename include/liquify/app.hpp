@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +20,7 @@
 #include "liquify/multiplayer.hpp"
 #include "liquify/navigation.hpp"
 #include "liquify/plugin.hpp"
+#include "liquify/redraw.hpp"
 #include "liquify/review.hpp"
 #include "liquify/settings.hpp"
 #include "liquify/structural_edit.hpp"
@@ -211,7 +213,21 @@ private:
   [[nodiscard]] auto screenshot_mode() const -> bool;
   void shutdown();
 
+  // Ask the run loop for a frame. Safe to call from any thread: it wakes a
+  // blocked SDL_WaitEventTimeout. See docs/ui/redraw.md.
+  void request_repaint();
+  // Whether the loop may sleep, and for how long.
+  [[nodiscard]] auto redraw_inputs() const -> RedrawInputs;
+  // True while the interface is mid-interaction or mid-animation.
+  [[nodiscard]] auto interface_is_busy() const -> bool;
+  // True while any polled future is outstanding.
+  [[nodiscard]] auto async_work_in_flight() const -> bool;
+  // Time until the nearest scheduled refresh.
+  [[nodiscard]] auto until_next_scheduled_refresh() const
+      -> std::chrono::steady_clock::duration;
+
   AppOptions options_;
+  std::atomic<bool> repaint_requested_{true};
   FirstRunState first_run_;
   std::filesystem::path first_run_state_path_;
   std::unique_ptr<RepositoryView> repository_;

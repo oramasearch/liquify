@@ -5,6 +5,9 @@ display. The screenshot path uses SDL's dummy video driver and software renderer
 with a framebuffer scale of one. It uses the token-derived style and embedded IBM Plex atlas,
 static fixture text, and two frames. It reads no repository, clock or network state.
 
+The run loop's redraw policy — when liquify draws and when it waits — is
+[`redraw.md`](redraw.md).
+
 ## Screen registry
 
 Every screen has light and dark variants:
