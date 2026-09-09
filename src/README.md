@@ -12,3 +12,7 @@ artifact and upgrade guidance when that API rejects an unsupported store format,
 unrelated errors. `version.cpp` reports the configured IDE and library revisions. See
 [what the window shows](../docs/ui/what-the-window-shows.md) and
 [store compatibility](../docs/build/store-compatibility.md) for the UI and proof contracts.
+
+`app.cpp` replaces its plain C++ frame layout report each frame, including submitted text bounds
+and all panel placements. Native rendering properties are described in
+[layout properties](../docs/ui/property-tests.md).

@@ -88,7 +88,7 @@ The test starts an ordinary visible `App` window and uses the deterministic scre
 in-memory `src/main.cpp` fixture. It deliberately avoids the current liquid CLI repository path
 because its store-format compatibility is tracked in liquify#54; repository loading is outside
 this rendering regression. It reads the native GPU framebuffer immediately before presenting it,
-checks shell controls and source glyphs on the right, resizes the window, rebuilds fonts, moves
+checks shell controls, source glyphs at reported extremes and panel occupancy, resizes the window, rebuilds fonts, moves
 among attached displays and resolves logical pointer coordinates through the displayed text layout.
 It compares the palette and a floating panel interior with and without source underneath:
 every channel must match. Evidence PNGs are written to `build/tests/native-window/`. On macOS the
@@ -177,3 +177,7 @@ The committed evidence is:
 stable shell pixels; `PanelRegistry` and `AppShellState` tests cover registry behavior,
 repository-local round trips, version 1 migration, reset, and invalid state. The screenshot script
 checks the complete matrix and each capture command reports its dimensions.
+
+The native and Diagnostics screenshot tests share [layout properties](property-tests.md):
+window coverage, glyph extent at drawable scale, editor and panel occupancy, and active tab
+visibility. The same page explains the required frame report and renderer mutation proof.

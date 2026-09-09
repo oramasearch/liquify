@@ -22,6 +22,7 @@
 #include "misc/cpp/imgui_stdlib.h"
 #include <SDL3/SDL.h>
 #ifdef LIQUIFY_NATIVE_WINDOW_TESTS
+#include "../tests/ui_property_assert.hpp"
 #include "imgui_internal.h"
 #endif
 
@@ -558,9 +559,13 @@ auto effective_palette(bool dark, bool high_contrast) -> design::Palette {
 }
 
 #if !defined(__APPLE__) || !defined(__OBJC__)
-auto system_high_contrast() -> bool { return false; }
+auto system_high_contrast() -> bool {
+  return false;
+}
 
-auto system_reduced_motion() -> bool { return false; }
+auto system_reduced_motion() -> bool {
+  return false;
+}
 #endif
 
 constexpr auto clipboard_plain_utf8 = "text/plain;charset=utf-8";
@@ -783,6 +788,39 @@ auto deploy_outcome_name(liquid::sync_ref_outcome_kind outcome)
   return "unknown";
 }
 
+auto pixel_color(ImVec4 color) -> UiPixelColor {
+  return {static_cast<std::uint8_t>(std::round(color.x * 255.0F)),
+          static_cast<std::uint8_t>(std::round(color.y * 255.0F)),
+          static_cast<std::uint8_t>(std::round(color.z * 255.0F)),
+          static_cast<std::uint8_t>(std::round(color.w * 255.0F))};
+}
+
+auto item_rectangle() -> InputRectangle {
+  const auto start = ImGui::GetItemRectMin();
+  const auto size = ImGui::GetItemRectSize();
+  return {start.x, start.y, size.x, size.y};
+}
+
+// Call around text-only drawing; backgrounds and icons must not enter the ink
+// bounds.
+auto text_geometry(int first_vertex) -> UiTextGeometry {
+  const auto &vertices = ImGui::GetWindowDrawList()->VtxBuffer;
+  if (first_vertex == vertices.Size) {
+    return {};
+  }
+  auto minimum = vertices[first_vertex].pos;
+  auto maximum = minimum;
+  for (int index = first_vertex; index < vertices.Size; ++index) {
+    const auto position = vertices[index].pos;
+    minimum.x = std::min(minimum.x, position.x);
+    minimum.y = std::min(minimum.y, position.y);
+    maximum.x = std::max(maximum.x, position.x);
+    maximum.y = std::max(maximum.y, position.y);
+  }
+  return {{minimum.x, minimum.y, maximum.x - minimum.x, maximum.y - minimum.y},
+          ImGui::GetTextLineHeight()};
+}
+
 } // namespace
 
 class RetainedTextLayer {
@@ -879,6 +917,33 @@ public:
     draw_cursor(renderer, buffer, layouts, x, y, first_line, last_line,
                 line_height, cell_width, horizontal_scroll);
     return last_line - first_line;
+  }
+
+  auto visible_text(InputRectangle clip, float line_height) const
+      -> UiTextGeometry {
+    auto result = UiTextGeometry{};
+    for (std::size_t index = 0; index + 3 < frame_vertices_.size();
+         index += 4) {
+      const auto &first = frame_vertices_[index].position;
+      const auto &last = frame_vertices_[index + 2].position;
+      if (last.x <= first.x || last.y <= first.y || first.x < clip.x ||
+          first.y < clip.y || last.x > clip.x + clip.width ||
+          last.y > clip.y + clip.height) {
+        continue;
+      }
+      if (result.ink.width == 0) {
+        result.ink = {first.x, first.y, last.x - first.x, last.y - first.y};
+        continue;
+      }
+      const auto right = std::max(result.ink.x + result.ink.width, last.x);
+      const auto bottom = std::max(result.ink.y + result.ink.height, last.y);
+      result.ink.x = std::min(result.ink.x, first.x);
+      result.ink.y = std::min(result.ink.y, first.y);
+      result.ink.width = right - result.ink.x;
+      result.ink.height = bottom - result.ink.y;
+    }
+    result.line_height = line_height;
+    return result;
   }
 
 private:
@@ -1753,7 +1818,9 @@ void App::poll_sign_in() {
   identity_operation_.reset();
 }
 
-App::~App() { shutdown(); }
+App::~App() {
+  shutdown();
+}
 
 void App::configure_commands() {
   commands_ = std::make_unique<CommandRegistry>();
@@ -1867,10 +1934,18 @@ bool App::invoke_command(std::string_view name) {
   return true;
 }
 
-bool App::init() { return init_window(true); }
+bool App::init() {
+  return init_window(true);
+}
 
 auto App::diagnostics_viewport() const -> InputRectangle {
-  return diagnostics_viewport_;
+  const auto found = frame_layout_.panels.find(PanelId::diagnostics);
+  return found == frame_layout_.panels.end() ? InputRectangle{}
+                                             : found->second.content;
+}
+
+auto App::frame_layout() const -> const UiFrameLayout & {
+  return frame_layout_;
 }
 
 bool App::init_window(bool high_pixel_density) {
@@ -5408,7 +5483,9 @@ void App::draw_editor_toolbar() {
     ImGui::TextDisabled("%s", name);
   };
   ImGui::BeginGroup();
+  const auto first_vertex = ImGui::GetWindowDrawList()->VtxBuffer.Size;
   ImGui::TextDisabled("File");
+  frame_layout_.toolbar_text = text_geometry(first_vertex);
   ImGui::BeginDisabled(review_diff_open_);
   if (ImGui::Button("Save")) {
     save_editor();
@@ -5445,7 +5522,7 @@ void App::draw_editor_toolbar() {
   ImGui::EndGroup();
   ImGui::Separator();
   const auto end = ImGui::GetItemRectMax();
-  toolbar_rectangle_ = {origin.x, origin.y, available.x, end.y - origin.y};
+  frame_layout_.toolbar = {origin.x, origin.y, available.x, end.y - origin.y};
 }
 
 void App::draw_multiplayer_details() {
@@ -5721,6 +5798,7 @@ void App::draw_editor() {
   editor_width_ = size.x;
   editor_height_ = size.y;
   editor_drop_rectangle_ = {position.x, position.y, size.x, size.y};
+  frame_layout_.editor = editor_drop_rectangle_;
   line_height_ = ImGui::GetFontSize() + 4.0F;
   const auto *glyph = ImGui::GetFont()->FindGlyph('M');
   cell_width_ =
@@ -5848,8 +5926,11 @@ void App::draw_diagnostics_panel(const EditorGraphSnapshot &graph_snapshot) {
   if (screenshot_mode()) {
     const auto palette =
         effective_palette(applied_dark_theme_, applied_high_contrast_);
+    const auto first_vertex = ImGui::GetWindowDrawList()->VtxBuffer.Size;
     ImGui::TextColored(imgui_color(palette.danger),
                        "error: expected ';' after return statement");
+    frame_layout_.panels[PanelId::diagnostics].text =
+        text_geometry(first_vertex);
     ImGui::TextUnformatted("warning: unused result from save_app_shell_state");
     ImGui::TextDisabled("info: consider adding a return type");
     return;
@@ -6133,6 +6214,10 @@ void App::draw_panel_header(PanelId id) {
 }
 
 void App::draw_panel(PanelId id) {
+  const auto position = ImGui::GetCursorScreenPos();
+  const auto available = ImGui::GetContentRegionAvail();
+  frame_layout_.panels[id].content = {position.x, position.y, available.x,
+                                      available.y};
   draw_panel_header(id);
   switch (id) {
   case PanelId::repository:
@@ -6396,6 +6481,8 @@ void App::draw_editor_area() {
       const auto flags =
           panels_.focus_requested(id) ? ImGuiTabItemFlags_SetSelected : 0;
       const auto selected = ImGui::BeginTabItem(label.c_str(), &open, flags);
+      frame_layout_.panels[id].tab = item_rectangle();
+      frame_layout_.panels[id].selected = selected;
       item_icon(panel_icon(id));
       if (ImGui::BeginPopupContextItem()) {
         draw_panel_menu(id);
@@ -6441,6 +6528,8 @@ void App::draw_bottom_panel() {
       panels_.clear_focus_request();
       persist_shell_state();
     }
+    frame_layout_.panels[id].tab = item_rectangle();
+    frame_layout_.panels[id].selected = active == id;
     item_icon(panel_icon(id));
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("%s · Right-click for panel placement",
@@ -6454,12 +6543,6 @@ void App::draw_bottom_panel() {
   ImGui::Separator();
   if (active) {
     ImGui::BeginChild("panel-content");
-    if (*active == PanelId::diagnostics) {
-      const auto position = ImGui::GetCursorScreenPos();
-      const auto available = ImGui::GetContentRegionAvail();
-      diagnostics_viewport_ = {position.x, position.y, available.x,
-                               available.y};
-    }
     draw_panel(*active);
     ImGui::EndChild();
     if (panels_.focus_requested(*active)) {
@@ -6994,6 +7077,8 @@ void App::render_editor(InputRectangle clip_bounds) {
       editor_y_, editor_width_, editor_height_, scroll_line_, line_height_,
       cell_width_, horizontal_scroll_, review_lines, comment_lines,
       settings_.editor.whitespace);
+  frame_layout_.editor_text =
+      text_layer_->visible_text(clip_bounds, line_height_);
 }
 
 void App::frame(bool present) {
@@ -7033,6 +7118,8 @@ void App::frame(bool present) {
   }
   ImGui::NewFrame();
   editor_visible_ = false;
+  frame_layout_ = {};
+  frame_layout_.drawable_scale = {framebuffer_scale.x, framebuffer_scale.y};
 
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -7040,6 +7127,10 @@ void App::frame(bool present) {
   ImGui::Begin("liquify", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_NoSavedSettings);
+  const auto window_position = ImGui::GetWindowPos();
+  const auto window_size = ImGui::GetWindowSize();
+  frame_layout_.window = {window_position.x, window_position.y, window_size.x,
+                          window_size.y};
   draw_contents();
   ImGui::End();
   draw_floating_panels();
@@ -7054,6 +7145,9 @@ void App::frame(bool present) {
   ImGui::Render();
   const auto palette =
       effective_palette(applied_dark_theme_, applied_high_contrast_);
+  frame_layout_.canvas = pixel_color(imgui_color(palette.canvas));
+  frame_layout_.surface = pixel_color(imgui_color(palette.surface));
+  frame_layout_.selected = pixel_color(imgui_color(palette.selected));
   SDL_SetRenderDrawColor(
       renderer_, static_cast<std::uint8_t>(palette.canvas.red * 255.0F),
       static_cast<std::uint8_t>(palette.canvas.green * 255.0F),
@@ -7457,6 +7551,11 @@ public:
 #endif
       check_geometry(app, image, "initial");
       check_hit(app);
+      app.shell_state_.bottom_panel_visible = true;
+      app.panels_.focus(PanelId::diagnostics);
+      image = capture(app);
+      save(prefix.string() + "-panel.png", image);
+      check_geometry(app, image, "panel visible");
       SDL_SetWindowSize(app.window_, 1510, 930);
       SDL_SyncWindow(app.window_);
       image = capture(app);
@@ -7523,50 +7622,40 @@ private:
             "could not write native evidence: " + path.string());
   }
 
-  static std::size_t dark_pixels(const ScreenshotImage &image, float x, float y,
-                                 float width, float height, ImVec2 scale) {
-    std::size_t count = 0;
-    const auto left = std::max(0, static_cast<int>(x * scale.x));
-    const auto top = std::max(0, static_cast<int>(y * scale.y));
-    const auto right = std::min(static_cast<int>(image.width),
-                                static_cast<int>((x + width) * scale.x));
-    const auto bottom = std::min(static_cast<int>(image.height),
-                                 static_cast<int>((y + height) * scale.y));
-    for (int row = top; row < bottom; ++row) {
-      for (int column = left; column < right; ++column) {
-        const auto offset = (row * image.width + column) * 4;
-        if (image.rgba[offset] < 230 && image.rgba[offset + 1] < 230 &&
-            image.rgba[offset + 2] < 230) {
-          ++count;
-        }
-      }
-    }
-    return count;
-  }
-
   static void check_geometry(App &app, const ScreenshotImage &image,
                              const char *stage) {
+    const auto &layout = app.frame_layout();
+    const auto coverage = test::require_window_coverage(image, layout);
+    test::require_toolbar(image, layout);
+    test::require_editor(image, layout);
+    if (app.shell_state_.bottom_panel_visible) {
+      test::require_panel(image, layout, PanelId::diagnostics, false);
+    } else {
+      const auto panel = layout.panels.find(PanelId::diagnostics);
+      require(panel == layout.panels.end() || panel->second.content.height == 0,
+              "hidden panel retained stale content bounds");
+    }
     const auto &io = ImGui::GetIO();
-    const auto &toolbar = app.toolbar_rectangle_;
-    const auto shell = dark_pixels(image, toolbar.x, toolbar.y, toolbar.width,
-                                   toolbar.height, io.DisplayFramebufferScale);
-    const auto editor = dark_pixels(
-        image, app.editor_x_ + app.editor_width_ * 0.65F,
-        app.editor_y_ + app.line_height_ * 15, app.editor_width_ * 0.30F,
-        app.line_height_ * 10, io.DisplayFramebufferScale);
+    require(
+        io.Fonts->Fonts[app.ui_font_index_]->ConfigData->RasterizerDensity >=
+            std::max(layout.drawable_scale.x, layout.drawable_scale.y),
+        "shell font atlas density is below the drawable scale");
+    require(io.Fonts->Fonts[app.editor_font_index_]
+                    ->ConfigData->RasterizerDensity >=
+                std::max(layout.drawable_scale.x, layout.drawable_scale.y),
+            "editor font atlas density is below the drawable scale");
     std::printf(
         "native-window: %s renderer=%s logical=%.0fx%.0f drawable=%ux%u "
-        "scale=%.1fx%.1f shell_pixels=%zu editor_pixels=%zu\n",
-        stage, SDL_GetRendererName(app.renderer_), io.DisplaySize.x,
-        io.DisplaySize.y, image.width, image.height,
-        io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y, shell,
-        editor);
-    require(toolbar.width > 0.0F && toolbar.height > 0.0F,
-            "the shell did not report toolbar bounds");
-    require(shell > 100,
-            "shell controls did not draw in their reported bounds");
-    require(editor > 100,
-            "source glyphs missing in the right side of the editor");
+        "scale=%.1fx%.1f coverage=%.3f toolbar=%.0f,%.0f %.0fx%.0f "
+        "source=%.0f,%.0f %.0fx%.0f panel=%s\n",
+        stage, SDL_GetRendererName(app.renderer_), layout.window.width,
+        layout.window.height, image.width, image.height,
+        layout.drawable_scale.x, layout.drawable_scale.y, coverage,
+        layout.toolbar.x, layout.toolbar.y, layout.toolbar.width,
+        layout.toolbar.height, layout.editor_text.ink.x,
+        layout.editor_text.ink.y, layout.editor_text.ink.width,
+        layout.editor_text.ink.height,
+        app.shell_state_.bottom_panel_visible ? "visible" : "hidden");
   }
 
   static void check_hit(App &app) {
@@ -7656,18 +7745,17 @@ private:
 
   static void compare_overlay(const ScreenshotImage &with_source,
                               const ScreenshotImage &without_source,
-                              std::string_view name, ImVec2 position,
-                              ImVec2 size) {
+                              std::string_view name, InputRectangle content) {
     const auto scale = ImGui::GetIO().DisplayFramebufferScale;
     std::size_t changed = 0;
     auto first_x = with_source.width;
     auto first_y = with_source.height;
     auto last_x = 0U;
     auto last_y = 0U;
-    for (int y = static_cast<int>((position.y + 80) * scale.y);
-         y < static_cast<int>((position.y + size.y - 30) * scale.y); ++y) {
-      for (int x = static_cast<int>((position.x + 30) * scale.x);
-           x < static_cast<int>((position.x + size.x - 30) * scale.x); ++x) {
+    for (int y = static_cast<int>(content.y * scale.y);
+         y < static_cast<int>((content.y + content.height) * scale.y); ++y) {
+      for (int x = static_cast<int>(content.x * scale.x);
+           x < static_cast<int>((content.x + content.width) * scale.x); ++x) {
         if (x < 0 || y < 0 || x >= with_source.width ||
             y >= with_source.height) {
           continue;
@@ -7705,35 +7793,42 @@ private:
     auto *window = ImGui::FindWindowByName("Command palette");
     require(window != nullptr && window->Active,
             "command palette did not open");
-    const auto palette_position = window->Pos;
-    const auto palette_size = window->Size;
+    // The antialiased outer border blends with whatever is behind the popup.
+    // Compare its opaque client content using the window's current padding.
+    const auto palette_rect = window->InnerRect;
+    const auto padding = window->WindowPadding;
+    const auto palette_content = InputRectangle{
+        palette_rect.Min.x + padding.x, palette_rect.Min.y + padding.y,
+        palette_rect.GetWidth() - padding.x * 2,
+        palette_rect.GetHeight() - padding.y * 2};
     replace_buffer(app, "");
     auto without_source = capture(app);
     save(prefix.string() + "-palette-empty-editor.png", without_source);
     compare_overlay(with_source, without_source, "Command palette",
-                    palette_position, palette_size);
+                    palette_content);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
     capture(app);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
     capture(app);
     replace_buffer(app, source);
     app.panels_.move(PanelId::diagnostics, PanelPlacement::floating);
-    app.panels_.update_floating_rect(
-        PanelId::diagnostics,
-        {app.editor_x_ + 10, app.editor_y_ + 30, 600, 350});
+    app.panels_.update_floating_rect(PanelId::diagnostics,
+                                     {app.editor_x_, app.editor_y_,
+                                      app.editor_width_ * 0.7F,
+                                      app.editor_height_ * 0.7F});
     app.panels_.focus(PanelId::diagnostics);
     with_source = capture(app);
     save(prefix.string() + "-floating.png", with_source);
     window = ImGui::FindWindowByName("Diagnostics###floating-diagnostics");
     require(window != nullptr && window->Active,
             "floating diagnostics did not open");
-    const auto floating_position = window->Pos;
-    const auto floating_size = window->Size;
+    const auto floating_content =
+        app.frame_layout().panels.at(PanelId::diagnostics).content;
     replace_buffer(app, "");
     without_source = capture(app);
     save(prefix.string() + "-floating-empty-editor.png", without_source);
     compare_overlay(with_source, without_source, "Floating diagnostics",
-                    floating_position, floating_size);
+                    floating_content);
   }
 };
 

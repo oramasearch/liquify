@@ -139,3 +139,8 @@ exercised on Ubuntu and Fedora. `v*` tags publish those installers with signed a
 SHA-256 records; notarization runs when the release secrets are present. Hand-built packaging
 remains in place until liquid's projection and platform-signing targets land
 ([`../build/ci.md`](../build/ci.md), [`../packaging/README.md`](../packaging/README.md)).
+
+Native window and Diagnostics screenshot rendering checks consume the current frame layout
+and submitted glyph ink. They assert drawable coverage, text extent, editor/panel occupancy,
+and selected-tab visibility; renderer mutations and a moved toolbar verify their signal. See
+[`../ui/property-tests.md`](../ui/property-tests.md).

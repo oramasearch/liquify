@@ -12,3 +12,7 @@ coordinates. See the [coordinate contract](../../docs/ui/app-shell.md) and
 These headers expose plain C++ application and editor models. `version.hpp` exposes the numerical
 release value, revision-bearing IDE version, pinned library revision, and complete build
 description. See [store compatibility](../../docs/build/store-compatibility.md).
+
+`ui_layout.hpp` defines `UiFrameLayout`, returned by `App::frame_layout()`: current logical
+window, toolbar, editor and panel bounds, drawable scale, theme colors and submitted text ink.
+See [layout properties](../../docs/ui/property-tests.md) for the reporting contract.

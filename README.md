@@ -63,7 +63,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 `version` and the unit tests run without a display; the native rendering test requires a Retina
-desktop on macOS (see [`docs/ui/app-shell.md`](docs/ui/app-shell.md)); `--smoke` opens a window, scrolls and edits a
+desktop on macOS (see [`docs/ui/app-shell.md`](docs/ui/app-shell.md) and
+[layout property proof](docs/ui/property-tests.md)); `--smoke` opens a window, scrolls and edits a
 50,000-line buffer for 30 frames, prints latency metrics and exits 0. `./build/liquify <path>`
 opens a liquid repository; `--print-tree`, `--apply-edits` and `--lake` are listed with the rest
 of the build in [`docs/build/local.md`](docs/build/local.md). Linux requirements and the CI
