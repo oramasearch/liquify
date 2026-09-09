@@ -22,6 +22,7 @@
 #include "liquify/review.hpp"
 #include "liquify/settings.hpp"
 #include "liquify/structural_edit.hpp"
+#include "liquify/ui_layout.hpp"
 
 struct SDL_Window;
 struct SDL_Renderer;
@@ -66,6 +67,7 @@ public:
   // Run the frame loop; returns the process exit code.
   int run();
   [[nodiscard]] auto diagnostics_viewport() const -> InputRectangle;
+  [[nodiscard]] auto frame_layout() const -> const UiFrameLayout &;
 
 private:
   friend class NativeBufferRegression;
@@ -246,8 +248,7 @@ private:
   float editor_y_{};
   float editor_width_{};
   float editor_height_{};
-  InputRectangle toolbar_rectangle_{};
-  InputRectangle diagnostics_viewport_{};
+  UiFrameLayout frame_layout_;
   float line_height_{};
   float cell_width_{};
   InputRectangle repository_drop_rectangle_;

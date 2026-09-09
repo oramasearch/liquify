@@ -82,3 +82,8 @@ Headless fixture success alone does not establish native rendering correctness.
 
 The display-required dirty-buffer regression and lifetime policy are documented in
 [`buffers.md`](buffers.md). Native discard dialogs are verified by that regression.
+
+The complete [layout property contract](property-tests.md) records current-frame geometry and
+text reporting, shared framebuffer assertions, and the repeatable blank-shell, quarter-size and
+moved-toolbar demonstrations. Diagnostics runs in both themes and requires its selected tab,
+error text and declared area.

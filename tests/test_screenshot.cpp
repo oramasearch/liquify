@@ -8,6 +8,7 @@
 #include "liquify/app.hpp"
 #include "liquify/screenshot.hpp"
 #include "ui_pixel_assert.hpp"
+#include "ui_property_assert.hpp"
 
 namespace liquify {
 namespace {
@@ -35,14 +36,14 @@ auto render_state(std::string_view state) -> ScreenshotImage {
 
 struct DiagnosticsScreenshot {
   ScreenshotImage image;
-  InputRectangle viewport;
+  UiFrameLayout layout;
 };
 
-auto render_diagnostics() -> DiagnosticsScreenshot {
+auto render_diagnostics(std::string_view state) -> DiagnosticsScreenshot {
   const auto output = std::filesystem::path(LIQUIFY_TEST_OUTPUT_DIR) /
-                      "diagnostics-light-test.png";
+                      (std::string(state) + "-test.png");
   auto options = AppOptions{};
-  options.screenshot_state = "diagnostics-light";
+  options.screenshot_state = std::string(state);
   options.screenshot_output = output;
   options.max_frames = 2;
   auto app = App(std::move(options));
@@ -56,7 +57,7 @@ auto render_diagnostics() -> DiagnosticsScreenshot {
     ADD_FAILURE() << image.error();
     return {};
   }
-  return {std::move(*image), app.diagnostics_viewport()};
+  return {std::move(*image), app.frame_layout()};
 }
 
 TEST(Screenshot, EditorRendersSelectedSource) {
@@ -68,16 +69,17 @@ TEST(Screenshot, EditorRendersSelectedSource) {
 }
 
 TEST(Screenshot, PanelRendersDiagnostics) {
-  const auto rendered = render_diagnostics();
-  const auto viewport =
-      test::PixelRegion{static_cast<std::uint32_t>(rendered.viewport.x),
-                        static_cast<std::uint32_t>(rendered.viewport.y),
-                        static_cast<std::uint32_t>(rendered.viewport.width),
-                        static_cast<std::uint32_t>(rendered.viewport.height)};
-  EXPECT_GT(viewport.width, 0U);
-  EXPECT_GT(viewport.height, 0U);
-  EXPECT_TRUE(test::region_contains_color(rendered.image, viewport,
-                                          {186, 27, 35, 255}, 40, 2));
+  for (const auto state : {"diagnostics-light", "diagnostics-dark"}) {
+    SCOPED_TRACE(state);
+    const auto rendered = render_diagnostics(state);
+    EXPECT_NO_THROW({
+      test::require_window_coverage(rendered.image, rendered.layout);
+      test::require_toolbar(rendered.image, rendered.layout);
+      test::require_editor(rendered.image, rendered.layout);
+      test::require_panel(rendered.image, rendered.layout, PanelId::diagnostics,
+                          true);
+    });
+  }
 }
 
 TEST(Screenshot, CommandPaletteShowsSearchAndRecentCommands) {

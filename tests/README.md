@@ -112,9 +112,8 @@ creates exactly one drip and a local assisted-edit record without recording the 
 
 `test_screenshot.cpp` renders the deterministic C++ editor, complete editor view, diagnostics,
 command-palette, panel-system and settings states through SDL's dummy video driver and software renderer, decodes their PNG
-output and uses
-`ui_pixel_assert.hpp` to prove that a highlighted line, panel title and count badge occupy their
-expected regions.
+output. `ui_pixel_assert.hpp` covers the existing fixture landmarks; Diagnostics uses the shared
+layout properties described below to require its selected tab, error text and occupied content area.
 
 `test_native_window.cpp` runs the native window driver in `src/app.cpp`, preserving the single
 SDL/ImGui translation unit. The driver uses the screenshot suite's in-memory source fixture rather
@@ -130,3 +129,11 @@ dirty-buffer identity, selection and undo retention across file switches and all
 run it separately from headless CTest as described in
 [`../docs/ui/buffers.md`](../docs/ui/buffers.md). Local buffer tests also cover selection and
 multi-cursor undo, redo invalidation and saving without clearing history.
+
+The native driver and `Screenshot.PanelRendersDiagnostics` share `ui_property_assert.hpp`.
+They require window coverage, surface-contrast text density, rows and span at drawable scale,
+declared editor/panel occupancy, and a visible selected Diagnostics tab; the screenshot case
+checks error ink in both themes.
+No sample position is fixed. The native overlay comparisons also use reported content bounds.
+The blank-shell, quarter-size and moved-toolbar demonstrations are repeatable with
+`tools/ui/check-properties.py`; see [layout properties](../docs/ui/property-tests.md).
