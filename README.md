@@ -62,8 +62,9 @@ ctest --test-dir build --output-on-failure
 ./build/liquify --smoke 30
 ```
 
-`version` and the unit tests run without a display; the native rendering test requires a Retina
-desktop on macOS (see [`docs/ui/app-shell.md`](docs/ui/app-shell.md) and
+`version` and the unit tests run without a display; native rendering and workflow acceptance tests
+require a logged-in desktop on macOS (see [native acceptance](docs/ui/native-acceptance.md),
+[`docs/ui/app-shell.md`](docs/ui/app-shell.md) and
 [layout property proof](docs/ui/property-tests.md)); `--smoke` opens a window, scrolls and edits a
 50,000-line buffer for 30 frames, prints latency metrics and exits 0. `./build/liquify <path>`
 opens a liquid repository; `--print-tree`, `--apply-edits` and `--lake` are listed with the rest

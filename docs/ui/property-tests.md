@@ -9,7 +9,9 @@ new pixel constants in either test. This implements liquify issue #62.
 `UiFrameLayout` is a plain C++ record, replaced at the start of every frame. All rectangles are
 in logical window coordinates. The record contains the root window extent, drawable scale,
 active theme colors, toolbar and retained editor bounds, and panel content and tab bounds keyed
-by `PanelId`. Hidden surfaces have no current content bounds. `diagnostics_viewport()` remains
+by `PanelId`. Hidden surfaces have no current content bounds. `controls` holds named current
+interactive control bounds for native acceptance; controls absent from the current frame have no
+entry. `diagnostics_viewport()` remains
 available and reads the current Diagnostics entry, including floating and sidebar placement.
 
 Toolbar text and diagnostic error ink come from the vertices submitted by their text draw calls.

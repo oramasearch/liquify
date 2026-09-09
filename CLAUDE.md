@@ -34,8 +34,9 @@ The stamped Orama DTCG snapshot under `design/` generates native light and dark 
 embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The
 light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel,
 floating panels and status bar from those roles. Shell and retained editor share logical
-coordinates with one frame-level drawable scale; native GPU window tests cover drawable coverage, reported editor/panel areas, text extent and
-popup occlusion. The Diagnostics screenshot uses the same layout properties in both themes;
+coordinates with one frame-level drawable scale; native GPU window and workflow acceptance tests
+cover drawable coverage, reported editor/panel areas, text extent, popup occlusion, real repository
+input and panel selection. The Diagnostics screenshot uses the same layout properties in both themes;
 renderer mutations and a moved toolbar verify the assertions (`docs/ui/property-tests.md`). Font texture failures stop rendering with a visible native error. One plain-C++
 registry owns every panel's metadata, commands, placement, focus, state and notifications; panels
 move among dock areas, float and re-dock, repository-local state persists the complete layout, and

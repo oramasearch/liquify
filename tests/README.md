@@ -137,3 +137,7 @@ checks error ink in both themes.
 No sample position is fixed. The native overlay comparisons also use reported content bounds.
 The blank-shell, quarter-size and moved-toolbar demonstrations are repeatable with
 `tools/ui/check-properties.py`; see [layout properties](../docs/ui/property-tests.md).
+
+`native_acceptance.cpp` adds repository and application-state checks driven through the native
+event loop. It requires SDL text-input activation before sending text. The adapters remain in
+`app.cpp`; [native acceptance](../docs/ui/native-acceptance.md) records scenarios and proof status.

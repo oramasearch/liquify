@@ -55,6 +55,25 @@ add_test(NAME liquify-independent-cli-compat
     --cli "${LIQUIFY_COMPAT_CLI}")
 set_tests_properties(liquify-independent-cli-compat PROPERTIES RUN_SERIAL TRUE)
 if(LIQUIFY_NATIVE_WINDOW_TESTS)
+  add_executable(liquify-native-acceptance native_acceptance.cpp)
+  target_link_libraries(liquify-native-acceptance PRIVATE liquify-app)
+  foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette modal-input tabs build)
+    add_test(NAME liquify-native-acceptance-${scenario}
+      COMMAND liquify-native-acceptance ${scenario}
+        ${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario})
+    set_tests_properties(liquify-native-acceptance-${scenario} PROPERTIES
+      LABELS "native;display;acceptance" RUN_SERIAL TRUE TIMEOUT 120
+      ENVIRONMENT "LIQUID_HOME=${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario}/home")
+  endforeach()
+  # #39 remains open: retained-editor text input stops after an ImGui field.
+  set_tests_properties(liquify-native-acceptance-edit PROPERTIES WILL_FAIL TRUE)
+  # #33 remains open: Quick Open has no keyboard result dispatch.
+  set_tests_properties(liquify-native-acceptance-quick-open PROPERTIES WILL_FAIL TRUE)
+  # #34 remains open: palette keyboard selection does not dispatch a command.
+  set_tests_properties(liquify-native-acceptance-palette PROPERTIES WILL_FAIL TRUE)
+  # #39 remains open: modal ImGui text can also reach the obscured retained editor.
+  set_tests_properties(liquify-native-acceptance-modal-input PROPERTIES WILL_FAIL TRUE)
+  set_tests_properties(liquify-native-acceptance-launch-1 PROPERTIES SKIP_RETURN_CODE 77)
   add_executable(liquify-native-window-test test_native_window.cpp)
   target_link_libraries(liquify-native-window-test PRIVATE liquify-app)
   add_test(NAME liquify-native-window

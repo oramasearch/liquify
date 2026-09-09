@@ -16,3 +16,7 @@ description. See [store compatibility](../../docs/build/store-compatibility.md).
 `ui_layout.hpp` defines `UiFrameLayout`, returned by `App::frame_layout()`: current logical
 window, toolbar, editor and panel bounds, drawable scale, theme colors and submitted text ink.
 See [layout properties](../../docs/ui/property-tests.md) for the reporting contract.
+
+`UiFrameLayout::controls` reports named current repository and Quick Open control rectangles
+for native pointer acceptance. Hidden controls disappear on the next frame. See
+[native acceptance](../../docs/ui/native-acceptance.md).
