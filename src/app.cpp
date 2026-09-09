@@ -22,6 +22,7 @@
 #include "misc/cpp/imgui_stdlib.h"
 #include <SDL3/SDL.h>
 #ifdef LIQUIFY_NATIVE_WINDOW_TESTS
+#include "../tests/native_acceptance.hpp"
 #include "../tests/ui_property_assert.hpp"
 #include "imgui_internal.h"
 #endif
@@ -4209,6 +4210,7 @@ void App::draw_repository_entries(std::string_view directory) {
         repository_focused_ = true;
         open_editor(path, liquid::to_string(entry.id));
       }
+      frame_layout_.controls["repository/" + path] = item_rectangle();
       item_icon(file_icon(kind));
       file_type_hint(kind);
     } else if (entry.kind == liquid::node_kind::tree) {
@@ -4296,6 +4298,7 @@ void App::draw_navigation_popups() {
                                       : ImGuiInputTextFlags_None;
     ImGui::InputTextWithHint("##quick-open", "Type a path", &quick_open_query_,
                              quick_open_flags);
+    frame_layout_.controls["quick-open/query"] = item_rectangle();
     if (navigation_screenshot) {
       file_item("src/app.cpp", NavigationFileKind::cpp_source, true);
       file_item("src/app_state.cpp", NavigationFileKind::cpp_source);
@@ -4316,6 +4319,8 @@ void App::draw_navigation_popups() {
           quick_open_query_.clear();
           ImGui::CloseCurrentPopup();
         }
+        frame_layout_.controls["quick-open/" + path.path.generic_string()] =
+            item_rectangle();
         item_icon(file_icon(path.kind));
         file_type_hint(path.kind);
       }
@@ -4323,6 +4328,7 @@ void App::draw_navigation_popups() {
     if (ImGui::Button("Close")) {
       ImGui::CloseCurrentPopup();
     }
+    frame_layout_.controls["quick-open/close"] = item_rectangle();
     ImGui::EndPopup();
   }
 
@@ -7493,6 +7499,207 @@ void NativeBufferRegression::answer_dialog(std::string_view label) {
 #endif
 
 #ifdef LIQUIFY_NATIVE_WINDOW_TESTS
+
+// Acceptance adapters send input through App::run, the production event loop.
+int NativeAcceptance::launch(App &app, int density) {
+  if (!app.init()) {
+    return 1;
+  }
+  test::require_property(std::string_view(SDL_GetCurrentVideoDriver()) !=
+                             "dummy",
+                         "native acceptance requires a desktop video driver");
+  test::require_property(std::string_view(SDL_GetRendererName(app.renderer_)) !=
+                             "software",
+                         "native acceptance requires a GPU renderer");
+  SDL_RaiseWindow(app.window_);
+  pulse(app);
+  auto scale = app.frame_layout().drawable_scale;
+  if (scale.x != density || scale.y != density) {
+    int count = 0;
+    auto *displays = SDL_GetDisplays(&count);
+    test::require_property(displays != nullptr,
+                           "native displays are unavailable");
+    for (int index = 0; index < count; ++index) {
+      SDL_SetWindowPosition(app.window_,
+                            SDL_WINDOWPOS_CENTERED_DISPLAY(displays[index]),
+                            SDL_WINDOWPOS_CENTERED_DISPLAY(displays[index]));
+      SDL_SyncWindow(app.window_);
+      pulse(app);
+      scale = app.frame_layout().drawable_scale;
+      std::printf(
+          "native display: name=%s drawable_density=%.1fx%.1f requested=%d\n",
+          SDL_GetDisplayName(displays[index]), scale.x, scale.y, density);
+      if (scale.x == density && scale.y == density) {
+        break;
+      }
+    }
+    SDL_free(displays);
+  }
+  if (scale.x != density || scale.y != density) {
+    std::printf(
+        "SKIP: unmodified native launch cannot reach drawable density %d; "
+        "attached displays are density 2.0x2.0\n",
+        density);
+    return 77;
+  }
+  std::printf(
+      "native window: driver=%s renderer=%s density=%.1fx%.1f hidden=%d\n",
+      SDL_GetCurrentVideoDriver(), SDL_GetRendererName(app.renderer_), scale.x,
+      scale.y, (SDL_GetWindowFlags(app.window_) & SDL_WINDOW_HIDDEN) != 0);
+  return 0;
+}
+
+void NativeAcceptance::pulse(App &app) {
+  app.options_.max_frames = 4;
+  test::require_property(app.run() == 0,
+                         "native application event loop failed");
+}
+
+void NativeAcceptance::click(App &app, InputRectangle rectangle) {
+  test::require_bounds(rectangle, app.frame_layout().window, "pointer target");
+  const auto x = rectangle.x + rectangle.width * 0.5F;
+  const auto y = rectangle.y + rectangle.height * 0.5F;
+  SDL_WarpMouseInWindow(app.window_, x, y);
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_MOUSE_MOTION;
+  event.motion.windowID = SDL_GetWindowID(app.window_);
+  event.motion.x = x;
+  event.motion.y = y;
+  SDL_PushEvent(&event);
+  pulse(app);
+  event = {};
+  event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+  event.button.windowID = SDL_GetWindowID(app.window_);
+  event.button.button = SDL_BUTTON_LEFT;
+  event.button.down = true;
+  event.button.x = x;
+  event.button.y = y;
+  SDL_PushEvent(&event);
+  pulse(app);
+  event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+  event.button.down = false;
+  SDL_PushEvent(&event);
+  pulse(app);
+}
+
+void NativeAcceptance::key(App &app, std::string_view name, bool primary,
+                           bool shift) {
+  const auto label = std::string(name);
+  const auto code =
+      name == "Enter" ? SDLK_RETURN : SDL_GetKeyFromName(label.c_str());
+  test::require_property(code != SDLK_UNKNOWN, "unknown acceptance key");
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_KEY_DOWN;
+  event.key.windowID = SDL_GetWindowID(app.window_);
+  event.key.key = code;
+  event.key.scancode = SDL_GetScancodeFromKey(code, nullptr);
+  event.key.down = true;
+#if defined(__APPLE__)
+  event.key.mod = primary ? SDL_KMOD_GUI : SDL_KMOD_NONE;
+#else
+  event.key.mod = primary ? SDL_KMOD_CTRL : SDL_KMOD_NONE;
+#endif
+  if (shift) {
+    event.key.mod |= SDL_KMOD_SHIFT;
+  }
+  SDL_PushEvent(&event);
+  pulse(app);
+  event.type = SDL_EVENT_KEY_UP;
+  event.key.down = false;
+  event.key.mod = SDL_KMOD_NONE;
+  SDL_PushEvent(&event);
+  pulse(app);
+}
+
+void NativeAcceptance::text(App &app, std::string_view value) {
+  const auto content = std::string(value);
+  std::printf("native text: input_active=%d bytes=%zu\n",
+              SDL_TextInputActive(app.window_), content.size());
+  test::require_property(
+      SDL_TextInputActive(app.window_),
+      "#39: native text input is inactive after focus transition");
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_TEXT_INPUT;
+  event.text.windowID = SDL_GetWindowID(app.window_);
+  event.text.text = content.c_str();
+  SDL_PushEvent(&event);
+  pulse(app);
+}
+
+ScreenshotImage NativeAcceptance::capture(App &app) {
+  pulse(app);
+  app.frame(false);
+  auto *pixels = SDL_RenderReadPixels(app.renderer_, nullptr);
+  test::require_property(pixels != nullptr,
+                         "native framebuffer readback failed");
+  auto *rgba = SDL_ConvertSurface(pixels, SDL_PIXELFORMAT_RGBA32);
+  SDL_DestroySurface(pixels);
+  test::require_property(rgba != nullptr,
+                         "native framebuffer conversion failed");
+  ScreenshotImage image;
+  image.width = rgba->w;
+  image.height = rgba->h;
+  const auto *data = static_cast<const std::uint8_t *>(rgba->pixels);
+  for (int row = 0; row < rgba->h; ++row) {
+    image.rgba.insert(image.rgba.end(), data + row * rgba->pitch,
+                      data + row * rgba->pitch + rgba->w * 4);
+  }
+  SDL_DestroySurface(rgba);
+  SDL_RenderPresent(app.renderer_);
+  return image;
+}
+
+bool NativeAcceptance::popup(std::string_view name) {
+  const auto label = std::string(name);
+  const auto *window = ImGui::FindWindowByName(label.c_str());
+  return window != nullptr && window->Active;
+}
+
+void NativeAcceptance::resize(App &app) {
+  const auto before = app.frame_layout().window;
+  test::require_property(
+      SDL_SetWindowSize(app.window_, static_cast<int>(before.width * 0.8F),
+                        static_cast<int>(before.height * 0.8F)),
+      "native resize failed");
+  SDL_SyncWindow(app.window_);
+  pulse(app);
+  test::require_property(app.frame_layout().window.width < before.width,
+                         "native resize did not change layout");
+}
+
+void NativeAcceptance::fonts(App &app) {
+  const auto &layout = app.frame_layout();
+  for (const auto index : {app.ui_font_index_, app.editor_font_index_}) {
+    test::require_property(
+        ImGui::GetIO().Fonts->Fonts[index]->ConfigData->RasterizerDensity >=
+            std::max(layout.drawable_scale.x, layout.drawable_scale.y),
+        "uploaded font density is below drawable density");
+  }
+  std::printf(
+      "fonts: uploaded shell and editor atlases match drawable density\n");
+}
+
+void NativeAcceptance::source_tab(App &app) {
+  auto &bars = ImGui::GetCurrentContext()->TabBars;
+  for (int index = 0; index < bars.GetMapSize(); ++index) {
+    auto *bar = bars.TryGetMapData(index);
+    if (bar == nullptr) {
+      continue;
+    }
+    for (auto &tab : bar->Tabs) {
+      if (std::string_view(ImGui::TabBarGetTabName(bar, &tab))
+              .ends_with("###active-editor")) {
+        const auto bounds =
+            InputRectangle{bar->BarRect.Min.x + tab.Offset, bar->BarRect.Min.y,
+                           tab.Width, bar->BarRect.GetHeight()};
+        click(app, bounds);
+        return;
+      }
+    }
+  }
+  throw std::runtime_error("source tab was not laid out");
+}
+
 // The display test stays here to preserve the single SDL/ImGui translation
 // unit.
 class NativeWindowTest {

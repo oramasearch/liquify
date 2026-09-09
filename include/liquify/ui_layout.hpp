@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <string>
 
 #include "liquify/input.hpp"
 #include "liquify/panel.hpp"
@@ -36,6 +37,7 @@ struct UiFrameLayout {
   InputRectangle editor;
   UiTextGeometry editor_text;
   std::map<PanelId, UiPanelGeometry> panels;
+  std::map<std::string, InputRectangle> controls;
 };
 
 } // namespace liquify

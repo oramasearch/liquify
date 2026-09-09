@@ -87,3 +87,9 @@ The complete [layout property contract](property-tests.md) records current-frame
 text reporting, shared framebuffer assertions, and the repeatable blank-shell, quarter-size and
 moved-toolbar demonstrations. Diagnostics runs in both themes and requires its selected tab,
 error text and declared area.
+
+## Native workflow acceptance
+
+[Native editor acceptance](native-acceptance.md) records the additional SDL event and real-repository
+scenarios. Relevant UI changes require both fixture images and fresh live-window evidence; the
+acceptance page distinguishes passing proof, known product defects, and prerequisites that skip.

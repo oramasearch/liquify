@@ -42,4 +42,8 @@ and deploy panels remain covered by the editor graph test named below.
 
 **Verification.** `EditorGraph.PresentsBuildEventsTestsAndRefusedReferences` covers action state,
 a failed action diagnostic placed on a source line, a test hit followed by a rerun, and a refused
-reference reason with independent applied references.
+reference reason with independent applied references. The display-required `build` native
+acceptance scenario sends F7 and F9 through the application loop against a disposable repository
+and requires an honest unavailable daemon and absent-remote state. Successful and failed sandboxed
+actions remain owed on macOS until macFUSE is available; see
+[`../ui/native-acceptance.md`](../ui/native-acceptance.md).

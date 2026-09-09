@@ -16,3 +16,7 @@ unrelated errors. `version.cpp` reports the configured IDE and library revisions
 `app.cpp` replaces its plain C++ frame layout report each frame, including submitted text bounds
 and all panel placements. Native rendering properties are described in
 [layout properties](../docs/ui/property-tests.md).
+
+The native acceptance adapters enqueue SDL pointer, key and text events. Repository rows and
+Quick Open controls contribute current rectangles to the frame report. See
+[native acceptance](../docs/ui/native-acceptance.md).

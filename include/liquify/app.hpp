@@ -72,6 +72,7 @@ public:
 private:
   friend class NativeBufferRegression;
   friend class NativeWindowTest;
+  friend class NativeAcceptance;
   bool init_window(bool high_pixel_density);
   void frame(bool present = true);
   void draw_contents();
