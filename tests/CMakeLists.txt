@@ -46,12 +46,23 @@ add_executable(liquify-compat-editor compat_editor.cpp)
 target_link_libraries(liquify-compat-editor PRIVATE liquify-core)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(LIQUIFY_COMPAT_CLI "" CACHE FILEPATH "Separately configured and built supported liquid CLI")
+# Read the pinned liquid revision from the submodule rather than repeating it
+# here: a literal breaks this test on every deliberate pin bump, which teaches
+# the next person that a red compat test is normal.
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} -C ${PROJECT_SOURCE_DIR}/modules/liquid rev-parse HEAD
+  OUTPUT_VARIABLE LIQUIFY_PINNED_LIQUID_REVISION
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  RESULT_VARIABLE LIQUIFY_PINNED_LIQUID_RESULT)
+if(NOT LIQUIFY_PINNED_LIQUID_RESULT EQUAL 0 OR NOT LIQUIFY_PINNED_LIQUID_REVISION)
+  message(FATAL_ERROR "could not read the pinned liquid revision from modules/liquid")
+endif()
 add_test(NAME liquify-independent-cli-compat
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/independent_cli_compat.py
     --ide $<TARGET_FILE:liquify>
     --editor $<TARGET_FILE:liquify-compat-editor>
     --work ${CMAKE_CURRENT_BINARY_DIR}/independent-compat
-    --revision 7ff6ed82f93b916ef206c5776e2761b19536d8f3
+    --revision ${LIQUIFY_PINNED_LIQUID_REVISION}
     --cli "${LIQUIFY_COMPAT_CLI}")
 set_tests_properties(liquify-independent-cli-compat PROPERTIES RUN_SERIAL TRUE)
 if(LIQUIFY_NATIVE_WINDOW_TESTS)

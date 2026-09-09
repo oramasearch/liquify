@@ -32,6 +32,10 @@ def independent_cli(args):
         build = args.work / "cli-build"
         if not source.exists():
             run("git", "clone", "--no-checkout", "https://github.com/oramasearch/liquid.git", str(source))
+        # The clone is cached between runs, so a revision pinned after it was made
+        # is not present yet; without this fetch the test can only ever check out
+        # revisions that existed when the directory was first created.
+        run("git", "fetch", "--quiet", "origin", cwd=source)
         run("git", "checkout", "--detach", args.revision, cwd=source)
         run("git", "submodule", "update", "--init", "--recursive", cwd=source)
         run("cmake", "-S", str(source), "-B", str(build), "-G", "Ninja",
