@@ -93,10 +93,10 @@ class HttpsDouble {
 public:
     HttpsDouble(std::string body, bool disconnect)
         : acceptor_(context_), socket_(context_), body_(std::move(body)), disconnect_(disconnect),
-          certificate_(read_text(std::filesystem::path(LIQUIFY_SOURCE_DIR) /
-                                 "modules/liquid/tools/reapi-peers/nativelink-tls-cert.pem")),
-          private_key_(read_text(std::filesystem::path(LIQUIFY_SOURCE_DIR) /
-                                 "modules/liquid/tools/reapi-peers/nativelink-tls-key.pem")) {
+          certificate_(read_text(std::filesystem::path(LIQUIFY_LIQUID_DIR) /
+                                 "tools/reapi-peers/nativelink-tls-cert.pem")),
+          private_key_(read_text(std::filesystem::path(LIQUIFY_LIQUID_DIR) /
+                                 "tools/reapi-peers/nativelink-tls-key.pem")) {
         acceptor_.open(boost::corosio::tcp::v4());
         acceptor_.set_option(boost::corosio::socket_option::reuse_address(true));
         const auto bind_error =

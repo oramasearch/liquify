@@ -51,7 +51,7 @@ library build. Its first run needs GitHub access; later runs reuse that independ
 
 An already independently built CLI can be supplied with
 `-DLIQUIFY_COMPAT_CLI=/absolute/path/to/liquid/build/liquid`. Its adjacent CMake cache must name a
-standalone liquid project with CLI enabled, outside `modules/liquid`, and its source checkout must
+standalone liquid project with CLI enabled, separate from the shared `../liquid` checkout, and its source checkout must
 be at the supported revision. The caller is responsible for supplying a current binary from that
 build. No CLI is ever enabled in the IDE's CMake project.
 

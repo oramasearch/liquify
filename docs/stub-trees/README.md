@@ -35,7 +35,7 @@ cmake -S . -B build -G Ninja -DLIQUIFY_BUILD_BENCH=ON
 cmake --build build
 ctest --test-dir build --output-on-failure -R StubTrees
 stub_state=$(mktemp -d)
-./build/liquify-stub-tree-bench modules/liquid "$stub_state"
+./build/liquify-stub-tree-bench ../liquid "$stub_state"
 ```
 
 The tests cover fixture declaration lists, equal-blob sharing, persistence across graph reopen,

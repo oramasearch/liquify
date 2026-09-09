@@ -69,7 +69,8 @@ repository-scoped graph, plugins, assistant, review and shell state in the curre
 Unreadable repositories and offline clone failures retain their inputs for retry. The identity
 state file contains the public actor and custody description, never a credential.
 
-**libliquid.** liquid is a submodule at `modules/liquid`, built library-only
+**libliquid.** liquid is a sibling module resolved by `LIQUIFY_LIQUID_SOURCE_DIR`
+(default `../liquid`), built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
 `liquid::liquid`. The pin is `7ff6ed82f93b916ef206c5776e2761b19536d8f3`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
 distribution foundation, compact shallow repository checkpoints, the persisted demand-driven
@@ -95,13 +96,17 @@ checkouts and pin updates must initialize submodules recursively. The
 pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
 the liquid change it takes:
 
+liquid is **not** pinned here any more — `liquid-bridge` holds the one pin. Move it there,
+verify liquify against it, then bump the bridge pointer:
+
 ```sh
-git -C modules/liquid fetch origin && git -C modules/liquid checkout <sha>
-git add modules/liquid
-git submodule update --init --recursive
+git -C ../liquid fetch origin && git -C ../liquid checkout <sha>
 cmake --build build && ./build/liquify --smoke && ctest --test-dir build
-git add modules/liquid && git commit -m "Bump liquid to <sha>: <why>"
+git -C .. add modules/liquid && git -C .. commit -m "Bump liquid to <sha>: <why>"
 ```
+
+CI resolves liquid from its own checkout, so bump the `ref:` in
+[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) in the same change.
 
 **Tests.** Repository and editor fixtures are created at test time by the pinned liquid, then
 written and reopened through the same public API. Repository cases also verify path and symbol

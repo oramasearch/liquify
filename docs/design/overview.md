@@ -24,7 +24,8 @@ Linux: SDL3 and Dear ImGui with the SDL_Renderer backend, with the editor buffer
 text layer inside ImGui ([`../app-shell/README.md`](../app-shell/README.md),
 [`../editor/README.md`](../editor/README.md)). No Zetta code is used, only its choices; liquify
 never depends on Zetta or on `oramasearch/lake`. liquify is a client of libliquid: liquid is a
-submodule at `modules/liquid`, built library-only and linked as `liquid::liquid`, and everything
+sibling module resolved by `LIQUIFY_LIQUID_SOURCE_DIR` (default `../liquid`), built library-only
+and linked as `liquid::liquid`, and everything
 liquify knows about repositories, drips, builds, analysis and search comes through that API.
 liquify talks to liquid (the daemon), and through liquid to lake. The numbered decisions behind
 these choices are in `CLAUDE.md`.

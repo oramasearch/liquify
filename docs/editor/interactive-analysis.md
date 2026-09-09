@@ -103,7 +103,7 @@ Run the focused proof with a new state directory under the build tree:
 cmake -S . -B build -G Ninja -DLIQUIFY_BUILD_BENCH=ON
 cmake --build build
 ctest --test-dir build --output-on-failure -R InteractiveAnalysis
-./build/liquify-interactive-analysis-bench modules/liquid build/interactive-analysis-state
+./build/liquify-interactive-analysis-bench ../liquid build/interactive-analysis-state
 ```
 
 `EditorGraph.*` additionally proves first-client daemon hosting, attachment to an existing daemon,
