@@ -510,10 +510,30 @@ void draw_shell_icon(ShellIcon icon, ImVec2 origin) {
   }
 }
 
-void item_icon(ShellIcon icon, float inset = 4.0F) {
+constexpr float icon_box = 16.0F;
+constexpr float icon_inset = design::space1;
+
+void item_icon(ShellIcon icon, float inset = icon_inset) {
   const auto begin = ImGui::GetItemRectMin();
   const auto height = ImGui::GetItemRectSize().y;
-  draw_shell_icon(icon, {begin.x + inset, begin.y + (height - 16.0F) * 0.5F});
+  draw_shell_icon(icon,
+                  {begin.x + inset, begin.y + (height - icon_box) * 0.5F});
+}
+
+// Widgets that own their hit area — Selectable, TreeNode, TabItem — take one
+// label, so the room for the icon has to live inside that string. Deriving the
+// count from the font's own advance keeps the gap a real gap at any font size
+// or display scale; a fixed number of spaces silently closes up the moment
+// either changes, which is what put icons against their labels.
+auto icon_label(std::string_view text, float text_offset,
+                float inset = icon_inset) -> std::string {
+  const auto reserved = inset + icon_box + design::space2 - text_offset;
+  const auto advance = ImGui::CalcTextSize(" ").x;
+  const auto count =
+      advance > 0.0F && reserved > 0.0F
+          ? static_cast<std::size_t>(std::ceil(reserved / advance))
+          : std::size_t{0};
+  return std::string(count, ' ') + std::string(text);
 }
 
 void file_type_hint(NavigationFileKind kind) {
@@ -524,7 +544,9 @@ void file_type_hint(NavigationFileKind kind) {
 
 bool file_item(const char *name, NavigationFileKind kind,
                bool selected = false) {
-  const auto label = std::string("      ") + name;
+  // Selectable draws its label at the item's left edge; it applies frame
+  // padding vertically only, so the reservation starts from zero here.
+  const auto label = icon_label(name, 0.0F);
   const auto clicked = ImGui::Selectable(label.c_str(), selected);
   item_icon(file_icon(kind));
   file_type_hint(kind);
@@ -532,7 +554,8 @@ bool file_item(const char *name, NavigationFileKind kind,
 }
 
 bool directory_item(const char *name) {
-  const auto label = std::string("      ") + name;
+  const auto spacing = ImGui::GetTreeNodeToLabelSpacing();
+  const auto label = icon_label(name, spacing, spacing);
   const auto open = ImGui::TreeNode(label.c_str());
   item_icon(ShellIcon::folder, ImGui::GetTreeNodeToLabelSpacing());
   file_type_hint(NavigationFileKind::directory);
@@ -4188,7 +4211,10 @@ void App::draw_repository_entries(std::string_view directory) {
         metadata == nullptr
             ? navigation_file_kind(path, entry.kind == liquid::node_kind::tree)
             : metadata->kind;
-    auto label = "      " + entry.name;
+    const auto tree_row = entry.kind == liquid::node_kind::tree;
+    const auto tree_spacing = ImGui::GetTreeNodeToLabelSpacing();
+    auto label = tree_row ? icon_label(entry.name, tree_spacing, tree_spacing)
+                          : icon_label(entry.name, 0.0F);
     if (metadata != nullptr &&
         metadata->change != NavigationChangeState::clean) {
       label += "  [" +
@@ -4312,8 +4338,8 @@ void App::draw_navigation_popups() {
       for (const auto &match :
            rank_paths(repository_->navigation_paths(), quick_open_query_)) {
         const auto &path = repository_->navigation_paths()[match.index];
-        const auto label = "      " + path.path.generic_string() + "##quick-" +
-                           std::to_string(match.index);
+        const auto label = icon_label(path.path.generic_string(), 0.0F) +
+                           "##quick-" + std::to_string(match.index);
         if (ImGui::Selectable(label.c_str())) {
           open_editor(path.path.generic_string(), path.blob_id);
           quick_open_query_.clear();
@@ -5477,20 +5503,31 @@ void App::draw_editor_modes() {
 void App::draw_editor_toolbar() {
   const auto origin = ImGui::GetCursorScreenPos();
   const auto available = ImGui::GetContentRegionAvail();
-  const auto next_group = [](const char *name, float width) {
+  // A group caption sits above buttons whose own text is inset by the frame
+  // padding, so aligning the caption to the frame leaves it hanging to the
+  // left of everything it labels. Indent it by the same padding and tighten
+  // the gap beneath it, so the caption reads as belonging to its row.
+  const auto group_caption = [](const char *name) {
+    const auto &style = ImGui::GetStyle();
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + style.FramePadding.x);
+    ImGui::TextDisabled("%s", name);
+    ImGui::GetCurrentWindow()->DC.CursorPos.y -=
+        style.ItemSpacing.y - design::space1;
+  };
+  const auto next_group = [&group_caption](const char *name, float width) {
     ImGui::EndGroup();
     const auto end = ImGui::GetItemRectMax().x;
     const auto right =
         ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
     if (end + width + design::space4 < right) {
-      ImGui::SameLine(0, design::space4);
+      ImGui::SameLine(0, design::space6);
     }
     ImGui::BeginGroup();
-    ImGui::TextDisabled("%s", name);
+    group_caption(name);
   };
   ImGui::BeginGroup();
   const auto first_vertex = ImGui::GetWindowDrawList()->VtxBuffer.Size;
-  ImGui::TextDisabled("File");
+  group_caption("File");
   frame_layout_.toolbar_text = text_geometry(first_vertex);
   ImGui::BeginDisabled(review_diff_open_);
   if (ImGui::Button("Save")) {
@@ -6204,7 +6241,7 @@ void App::draw_panel_header(PanelId id) {
     return;
   }
   ImGui::PushID(panel_id_name(id).data());
-  const auto label = "      " + panel_label(id);
+  const auto label = icon_label(panel_label(id), 0.0F);
   ImGui::TextUnformatted(label.c_str());
   item_icon(panel_icon(id));
   ImGui::SameLine();
@@ -6482,8 +6519,9 @@ void App::draw_editor_area() {
         continue;
       }
       auto open = true;
-      const auto label = "      " + panel_label(id) + "###panel-" +
-                         std::string(panel_id_name(id));
+      const auto label =
+          icon_label(panel_label(id), ImGui::GetStyle().FramePadding.x) +
+          "###panel-" + std::string(panel_id_name(id));
       const auto flags =
           panels_.focus_requested(id) ? ImGuiTabItemFlags_SetSelected : 0;
       const auto selected = ImGui::BeginTabItem(label.c_str(), &open, flags);
@@ -6522,7 +6560,7 @@ void App::draw_bottom_panel() {
     if (!panels_.layout(id).visible) {
       continue;
     }
-    const auto label = "      " + panel_label(id);
+    const auto label = icon_label(panel_label(id), 0.0F);
     const auto width = ImGui::CalcTextSize(label.c_str()).x + 16.0F;
     if (!first && ImGui::GetContentRegionAvail().x > width) {
       ImGui::SameLine();

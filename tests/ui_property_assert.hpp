@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "liquify/screenshot.hpp"
 #include "liquify/ui_layout.hpp"
@@ -228,6 +230,66 @@ inline void require_text(const ScreenshotImage &image,
           "x" +
           std::to_string(static_cast<int>(
               std::ceil(text.ink.height * layout.drawable_scale.y))));
+}
+
+// An icon drawn over the space a label reserved is the defect this catches:
+// the reservation used to be a fixed number of space characters, which closed
+// up as soon as the font or the scale moved. Rows are found by their ink, not
+// by coordinates, so the check survives a layout change.
+inline void require_icons_clear_their_labels(const ScreenshotImage &image,
+                                             InputRectangle region,
+                                             InputPoint scale,
+                                             UiPixelColor background,
+                                             std::string_view name,
+                                             int minimum_gap = 3) {
+  const auto left = std::max(0, static_cast<int>(std::floor(region.x * scale.x)));
+  const auto top = std::max(0, static_cast<int>(std::floor(region.y * scale.y)));
+  const auto right = std::min(static_cast<int>(image.width),
+      static_cast<int>(std::ceil((region.x + region.width) * scale.x)));
+  const auto bottom = std::min(static_cast<int>(image.height),
+      static_cast<int>(std::ceil((region.y + region.height) * scale.y)));
+  require_property(right > left && bottom > top,
+                   std::string(name) + " reported an empty region");
+  const auto inked = [&](int x, int y) {
+    const auto offset = (std::size_t(y) * image.width + x) * 4;
+    return std::max({std::abs(int(image.rgba[offset]) - background[0]),
+                     std::abs(int(image.rgba[offset + 1]) - background[1]),
+                     std::abs(int(image.rgba[offset + 2]) - background[2])}) >= 40;
+  };
+  const auto icon_span = static_cast<int>(std::lround(16.0F * scale.x));
+  auto rows_checked = 0;
+  for (auto y = top; y < bottom; ++y) {
+    // Collect horizontal ink runs on this row of pixels.
+    auto runs = std::vector<std::pair<int, int>>{};
+    auto run_start = -1;
+    for (auto x = left; x <= right; ++x) {
+      const auto ink = x < right && inked(x, y);
+      if (ink && run_start < 0) {
+        run_start = x;
+      } else if (!ink && run_start >= 0) {
+        runs.emplace_back(run_start, x - 1);
+        run_start = -1;
+      }
+    }
+    if (runs.size() < 2) {
+      continue;
+    }
+    // Only rows that begin with something icon-shaped are ours to judge; a row
+    // of plain text has no icon and its letter gaps mean nothing here.
+    const auto width = runs.front().second - runs.front().first + 1;
+    if (width < icon_span - 5 || width > icon_span + 2) {
+      continue;
+    }
+    ++rows_checked;
+    const auto gap = runs[1].first - runs.front().second - 1;
+    require_property(gap >= minimum_gap,
+                     std::string(name) + " icon touches its label: gap=" +
+                         std::to_string(gap) + " needs >=" +
+                         std::to_string(minimum_gap) + " at row " +
+                         std::to_string(y));
+  }
+  require_property(rows_checked > 0,
+                   std::string(name) + " found no icon rows to check");
 }
 
 inline void require_toolbar(const ScreenshotImage &image,

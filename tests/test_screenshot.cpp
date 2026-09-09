@@ -82,6 +82,21 @@ TEST(Screenshot, PanelRendersDiagnostics) {
   }
 }
 
+TEST(Screenshot, IconsDoNotTouchTheirLabels) {
+  for (const auto state : {"panels-light", "panels-dark"}) {
+    SCOPED_TRACE(state);
+    const auto rendered = render_diagnostics(state);
+    const auto panel = rendered.layout.panels.find(PanelId::repository);
+    ASSERT_NE(panel, rendered.layout.panels.end())
+        << "the shell did not report the repository panel";
+    EXPECT_NO_THROW({
+      test::require_icons_clear_their_labels(
+          rendered.image, panel->second.content, rendered.layout.drawable_scale,
+          rendered.layout.surface, "repository panel");
+    });
+  }
+}
+
 TEST(Screenshot, CommandPaletteShowsSearchAndRecentCommands) {
   const auto image = render_state("command-palette-light");
   EXPECT_TRUE(test::region_contains_color(image, {260, 140, 760, 520},
