@@ -181,3 +181,27 @@ checks the complete matrix and each capture command reports its dimensions.
 The native and Diagnostics screenshot tests share [layout properties](property-tests.md):
 window coverage, glyph extent at drawable scale, editor and panel occupancy, and active tab
 visibility. The same page explains the required frame report and renderer mutation proof.
+
+## Icons beside labels
+
+Widgets that own their hit area — `Selectable`, `TreeNode`, `TabItem` — take a single label, so the
+room for an icon has to live inside that string. `icon_label()` builds that prefix from the font's
+own space advance and the caller's text offset, rather than a fixed number of spaces:
+
+| Widget | Where its label starts |
+|---|---|
+| `Selectable` | the item's left edge — it applies frame padding **vertically only** |
+| `TreeNode` | `ImGui::GetTreeNodeToLabelSpacing()` |
+| `TabItem` | `ImGui::GetStyle().FramePadding.x` |
+| `TextUnformatted` | the item's left edge |
+
+Pass that offset as `icon_label`'s second argument and the icon keeps its gap at any font size or
+display scale. A fixed count of spaces does not: six spaces cleared a 16 px icon at one size and
+overlapped the first letter at another, which is how icons came to sit on top of their labels.
+
+`Screenshot.IconsDoNotTouchTheirLabels` renders the repository panel, finds rows whose first ink run
+is icon-shaped, and requires a gap before the label. It finds the rows by their ink rather than by
+coordinates, so a layout change does not break it.
+
+Toolbar group captions (`File`, `Build`, `View`, `Mode`) are indented by the frame padding so they
+align with the text of the buttons beneath them, not with the button frames.
