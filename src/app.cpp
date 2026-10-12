@@ -1704,6 +1704,7 @@ void App::begin_open_repository(std::filesystem::path path) {
   }
   first_run_.begin_open(path);
   repository_operation_is_clone_ = false;
+  request_repaint();
   repository_operation_.emplace(
       std::async(std::launch::async, [path = std::move(path)] {
         return std::make_unique<RepositoryView>(RepositoryView::open(path));
@@ -1722,6 +1723,7 @@ void App::begin_clone_repository(std::string remote,
   const auto token = configured_token == nullptr
                          ? std::string{}
                          : std::string{configured_token};
+  request_repaint();
   repository_operation_.emplace(std::async(
       std::launch::async,
       [path = std::move(path), remote = std::move(remote), token]() mutable {
@@ -1811,6 +1813,7 @@ void App::begin_sign_in() {
     return;
   }
   identity_error_.clear();
+  request_repaint();
   identity_operation_.emplace(std::async(std::launch::async, [] {
     auto signer =
         liquid::runtime::block_on(liquid::identity_detail::local_signer());
@@ -5328,6 +5331,7 @@ void App::refresh_multiplayer() {
                 .column = cursor.byte + 1},
       .end = {
           .byte = byte, .line = cursor.line + 1, .column = cursor.byte + 1}};
+  request_repaint();
   multiplayer_refresh_ = std::async(
       std::launch::async, [repository_path = *options_.repository_path,
                            path = std::string(editor_->display_path()),
@@ -7250,14 +7254,100 @@ void App::print_smoke_metrics() const {
               percentile(typing_times_ms_, 0.95));
 }
 
+namespace {
+// Distinct from the native menu commands above, which are small positive ints.
+constexpr std::int32_t repaint_wake_code = 0x5751; // "WQ"
+} // namespace
+
+void App::request_repaint() {
+  // Already pending: the loop has a frame coming, so skip the syscall.
+  if (repaint_requested_.exchange(true)) {
+    return;
+  }
+  // Wake a blocked SDL_WaitEventTimeout. SDL_PushEvent is thread-safe, which is
+  // what lets a producer on another thread ask for a frame.
+  auto event = SDL_Event{};
+  event.type = SDL_EVENT_USER;
+  event.user.code = repaint_wake_code;
+  SDL_PushEvent(&event);
+}
+
+auto App::interface_is_busy() const -> bool {
+  const auto &io = ImGui::GetIO();
+  // Only genuine activity counts. Deliberately NOT io.WantCaptureMouse /
+  // WantCaptureKeyboard / WantTextInput: those say where input would be routed,
+  // not that anything is happening, and they are true whenever the pointer is
+  // over the interface or a text field has focus — which is almost always. Using
+  // them here is what kept the loop at the display rate.
+  //
+  // A focused caret still blinks: max_idle_wait wakes the loop several times a
+  // second, which is enough for the blink and costs almost nothing.
+  return ImGui::IsAnyItemActive() || ImGui::IsAnyMouseDown() ||
+         io.MouseDelta.x != 0.0F || io.MouseDelta.y != 0.0F ||
+         io.MouseWheel != 0.0F || io.MouseWheelH != 0.0F ||
+         command_palette_open_;
+}
+
+auto App::async_work_in_flight() const -> bool {
+  // Every future polled from the frame path. While one is outstanding the loop
+  // keeps frame cadence so the result is noticed as promptly as before.
+  return (repository_operation_ && repository_operation_->valid()) ||
+         (identity_operation_ && identity_operation_->valid()) ||
+         multiplayer_refresh_.valid();
+}
+
+auto App::until_next_scheduled_refresh() const
+    -> std::chrono::steady_clock::duration {
+  const auto now = std::chrono::steady_clock::now();
+  auto nearest = std::chrono::steady_clock::duration::max();
+  const auto consider = [&](std::chrono::steady_clock::time_point deadline) {
+    // A default-constructed deadline is one that has never been scheduled.
+    if (deadline == std::chrono::steady_clock::time_point{}) {
+      return;
+    }
+    nearest = std::min(nearest, deadline - now);
+  };
+  consider(next_status_refresh_);
+  consider(next_review_refresh_);
+  consider(next_plugin_refresh_);
+  consider(next_multiplayer_refresh_);
+  return nearest;
+}
+
+auto App::redraw_inputs() const -> RedrawInputs {
+  return {.repaint_requested = repaint_requested_.load(),
+          .interacting = interface_is_busy(),
+          .async_in_flight = async_work_in_flight(),
+          .until_scheduled = until_next_scheduled_refresh()};
+}
+
 int App::run() {
   if (!initialized_) {
     return 1;
   }
   int frames = 0;
+  // Smoke and screenshot runs render a fixed number of frames as fast as they
+  // can; they are measurements, not a window someone is sitting in front of, so
+  // they keep the unconditional loop.
+  const bool continuous = options_.smoke || options_.max_frames > 0;
   while (!quit_) {
     SDL_Event event;
+    if (!continuous) {
+      // Wait for a cause instead of spinning. Every wake produces a frame below,
+      // so sleeping here cannot swallow a state change; the only decision is how
+      // long it is safe to wait. See docs/ui/redraw.md.
+      const auto wait = idle_wait(redraw_inputs());
+      if (wait > std::chrono::milliseconds::zero()) {
+        // A null event waits without dequeuing, so whatever arrives is still
+        // there for the single drain below. Taking it here instead would need it
+        // pushed back, which reorders the queue.
+        SDL_WaitEventTimeout(nullptr, static_cast<Sint32>(wait.count()));
+      }
+    }
+    repaint_requested_.store(false);
     while (SDL_PollEvent(&event)) {
+      // Any event is a reason to draw.
+      repaint_requested_.store(true);
       ImGui_ImplSDL3_ProcessEvent(&event);
       if (event.type == SDL_EVENT_QUIT) {
         request_quit();
