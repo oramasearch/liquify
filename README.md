@@ -106,7 +106,7 @@ upgrade diagnostics, and independent CLI → IDE → CLI integration check are i
 | `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
 | `docs/multiplayer.md` | multiplayer editor surface, plugin callback delivery, authorization boundary, and verification |
 | `packaging/` | hand-built macOS, Windows, AppImage, and Flatpak release inputs used until liquid's projection targets land |
-| `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `version`, `--smoke [N]`, `--help` |
+| `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `plugin trust`/`plugin list`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
 | `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* module of `liquid-bridge`, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 | `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |

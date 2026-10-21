@@ -55,6 +55,10 @@ version and reference commands write text, configured plugin commands consume an
 canonical-CBOR map and write canonical CBOR, and UI-only commands report that an open IDE is
 required. `liquify docs commands` and `liquify docs keymap` generate or check the registry-backed
 files under [`../ui/commands.md`](../ui/commands.md);
+`liquify plugin trust <file>` shows a native plugin's name, origin and SHA-256 digest and records
+the digest in the per-user trust store only after the user types `yes`, and
+`liquify plugin list <repository>` reports which configured plugins would load, without loading
+any ([`../plugins/README.md`](../plugins/README.md));
 `liquify --screenshot <state> --out <png>` renders one named, fixed shell state through SDL's
 dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md),
 [`../ui/app-shell.md`](../ui/app-shell.md)); `liquify --smoke [N]` scrolls and edits a generated

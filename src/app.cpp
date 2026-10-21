@@ -1593,6 +1593,7 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
   assistant_.reset();
   plugin_host_.reset();
   plugin_failures_.clear();
+  plugin_untrusted_.clear();
   plugin_panels_.clear();
   multiplayer_.reset();
   multiplayer_refresh_ = {};
@@ -1633,6 +1634,7 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
   } else {
     plugin_host_ = std::move(plugins->host);
     plugin_failures_ = std::move(plugins->failures);
+    plugin_untrusted_ = std::move(plugins->untrusted);
   }
   editor_graph_ = std::make_unique<EditorGraph>(
       *options_.repository_path, plugin_host_, syntax_frontend_path());
@@ -5302,7 +5304,11 @@ void App::sync_panel_system() {
   }
   panels_.set_panel_state(
       PanelId::plugins,
-      {.message = std::to_string(plugin_panels_.size()) + " plugin panels",
+      {.message = std::to_string(plugin_panels_.size()) + " plugin panels" +
+                  (plugin_untrusted_.empty()
+                       ? std::string{}
+                       : ", " + std::to_string(plugin_untrusted_.size()) +
+                             " not trusted"),
        .error = std::move(plugin_error)});
   panels_.set_panel_state(PanelId::structural_editing,
                           {.message = structural_preview_open_
@@ -5427,11 +5433,24 @@ bool App::editor_mutation_allowed() const {
 }
 
 void App::draw_plugin_panels() {
-  if (plugin_failures_.empty() && plugin_panels_.empty()) {
+  if (plugin_failures_.empty() && plugin_untrusted_.empty() &&
+      plugin_panels_.empty()) {
     return;
   }
   ImGui::Separator();
   ImGui::TextUnformatted("Plugins");
+  // A repository-named plugin that the user has not trusted is listed and
+  // never loaded. Trust is granted outside the IDE, so nothing the repository
+  // contains can grant it.
+  for (const auto &untrusted : plugin_untrusted_) {
+    ImGui::TextColored(ImVec4(0.80F, 0.55F, 0.10F, 1.0F),
+                       "%s: not trusted (%s)",
+                       untrusted.path.generic_string().c_str(),
+                       untrusted.digest.c_str());
+    ImGui::TextWrapped("Named by %s. To load it: liquify plugin trust \"%s\"",
+                       untrusted.repository.generic_string().c_str(),
+                       untrusted.path.generic_string().c_str());
+  }
   for (const auto &failure : plugin_failures_) {
     const auto path = failure.path.empty() ? std::string("configuration")
                                            : failure.path.generic_string();
@@ -6419,7 +6438,8 @@ void App::draw_panel(PanelId id) {
     if (screenshot_mode()) {
       ImGui::TextUnformatted("orama.sample/status: Sample plugin");
       ImGui::TextDisabled("Index and formatter commands ready.");
-    } else if (plugin_failures_.empty() && plugin_panels_.empty()) {
+    } else if (plugin_failures_.empty() && plugin_untrusted_.empty() &&
+               plugin_panels_.empty()) {
       ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
     } else {
       draw_plugin_panels();
