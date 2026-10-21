@@ -156,6 +156,12 @@ decisions, the one-translation-unit rule for SDL and ImGui, the liquid pin, what
 and the full local proof to run before finishing a change. [`AGENTS.md`](AGENTS.md) restates the
 non-negotiables for Codex.
 
+## Security
+
+Report a vulnerability privately, never in a public issue. [SECURITY.md](SECURITY.md) says how,
+what is in scope and what to expect; it is a draft until the reporting address and response times
+are approved ([oramasearch/liquid-bridge#11](https://github.com/oramasearch/liquid-bridge/issues/11)).
+
 ## Licence
 
 No licence file is declared. The repository is private for now and open source eventually, like
