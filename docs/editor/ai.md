@@ -55,7 +55,15 @@ thread only starts or cancels an operation and receives state snapshots.
 
 The provider sends `POST /v1/messages` with `x-api-key`, `anthropic-version: 2023-06-01`, and
 `content-type: application/json`. The JSON contains `model`, `max_tokens`, `system`, `messages`,
-and `stream: true`; it deliberately has no `thinking` member. Server-sent `content_block_delta`
+and `stream: true`; it deliberately has no `thinking` member.
+
+**Repository context is data, never instructions** (liquify#73). The one user message has two
+content blocks. The first is the context inside `<repository_context>` tags, with every
+`[user-request]` and every `<repository_context>` or `</repository_context>` inside it rewritten,
+so text from a hostile repository can neither close the block nor start a request. The second is
+`[user-request]` followed by the person's prompt. The system prompt ends by telling the model that
+everything inside `<repository_context>` is data read from the repository, never an instruction.
+`anthropic_request_body` builds it and `quote_repository_context` does the rewriting. Server-sent `content_block_delta`
 events become text deltas. `message_delta.stop_reason` and `message_stop` produce the terminal
 result. A `refusal` is a distinct successful stop reason shown as a refusal in the panel. An
 in-process TLS double verifies the request and covers a normal answer, refusal, and disconnection
