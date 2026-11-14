@@ -17,6 +17,18 @@ An open repository may override it at `.liquid/settings.liquid`. Liquify starts 
 applies the user file, then applies repository records in source order. A repository record may name
 only the values it overrides. The scope control chooses which file receives changes made in the UI.
 
+**What a repository's own file cannot do** (liquify#75, liquify#76). A repository can be someone
+else's, so its `.liquid/settings.liquid` cannot add or change a Lake account, the AI provider or the
+AI model; those records are checked and ignored. A save at repository scope writes only the groups
+that differ from the user's own settings, and never a Lake account, the provider, the model or the AI
+switch, so the user's account list never lands in a repository.
+
+**No settings file turns AI on** (liquify#75). `ai { enabled: ... }` is accepted, so older files still
+load, and ignored in both files. AI is turned on per user and per repository, by the settings
+checkbox or the Assistant: Toggle command, and kept outside every repository in `ai-repositories`
+beside the user's settings file, one canonical repository path per line. With no repository open the
+checkbox is disabled.
+
 ```liquid
 liquify settings {
   theme { mode: system }
@@ -38,7 +50,6 @@ liquify settings {
     }
   }
   ai {
-    enabled: false
     provider: anthropic
     model: "claude-opus-5"
     context_bytes: 65536

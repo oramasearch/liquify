@@ -307,6 +307,8 @@ private:
   InputState input_;
   PanelRegistry panels_;
   Settings settings_;
+  // The user file's settings alone: a repository-scope save writes only what differs (liquify#76).
+  Settings settings_user_;
   SettingsScope settings_scope_{SettingsScope::user};
   std::vector<SettingsDiagnostic> settings_diagnostics_;
   SDL_Window *window_ = nullptr;

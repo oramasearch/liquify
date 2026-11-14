@@ -88,7 +88,7 @@ TEST(Settings, ParsesEveryGroupWithLiquidConfigurationValues) {
     EXPECT_TRUE(parsed->editor.whitespace);
     EXPECT_TRUE(parsed->editor.format_on_save);
     EXPECT_EQ(parsed->keymap.at("build.run"), "Cmd+B");
-    EXPECT_TRUE(parsed->ai.enabled);
+    EXPECT_FALSE(parsed->ai.enabled) << "no settings file turns AI on (liquify#75)";
     EXPECT_EQ(parsed->ai.provider, "anthropic");
     EXPECT_EQ(parsed->ai.model, "test-model");
     EXPECT_EQ(parsed->ai.context_bytes, 8192U);
@@ -111,7 +111,8 @@ TEST(Settings, RepositoryValuesOverlayUserValues) {
     write_text(repository_settings_path(directory.path()),
                "liquify settings {\n"
                "  theme { mode: dark }\n"
-               "  ai { enabled: true }\n"
+               "  ai { enabled: true model: \"repository-model\" }\n"
+               "  lake { account \"theirs\" { url: \"https://lake.attacker.test\" } }\n"
                "}\n");
 
     const auto loaded = load_settings(directory.path(), user);
@@ -119,8 +120,12 @@ TEST(Settings, RepositoryValuesOverlayUserValues) {
     EXPECT_TRUE(loaded.diagnostics.empty());
     EXPECT_EQ(loaded.settings.theme, ThemePreference::dark);
     EXPECT_TRUE(loaded.settings.editor.wrap);
-    EXPECT_TRUE(loaded.settings.ai.enabled);
+    // A repository's own file cannot turn AI on, change the model, or add a Lake account
+    // (liquify#75, liquify#76).
+    EXPECT_FALSE(loaded.settings.ai.enabled);
     EXPECT_EQ(loaded.settings.ai.model, "user-model");
+    EXPECT_TRUE(loaded.settings.lake_accounts.empty());
+    EXPECT_EQ(loaded.user.theme, ThemePreference::light);
     EXPECT_FALSE(loaded.settings.telemetry);
 }
 
@@ -151,7 +156,6 @@ TEST(Settings, SaveRoundTripsWithoutCredentialMaterial) {
     auto settings = Settings{};
     settings.theme = ThemePreference::dark;
     settings.editor.whitespace = true;
-    settings.ai.enabled = true;
     settings.keymap["build.run"] = "F6";
     settings.lake_accounts.push_back({"production", "https://lake.example.test"});
     const auto path = directory.path() / "settings.liquid";
@@ -165,6 +169,31 @@ TEST(Settings, SaveRoundTripsWithoutCredentialMaterial) {
     const auto reparsed = parse_settings(text, path);
     ASSERT_TRUE(reparsed) << reparsed.error().message;
     EXPECT_EQ(*reparsed, settings);
+}
+
+// liquify#76: a repository-scope save writes only what the repository overrides, never the user's
+// Lake accounts, model or AI switch.
+TEST(Settings, RepositoryScopeSaveWritesOnlyOverridesAndNoAccounts) {
+    auto directory = TemporaryDirectory("liquify-settings-repository-save");
+    auto user = Settings{};
+    user.editor.wrap = true;
+    user.ai.model = "user-model";
+    user.lake_accounts.push_back({"production", "https://lake.example.test"});
+    auto merged = user;
+    merged.theme = ThemePreference::dark;
+    merged.ai.enabled = true;
+    const auto path = repository_settings_path(directory.path());
+
+    const auto saved = save_settings(path, merged, SettingsScope::repository, user);
+
+    ASSERT_TRUE(saved) << saved.error().message;
+    const auto text = read_text(path);
+    EXPECT_NE(text.find("theme { mode: dark }"), std::string::npos);
+    EXPECT_EQ(text.find("account"), std::string::npos);
+    EXPECT_EQ(text.find("lake.example.test"), std::string::npos);
+    EXPECT_EQ(text.find("user-model"), std::string::npos);
+    EXPECT_EQ(text.find("editor"), std::string::npos) << "the editor group is the user's own";
+    EXPECT_EQ(text.find("enabled: true"), std::string::npos);
 }
 
 TEST(Settings, SaveRejectsInvalidTypedValuesWithoutReplacingTheFile) {

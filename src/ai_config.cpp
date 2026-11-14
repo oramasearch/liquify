@@ -2,9 +2,12 @@
 
 #include "liquify/ai_config.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "liquify/settings.hpp"
 
@@ -134,36 +137,88 @@ auto global_ai_config_path() -> std::filesystem::path {
     return user_settings_path();
 }
 
+namespace {
+
+auto repository_identity(const std::filesystem::path& repository_path) -> std::string {
+    auto code = std::error_code{};
+    auto canonical = std::filesystem::weakly_canonical(repository_path, code);
+    return (code ? std::filesystem::absolute(repository_path) : canonical).generic_string();
+}
+
+auto enabled_repositories(const std::filesystem::path& list) -> std::vector<std::string> {
+    auto input = std::ifstream(list);
+    auto lines = std::vector<std::string>{};
+    for (auto line = std::string{}; std::getline(input, line);) {
+        if (!line.empty()) {
+            lines.push_back(line);
+        }
+    }
+    return lines;
+}
+
+} // namespace
+
+auto ai_repositories_path(std::optional<std::filesystem::path> global_path)
+    -> std::filesystem::path {
+    const auto settings = global_path.value_or(user_settings_path());
+    return settings.empty() ? std::filesystem::path{} : settings.parent_path() / "ai-repositories";
+}
+
+auto repository_ai_enabled(const std::filesystem::path& repository_path,
+                           std::optional<std::filesystem::path> global_path) -> bool {
+    const auto list = ai_repositories_path(global_path);
+    if (list.empty()) {
+        return false;
+    }
+    const auto identity = repository_identity(repository_path);
+    return std::ranges::contains(enabled_repositories(list), identity);
+}
+
 auto load_ai_config(const std::filesystem::path& repository_path,
                     std::optional<std::filesystem::path> global_path) -> liquid::result<AiConfig> {
     auto loaded = load_settings(repository_path, global_path);
     if (!loaded.diagnostics.empty()) {
         return std::unexpected(settings_failure(loaded.diagnostics.front()));
     }
-    return AiConfig{.enabled = loaded.settings.ai.enabled,
+    return AiConfig{.enabled = repository_ai_enabled(repository_path, global_path),
                     .context_bytes = loaded.settings.ai.context_bytes,
                     .model = loaded.settings.ai.model,
                     .max_tokens = loaded.settings.ai.max_tokens};
 }
 
-auto set_repository_ai_enabled(const std::filesystem::path& repository_path, bool enabled)
+auto set_repository_ai_enabled(const std::filesystem::path& repository_path,
+                               bool enabled,
+                               std::optional<std::filesystem::path> global_path)
     -> liquid::result<void> {
-    const auto path = repository_settings_path(repository_path);
+    const auto list = ai_repositories_path(global_path);
+    if (list.empty()) {
+        return std::unexpected(liquid::error{liquid::errc::unavailable,
+                                             "no user settings directory",
+                                             "set HOME, XDG_CONFIG_HOME or APPDATA"});
+    }
+    const auto identity = repository_identity(repository_path);
+    auto lines = enabled_repositories(list);
+    std::erase(lines, identity);
+    if (enabled) {
+        lines.push_back(identity);
+    }
     auto code = std::error_code{};
-    std::filesystem::create_directories(path.parent_path(), code);
+    std::filesystem::create_directories(list.parent_path(), code);
     if (code) {
         return std::unexpected(
             liquid::error{liquid::errc::io, "cannot create settings directory", code.message()});
     }
-    auto output = std::ofstream(path, std::ios::binary | std::ios::app);
+    auto output = std::ofstream(list, std::ios::binary | std::ios::trunc);
     if (!output) {
         return std::unexpected(
-            liquid::error{liquid::errc::io, "cannot write settings file", path.generic_string()});
+            liquid::error{liquid::errc::io, "cannot write the AI opt-in list", list.generic_string()});
     }
-    output << "liquify settings { ai { enabled: " << (enabled ? "true" : "false") << " } }\n";
+    for (const auto& line : lines) {
+        output << line << "\n";
+    }
     if (!output) {
         return std::unexpected(
-            liquid::error{liquid::errc::io, "cannot write settings file", path.generic_string()});
+            liquid::error{liquid::errc::io, "cannot write the AI opt-in list", list.generic_string()});
     }
     return {};
 }
