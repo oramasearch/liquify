@@ -9,6 +9,9 @@ inspectable context, provider contract, keyboard commands, and accept-only edit 
 [`review.md`](review.md) records the lake review panel, retained inline text diff, cursor anchors,
 rebase mapping states, review controls, and keyboard commands.
 
+[`cut.md`](cut.md) records Cut Change: the composer that names saved drips as one change through
+libliquid's cut API.
+
 [`structural-editing.md`](structural-editing.md) records syntax-node selection, canonical edit
 records, rename and extract-function previews, the headless agent surface and their limits.
 
