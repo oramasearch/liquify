@@ -300,6 +300,138 @@ auto describe_clone_refusal(std::string_view reference, std::string_view reason,
     };
 }
 
+auto describe_build_failure(const liquid::error& error, const std::filesystem::path& repository)
+    -> UserError {
+    auto output = UserError{.details = error_details(error, repository)};
+    if (error.code == liquid::errc::not_configured) {
+        output.kind = FailureKind::local;
+        output.summary = "This repository has no build set up yet";
+        output.next_step = "Choose the command that builds it. liquid records the command once "
+                           "and runs it on every build.";
+        output.action = ErrorAction::set_up_build;
+        output.action_label = "Set up build";
+        return output;
+    }
+    if (error.message == "build daemon is unavailable") {
+        output.kind = FailureKind::local;
+        output.summary = "The build service is not running for this repository";
+        output.next_step = "Reopen the repository to start it, then build again.";
+        return output;
+    }
+    output.kind = FailureKind::other;
+    output.summary = "The build did not finish";
+    output.next_step = "Fix what Details names, then build again.";
+    output.action = ErrorAction::retry;
+    output.action_label = "Build again";
+    return output;
+}
+
+auto describe_push_failure(const liquid::error& error, std::string_view remote,
+                           const std::filesystem::path& repository) -> UserError {
+    auto output = UserError{.details = error_details(error, repository)};
+    if (remote.empty()) {
+        output.kind = FailureKind::local;
+        output.summary = "This repository has no lake to push to";
+        output.next_step = "Choose the lake and the repository on it that this one pushes to.";
+        output.action = ErrorAction::set_sync_remote;
+        output.action_label = "Set lake";
+        return output;
+    }
+    const auto host = lake_host(remote);
+    output.kind = classify_lake_failure(error);
+    output.action = ErrorAction::retry;
+    output.action_label = "Push again";
+    switch (output.kind) {
+    case FailureKind::offline:
+        output.summary = std::format("Could not reach {}", host);
+        output.next_step = "Working offline is normal: your saved work stays here and can be "
+                           "pushed when the lake is reachable.";
+        break;
+    case FailureKind::secure_connection:
+        output.summary = std::format("{} answered, but a secure connection could not be made", host);
+        output.next_step = "Check the lake's address, or ask its operator about its certificate.";
+        break;
+    case FailureKind::interrupted:
+        output.summary = std::format("The connection to {} broke during the push", host);
+        output.next_step = "Nothing was lost here. Push again.";
+        break;
+    case FailureKind::unauthorized:
+        output.summary = std::format("{} did not accept your token", host);
+        output.next_step = "Create a token on the lake (Account, then API Tokens) and set it "
+                           "for this lake in Settings.";
+        output.action = ErrorAction::none;
+        output.action_label.clear();
+        break;
+    case FailureKind::forbidden:
+        output.summary = std::format("Your token cannot push to this repository on {}", host);
+        output.next_step = "Ask the repository's owner for write access.";
+        output.action = ErrorAction::none;
+        output.action_label.clear();
+        break;
+    case FailureKind::not_found:
+        output.summary = std::format("{} has no repository at the address this one pushes to", host);
+        output.next_step = "Choose the lake repository again.";
+        output.action = ErrorAction::set_sync_remote;
+        output.action_label = "Set lake";
+        break;
+    case FailureKind::lake_unavailable:
+        output.summary = std::format("{} cannot take the push right now", host);
+        output.next_step = "The lake answered that it is busy or unavailable. Push again in a "
+                           "moment.";
+        break;
+    case FailureKind::unsupported_lake:
+        output.summary = std::format("{} did not accept what this liquify sent", host);
+        output.next_step = "The lake and liquify may be different versions. Update liquify, or "
+                           "ask the lake's operator which version it runs.";
+        output.action = ErrorAction::none;
+        output.action_label.clear();
+        break;
+    case FailureKind::local:
+        output.summary = "The push could not read this repository";
+        output.next_step = "Fix what Details names, then push again.";
+        break;
+    case FailureKind::refused:
+    case FailureKind::other:
+        output.kind = FailureKind::other;
+        output.summary = std::format("The push to {} did not finish", host);
+        output.next_step = "Push again. If it fails again, open Details and report the message.";
+        break;
+    }
+    return output;
+}
+
+auto describe_query_failure(const liquid::error& error, const std::filesystem::path& repository)
+    -> UserError {
+    return {
+        .kind = FailureKind::local,
+        .summary = "Code analysis could not update",
+        .next_step = "Diagnostics, definitions and completion show their last result. Edit or "
+                     "save the file to try again.",
+        .details = error_details(error, repository),
+    };
+}
+
+auto describe_index_failure(std::string_view message, const std::filesystem::path& repository)
+    -> UserError {
+    return {
+        .kind = FailureKind::local,
+        .summary = "The file and symbol index could not be built",
+        .next_step = "The tree still lists files; Quick Open and symbol search wait for the "
+                     "index. Reopen the repository to try again.",
+        .details = without_absolute_paths(message, repository),
+    };
+}
+
+auto describe_folder_failure(std::string_view folder, std::string_view message,
+                             const std::filesystem::path& repository) -> UserError {
+    return {
+        .kind = FailureKind::local,
+        .summary = std::format("The folder {} could not be read", folder),
+        .next_step = "Collapse and expand it to try again.",
+        .details = without_absolute_paths(message, repository),
+    };
+}
+
 auto without_absolute_paths(std::string_view text, const std::filesystem::path& repository)
     -> std::string {
     const auto roots = repository_roots(repository);

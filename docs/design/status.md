@@ -51,7 +51,9 @@ and records known product defects separately from unavailable display modes
 metadata, commands, placement, focus, state and notifications; each surface moves among dock
 areas, floats and re-docks. Divider
 sizes and complete panel layouts persist per repository and can be reset. The status bar reports
-actionable build, sync, hydration and failure state. Collaboration, identity, change, timing and
+actionable build, sync, hydration and failure state; a failure is shown once, by one error
+component (sentence, next step, action, Details, no absolute paths), in the panel the status bar
+names ([`../ui/errors.md`](../ui/errors.md)). Collaboration, identity, change, timing and
 validation records remain available through explicit gutter, panel, and details controls. macOS installs native
 command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.md),
 [`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).

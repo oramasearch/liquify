@@ -55,6 +55,9 @@ struct TestSnapshot {
 struct DeploySnapshot {
   bool running{};
   std::string error;
+  // liquid's error for the failed push, and the sync remote it went to (empty: none set).
+  std::optional<liquid::error> failure;
+  std::string remote;
   std::uint64_t objects{};
   std::uint64_t bytes{};
   std::vector<liquid::sync_ref_outcome> references;
@@ -87,6 +90,7 @@ struct EditorGraphSnapshot {
   bool daemon_hosted{};
   std::string error;
   std::string query_error;
+  std::optional<liquid::error> query_failure;
   std::optional<liquid::daemon_status> daemon;
   liquid::graph_statistics graph;
   std::uint64_t repository_pending_drips{};
@@ -112,6 +116,8 @@ struct EditorGraphSnapshot {
   std::uint64_t structural_result_generation{};
   double edit_to_diagnostic_ms{};
   bool build_running{};
+  // The last build or test run's failure; shown in the Build panel only.
+  std::optional<liquid::error> build_error;
   std::string build_result;
   std::chrono::milliseconds build_first_action{};
   std::chrono::milliseconds build_finished{};

@@ -496,24 +496,27 @@ struct EditorGraph::Impl {
   void record_query_error(const liquid::error &error) {
     auto lock = std::lock_guard(mutex);
     current.query_error = error_message(error);
+    current.query_failure = error;
   }
 
+  // Build and push failures belong to the Build panel, never to Diagnostics.
   void record_build_error(const liquid::error &error) {
     auto lock = std::lock_guard(mutex);
-    current.query_error = error_message(error);
+    current.build_error = error;
     current.build_running = false;
   }
 
   void record_deploy_error(const liquid::error &error) {
     auto lock = std::lock_guard(mutex);
-    current.query_error = error_message(error);
     current.deploy.running = false;
-    current.deploy.error = current.query_error;
+    current.deploy.error = error_message(error);
+    current.deploy.failure = error;
   }
 
   void clear_query_error() {
     auto lock = std::lock_guard(mutex);
     current.query_error.clear();
+    current.query_failure.reset();
   }
 
   void refresh_daemon_status() {
@@ -536,6 +539,7 @@ struct EditorGraph::Impl {
     auto lock = std::lock_guard(mutex);
     build_requested_at = std::chrono::steady_clock::now();
     current.build_running = true;
+    current.build_error.reset();
     current.build_result.clear();
     current.build_first_action = {};
     current.build_finished = {};
@@ -748,15 +752,15 @@ struct EditorGraph::Impl {
   }
 
   void load_tests() {
+    // Listing tests in the background is not an operation the person asked for: a repository
+    // with no recorded build simply has no tests yet, and other failures wait for F7 or F8.
     auto source = liquid::runtime::block_on(
         liquid::repository::open_build(repository_path));
     if (!source) {
-      record_query_error(source.error());
       return;
     }
     auto targets = liquid::runtime::block_on(source->tests());
     if (!targets) {
-      record_query_error(targets.error());
       return;
     }
     auto lock = std::lock_guard(mutex);
@@ -992,10 +996,13 @@ struct EditorGraph::Impl {
     }
     const auto remote = source->remote_configuration();
     if (!remote) {
-      record_deploy_error({liquid::errc::not_found,
-                           "repository has no configured sync remote",
-                           repository_path.string()});
+      record_deploy_error({liquid::errc::not_configured,
+                           "repository has no configured sync remote", ""});
       return;
+    }
+    {
+      auto lock = std::lock_guard(mutex);
+      current.deploy.remote = remote->endpoint;
     }
     auto endpoint = liquid::sync_endpoint{
         remote->endpoint,
@@ -1006,6 +1013,7 @@ struct EditorGraph::Impl {
     current.deploy.running = false;
     if (!pushed) {
       current.deploy.error = error_message(pushed.error());
+      current.deploy.failure = pushed.error();
       return;
     }
     current.deploy.objects = pushed->sent.objects;

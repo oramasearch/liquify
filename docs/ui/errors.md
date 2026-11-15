@@ -21,6 +21,36 @@ No field carries an absolute local path the person did not type. `without_absolu
 path inside the repository relative to it, says "the repository" for the root, and reduces any
 other absolute path (macOS `/private` aliases included) to its file name. URLs are left as they are.
 
+## Where failures appear
+
+Each failure is shown once, in the panel that owns it, and the status bar names that panel.
+
+| Failure | Panel | Sentence | Action |
+|---|---|---|---|
+| Build or test run (F7, F8), no recorded build | Build | This repository has no build set up yet | Set up build (#107) |
+| Build or test run, the build service is not running | Build | The build service is not running for this repository | |
+| Build or test run, anything else | Build | The build did not finish | Build again |
+| Push (F9), no sync remote | Build | This repository has no lake to push to | Set lake (#104) |
+| Push, the lake failed | Build | The lake failure classes below, worded for a push | Push again, where retrying can help |
+| Code analysis (diagnostics, hover, definition, completion) | Diagnostics | Code analysis could not update | |
+| The path and symbol index | Repository sidebar | The file and symbol index could not be built | |
+| One folder of the tree | Repository sidebar | The folder *name* could not be read | |
+| Opening a repository | Front door, repository sidebar | This folder could not be opened as a repository | Retry |
+| Clone | Front door | The lake failure classes below | Retry clone |
+
+The status bar shows the first of build, push and code-analysis failures as its sentence followed by
+"Open *panel*"; selecting it focuses the panel and shows the sidebar or bottom area that holds it
+(`App::status_failure`). Any other status text has absolute paths removed before it is shown.
+
+A failure's action is drawn only when liquify can perform it (`App::error_action_available`); Set
+up build and Set lake appear once their dialogs exist. Until then the next step says what to do.
+
+Build and push failures are recorded separately from code-analysis failures in the editor graph
+(`EditorGraphSnapshot::build_error`, `DeploySnapshot::failure`, `query_failure`), so a failed
+build is never reported again as a diagnostics failure. Listing tests in the background is not an
+operation the person asked for: a repository with no recorded build has no tests, and is not an
+error.
+
 ## Lake failures
 
 `classify_lake_failure` reads liquid's error code (`liquid::errc`) and gives one kind per class.
@@ -50,6 +80,11 @@ arrives as `unspecified system_category error` and is classified as a secure-con
 When liquid reports the stage itself ([liquid#530](https://github.com/oramasearch/liquid/issues/530)), this table reads it instead of the message.
 
 ## How to verify
+
+- `liquify-native-acceptance-build` presses F7 and F9 in the real window on a repository with no
+  recorded build and no sync remote. It requires each failure once, in Build and not as a
+  code-analysis failure, with no absolute path, the status bar naming Build, and the status bar
+  opening Build when clicked; it saves `build-failure-*` and `push-failure-*` in both themes.
 
 - `ctest -R UserError` checks every class from liquid's codes, that only the offline class says
   offline is normal, that each class has its own sentence and step, and the path reduction.

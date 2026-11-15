@@ -50,7 +50,9 @@ changes live, keeps telemetry off by default, and never places credential values
 UI. SDL composition supports
 CJK input methods and dead keys; rich and plain clipboard forms, file drops, visible keyboard
 focus, macOS accessibility labels, high contrast and the OS reduced-motion preference cover the
-shell. The status bar reports actionable build, sync, hydration and failure state; collaboration,
+shell. The status bar reports actionable build, sync, hydration and failure state, and names the panel
+that holds a failure; one error component (sentence, next step, Details, no absolute paths) shows
+each failure once (`docs/ui/errors.md`); collaboration,
 identity, change and validation details open only through their explicit affordances. macOS exposes
 the command groups and Cmd bindings through the native menu bar. The same registry provides a fuzzy palette with recent commands and resolved
 bindings, typed `.liquid` keymap overrides with conflict reporting, plugin commands, and headless

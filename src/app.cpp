@@ -812,6 +812,11 @@ auto deploy_outcome_name(liquid::sync_ref_outcome_kind outcome)
   return "unknown";
 }
 
+auto graph_query_failure(const EditorGraphSnapshot &snapshot) -> liquid::error {
+  return snapshot.query_failure.value_or(
+      liquid::error{liquid::errc::internal, snapshot.query_error, ""});
+}
+
 auto pixel_color(ImVec4 color) -> UiPixelColor {
   return {static_cast<std::uint8_t>(std::round(color.x * 255.0F)),
           static_cast<std::uint8_t>(std::round(color.y * 255.0F)),
@@ -4088,16 +4093,21 @@ void App::draw_repository_tree() {
   }
   ImGui::Separator();
   if (!repository_->error().empty()) {
-    ImGui::TextWrapped("Could not open this repository: %s",
-                       std::string(repository_->error()).c_str());
+    draw_user_error({.kind = FailureKind::local,
+                     .summary = "This repository could not be opened",
+                     .next_step = "Reopen it from the front door.",
+                     .details = without_absolute_paths(repository_->error(),
+                                                       repository_->path())},
+                    "repository-failure");
     return;
   }
   repository_->poll();
   if (repository_->navigation_loading()) {
     ImGui::TextDisabled("Indexing paths and symbols...");
   } else if (!repository_->navigation_error().empty()) {
-    ImGui::TextWrapped("Navigation index: %s",
-                       std::string(repository_->navigation_error()).c_str());
+    draw_user_error(describe_index_failure(repository_->navigation_error(),
+                                           repository_->path()),
+                    "index-failure");
   }
   if (!repository_->mutation_status().empty()) {
     ImGui::TextWrapped("%s",
@@ -4271,9 +4281,10 @@ void App::draw_repository_entries(std::string_view directory) {
         if (repository_->directory_loading(path)) {
           ImGui::TextDisabled("loading...");
         } else if (!repository_->directory_error(path).empty()) {
-          ImGui::TextWrapped(
-              "Unable to read directory: %s",
-              std::string(repository_->directory_error(path)).c_str());
+          draw_user_error(
+              describe_folder_failure(path, repository_->directory_error(path),
+                                      repository_->path()),
+              "folder-failure/" + path);
         } else {
           draw_repository_entries(path);
         }
@@ -5997,8 +6008,9 @@ void App::draw_diagnostics_panel(const EditorGraphSnapshot &graph_snapshot) {
                              graph_snapshot.build_diagnostics.begin(),
                              graph_snapshot.build_diagnostics.end());
   if (!graph_snapshot.query_error.empty()) {
-    ImGui::TextWrapped("Could not update diagnostics: %s",
-                       graph_snapshot.query_error.c_str());
+    draw_user_error(describe_query_failure(graph_query_failure(graph_snapshot),
+                                           repository_path()),
+                    "query-failure");
   }
   for (std::size_t index = 0; index < visible_diagnostics.size(); ++index) {
     const auto &diagnostic = visible_diagnostics[index];
@@ -6075,9 +6087,10 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
   if (ImGui::SmallButton("Deploy saved drips")) {
     request_deploy();
   }
-  if (!snapshot.query_error.empty()) {
-    ImGui::TextWrapped("Could not complete the operation: %s",
-                       snapshot.query_error.c_str());
+  if (snapshot.build_error) {
+    draw_user_error(
+        describe_build_failure(*snapshot.build_error, repository_path()),
+        "build-failure", [this] { request_build(); });
   }
   if (snapshot.build_running) {
     ImGui::SameLine();
@@ -6138,15 +6151,17 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
       ImGui::TextWrapped("%s", result.output.c_str());
     }
   }
-  if (snapshot.deploy.running || !snapshot.deploy.error.empty() ||
+  if (snapshot.deploy.running || snapshot.deploy.failure ||
       !snapshot.deploy.references.empty()) {
     ImGui::Separator();
     if (snapshot.deploy.running) {
       ImGui::TextUnformatted("Deploying saved drips...");
     }
-    if (!snapshot.deploy.error.empty()) {
-      ImGui::TextColored(ImVec4(0.75F, 0.12F, 0.12F, 1.0F), "%s",
-                         snapshot.deploy.error.c_str());
+    if (snapshot.deploy.failure) {
+      draw_user_error(describe_push_failure(*snapshot.deploy.failure,
+                                            snapshot.deploy.remote,
+                                            repository_path()),
+                      "push-failure", [this] { request_deploy(); });
     }
     if (!snapshot.deploy.references.empty()) {
       ImGui::Text("Transferred %llu objects, %llu bytes",
@@ -6165,8 +6180,8 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
   if (!snapshot.build_running && snapshot.build_result.empty() &&
       snapshot.build_actions.empty() && snapshot.tests.empty() &&
       snapshot.test_results.empty() && !snapshot.deploy.running &&
-      snapshot.deploy.error.empty() && snapshot.deploy.references.empty() &&
-      snapshot.query_error.empty()) {
+      !snapshot.deploy.failure && snapshot.deploy.references.empty() &&
+      !snapshot.build_error) {
     ImGui::TextWrapped("%s",
                        panels_.descriptor(PanelId::build).empty_state.data());
   }
@@ -6650,7 +6665,46 @@ void App::draw_floating_panels() {
   }
 }
 
-void App::draw_user_error(const UserError &failure, std::string_view id) {
+auto App::repository_path() const -> std::filesystem::path {
+  return repository_ ? repository_->path() : std::filesystem::path{};
+}
+
+// The failure the status bar names, and the panel that shows it. Build and push failures live
+// in the Build panel; code-analysis failures in Diagnostics.
+auto App::status_failure(const EditorGraphSnapshot &graph) const
+    -> std::optional<StatusFailure> {
+  if (graph.build_error) {
+    return StatusFailure{
+        describe_build_failure(*graph.build_error, repository_path()).summary,
+        PanelId::build};
+  }
+  if (graph.deploy.failure) {
+    return StatusFailure{describe_push_failure(*graph.deploy.failure,
+                                               graph.deploy.remote,
+                                               repository_path())
+                             .summary,
+                         PanelId::build};
+  }
+  if (!graph.query_error.empty()) {
+    return StatusFailure{
+        describe_query_failure(graph_query_failure(graph), repository_path())
+            .summary,
+        PanelId::diagnostics};
+  }
+  return std::nullopt;
+}
+
+// Actions a failure can offer besides Retry, which the caller supplies. An action liquify
+// cannot perform yet is not drawn: a button that does nothing is worse than none.
+auto App::error_action_available(ErrorAction action) const -> bool {
+  static_cast<void>(action);
+  return false;
+}
+
+void App::run_error_action(ErrorAction action) { static_cast<void>(action); }
+
+void App::draw_user_error(const UserError &failure, std::string_view id,
+                          const std::function<void()> &retry) {
   const auto palette =
       effective_palette(applied_dark_theme_, applied_high_contrast_);
   ImGui::PushID(id.data(), id.data() + id.size());
@@ -6663,7 +6717,25 @@ void App::draw_user_error(const UserError &failure, std::string_view id) {
     ImGui::TextUnformatted(failure.next_step.c_str());
   }
   ImGui::PopTextWrapPos();
+  const auto has_action =
+      !failure.action_label.empty() &&
+      (failure.action == ErrorAction::retry
+           ? static_cast<bool>(retry)
+           : error_action_available(failure.action));
+  if (has_action) {
+    if (ImGui::Button(failure.action_label.c_str())) {
+      if (failure.action == ErrorAction::retry) {
+        retry();
+      } else {
+        run_error_action(failure.action);
+      }
+    }
+    frame_layout_.controls[std::string(id) + "/action"] = item_rectangle();
+  }
   if (!failure.details.empty()) {
+    if (has_action) {
+      ImGui::SameLine();
+    }
     auto &open = error_details_open_[std::string(id)];
     if (ImGui::SmallButton(open ? "Hide details" : "Details")) {
       open = !open;
@@ -6733,9 +6805,14 @@ void App::draw_welcome() {
 
   const auto phase = first_run_.phase();
   if (phase == RepositoryLifecyclePhase::unreadable) {
-    ImGui::TextUnformatted("Repository could not be opened");
-    ImGui::TextWrapped("%s", first_run_.pending_path().string().c_str());
-    ImGui::TextWrapped("%s", first_run_.error().c_str());
+    draw_user_error(
+        {.kind = FailureKind::local,
+         .summary = "This folder could not be opened as a repository",
+         .next_step = "Retry, or choose another folder.",
+         .details = without_absolute_paths(first_run_.error(),
+                                           first_run_.pending_path())},
+        "open-failure");
+    ImGui::TextDisabled("%s", first_run_.pending_path().string().c_str());
     if (ImGui::Button("Retry")) {
       begin_open_repository(first_run_.pending_path());
     }
@@ -6899,15 +6976,33 @@ void App::draw_status_bar() {
     state = "Syncing…";
   } else if (hydration_was_running_) {
     state = "Loading files…";
+  } else if (const auto failure = status_failure(graph)) {
+    const auto label =
+        failure->summary + " · Open " +
+        std::string(panels_.descriptor(failure->panel).title) +
+        "##status-failure";
+    const auto palette =
+        effective_palette(applied_dark_theme_, applied_high_contrast_);
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.danger));
+    if (ImGui::SmallButton(label.c_str())) {
+      panels_.focus(failure->panel);
+      if (panels_.layout(failure->panel).placement == PanelPlacement::sidebar) {
+        shell_state_.sidebar_visible = true;
+      } else {
+        shell_state_.bottom_panel_visible = true;
+      }
+      persist_shell_state();
+    }
+    ImGui::PopStyleColor();
+    frame_layout_.controls["status/failure"] = item_rectangle();
   } else if (!editor_status_.empty()) {
     state = editor_status_;
-  } else if (!graph.query_error.empty()) {
-    state = "Operation failed · see Diagnostics";
   } else if (repository_ && repository_->offline() &&
              repository_->pending_uploads() > 0) {
     state = "Offline · saved changes waiting to sync";
   }
   if (!state.empty()) {
+    state = without_absolute_paths(state, repository_path());
     auto visible = compact_identifiers(state);
     const auto width = ImGui::GetContentRegionAvail().x;
     while (visible.size() > 4 &&

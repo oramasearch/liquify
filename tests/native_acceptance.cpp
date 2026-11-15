@@ -303,29 +303,67 @@ void NativeAcceptance::tabs(App &app) {
           "#35: every visible tab selects its panel; failed=" + failed);
 }
 
-void NativeAcceptance::build(App &app) {
+void NativeAcceptance::build(App &app, const std::filesystem::path &output) {
   open_file(app);
   require(app.editor_graph_ != nullptr, "real repository has editor graph");
   app.editor_graph_->wait_until_idle();
   key(app, "F7");
   app.editor_graph_->wait_until_idle();
   pulse(app);
-  const auto snapshot = app.editor_graph_->snapshot();
-  std::printf("build: running=%d actions=%zu result='%s' error='%s'\n",
+  auto snapshot = app.editor_graph_->snapshot();
+  const auto repository = app.repository_->path().string();
+  const auto build_failure = describe_build_failure(
+      snapshot.build_error.value_or(liquid::error{}), app.repository_->path());
+  std::printf("build: running=%d actions=%zu result='%s' summary='%s' "
+              "step='%s' details='%s' query_error='%s'\n",
               snapshot.build_running, snapshot.build_actions.size(),
-              snapshot.build_result.c_str(), snapshot.query_error.c_str());
-  require(!snapshot.build_running && !snapshot.query_error.empty() &&
+              snapshot.build_result.c_str(), build_failure.summary.c_str(),
+              build_failure.next_step.c_str(), build_failure.details.c_str(),
+              snapshot.query_error.c_str());
+  require(!snapshot.build_running && snapshot.build_error.has_value() &&
               snapshot.build_result.empty(),
           "unconfigured build reports unavailable without fabricated success");
+  require(snapshot.query_error.empty(),
+          "#99: a build failure is not reported a second time as a query error");
+  require(build_failure.summary.find(repository) == std::string::npos &&
+              build_failure.details.find(repository) == std::string::npos,
+          "#99: no absolute repository path in the build failure");
+  auto status = app.status_failure(snapshot);
+  require(status && status->panel == PanelId::build &&
+              status->summary == build_failure.summary,
+          "#99: the status bar names the Build panel, which holds the error");
+  require(app.frame_layout().controls.contains("status/failure"),
+          "status bar failure is a control");
+  click(app, app.frame_layout().controls.at("status/failure"));
+  require(app.shell_state_.bottom_panel_visible &&
+              app.panels_.active(PanelPlacement::bottom) == PanelId::build &&
+              app.frame_layout().controls.contains("build-failure/summary"),
+          "#99: the status bar opens the Build panel showing the error");
+  capture_themes(app, output, "build-failure");
+
   key(app, "F9");
   app.editor_graph_->wait_until_idle();
   pulse(app);
-  const auto deploy = app.editor_graph_->snapshot().deploy;
-  std::printf("offline: running=%d objects=%llu error='%s'\n", deploy.running,
-              static_cast<unsigned long long>(deploy.objects),
-              deploy.error.c_str());
-  require(!deploy.running && !deploy.error.empty() && deploy.objects == 0,
+  snapshot = app.editor_graph_->snapshot();
+  const auto &deploy = snapshot.deploy;
+  const auto push_failure =
+      describe_push_failure(deploy.failure.value_or(liquid::error{}),
+                            deploy.remote, app.repository_->path());
+  std::printf("offline: running=%d objects=%llu summary='%s' step='%s' "
+              "details='%s' query_error='%s'\n",
+              deploy.running, static_cast<unsigned long long>(deploy.objects),
+              push_failure.summary.c_str(), push_failure.next_step.c_str(),
+              push_failure.details.c_str(), snapshot.query_error.c_str());
+  require(!deploy.running && deploy.failure.has_value() && deploy.objects == 0,
           "missing remote reports offline without fabricated upload");
+  require(snapshot.query_error.empty(),
+          "#99: a push failure appears once, not also as a query error");
+  require(push_failure.action == ErrorAction::set_sync_remote &&
+              push_failure.details.find(repository) == std::string::npos,
+          "#99: no sync remote offers Set lake, with no absolute path");
+  require(app.frame_layout().controls.contains("push-failure/summary"),
+          "push failure drawn in the Build panel");
+  capture_themes(app, output, "push-failure");
 }
 
 void NativeAcceptance::wait_for_repository_operation(App &app) {
@@ -484,7 +522,7 @@ int NativeAcceptance::run(std::string_view scenario,
   } else if (scenario == "tabs") {
     tabs(app);
   } else if (scenario == "build") {
-    build(app);
+    build(app, output);
   } else {
     throw std::runtime_error("unknown native acceptance scenario");
   }
