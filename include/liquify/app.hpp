@@ -113,6 +113,9 @@ private:
   void draw_cut_composer();
   void open_set_lake_dialog();
   void draw_set_lake_dialog();
+  void configure_review();
+  void open_request_review();
+  void draw_request_review_dialog();
   void draw_split_editor();
   void draw_repository_tree();
   void draw_repository_entries(std::string_view directory);
@@ -406,6 +409,11 @@ private:
   bool assistant_was_running_{};
   // Which error components show liquid's raw message, by component id.
   std::map<std::string, bool, std::less<>> error_details_open_;
+  // Request Review dialog.
+  bool request_review_requested_{};
+  std::string request_review_reviewers_;
+  // Whether options_.lake_url came from the repository (clone or Set Lake), not --lake.
+  bool lake_url_from_repository_{};
   // Set Lake dialog.
   bool set_lake_requested_{};
   std::string set_lake_url_;

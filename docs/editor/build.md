@@ -65,7 +65,7 @@ a test lake (liquid's `forge_double`) with libliquid, opens the folder in liquif
 cuts, presses F9 and requires every reference applied and a fresh clone from the test lake to
 serve the edit. `set-lake-push` presses F9 with no lake, clicks **Set lake**, types the address
 and requires the next F9 to reach that lake. `front-door-clone-push` does the whole loop from the
-front door's clone; it is `WILL_FAIL` until liquify#97 (liquid#526), because the first save into a
-store liquify itself just cloned loses an index run. Successful and failed sandboxed
+front door's clone; it is disabled until liquify#97 (liquid#526), because the first save into a
+store liquify itself just cloned usually loses an index run (and now and then does not). Successful and failed sandboxed
 actions remain owed on macOS until macFUSE is available; see
 [`../ui/native-acceptance.md`](../ui/native-acceptance.md).

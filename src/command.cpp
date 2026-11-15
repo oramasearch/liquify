@@ -19,7 +19,7 @@
 namespace liquify {
 namespace {
 
-using DefinitionArray = std::array<CommandDefinition, 43>;
+using DefinitionArray = std::array<CommandDefinition, 44>;
 
 const DefinitionArray definitions{{
     {"file.close",
@@ -139,6 +139,11 @@ const DefinitionArray definitions{{
      "Create a cursor-anchored comment.",
      {"Primary+Alt+C"}},
     {"review.approve", "Approve", "Review", "Approve the open review.", {"Primary+Alt+A"}},
+    {"review.request",
+     "Request Review",
+     "Review",
+     "Ask people on lake to review the current change.",
+     {}},
     {"assistant.ask",
      "Ask Assistant",
      "Assistant",

@@ -44,7 +44,7 @@ non-zero.
 blob at any expanded depth be opened in the editor. C and C++ buffers add graph-query controls, an
 inline diagnostics layer, diagnostics/completion and configured plugin panels, plugin commands in
 the shared command registry, fuzzy palette and native macOS menus, and a daemon status line;
-`liquify --lake <repository-url> <path>` adds the review panel and reads its bearer from
+`liquify --lake <repository-url> <path>` points the review panel at that lake (otherwise it uses the lake the repository came from; see `docs/editor/review.md`) and reads its bearer from
 `LIQUID_TOKEN`;
 `liquify --print-tree <path>` prints name, kind and mode without a display, with every control character in a name written as `\xHH` (liquify#78);
 `liquify --apply-edits <file> <path>` applies canonical-CBOR structural edits without a display

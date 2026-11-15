@@ -1028,7 +1028,7 @@ struct EditorGraph::Impl {
       current.history_generation = request;
   }
 
-  void deploy() {
+  void deploy(std::string lake_remote) {
     {
       auto lock = std::lock_guard(mutex);
       current.deploy = {};
@@ -1048,12 +1048,7 @@ struct EditorGraph::Impl {
       endpoint_url = remote->endpoint;
       token = bearer_token(*remote);
     } else {
-      auto recorded = recorded_lake_remote(repository_path);
-      if (!recorded) {
-        record_deploy_error(recorded.error());
-        return;
-      }
-      endpoint_url = std::move(*recorded);
+      endpoint_url = std::move(lake_remote);
     }
     if (endpoint_url.empty()) {
       record_deploy_error({liquid::errc::not_configured,
@@ -1682,9 +1677,11 @@ void EditorGraph::refresh_tests() {
       {[implementation = impl_.get()] { implementation->load_tests(); }});
 }
 
-void EditorGraph::request_push() {
-  impl_->enqueue(
-      {[implementation = impl_.get()] { implementation->deploy(); }});
+void EditorGraph::request_push(std::string lake_remote) {
+  impl_->enqueue({[implementation = impl_.get(),
+                   lake_remote = std::move(lake_remote)]() mutable {
+    implementation->deploy(std::move(lake_remote));
+  }});
 }
 
 void EditorGraph::publish_build_event(liquid::build_event event) {

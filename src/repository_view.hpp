@@ -64,6 +64,10 @@ public:
   [[nodiscard]] auto last_changed_at() const -> std::string_view;
   [[nodiscard]] auto offline_reason() const -> std::string_view;
   [[nodiscard]] auto offline() const -> bool;
+  // The lake repository this one was cloned from or that Set Lake recorded, read with the rest
+  // of the repository at open (libliquid's drive client); empty when none.
+  [[nodiscard]] auto lake_remote() const -> std::string_view;
+  void set_lake_remote(std::string remote);
   // Why a clone failed, in the product's words; empty after a successful clone or an open.
   [[nodiscard]] auto clone_failure() const -> const UserError &;
   [[nodiscard]] auto remote_bytes() const -> std::uint64_t;
@@ -142,6 +146,7 @@ private:
   std::string offline_reason_;
   bool offline_{};
   UserError clone_failure_;
+  std::string lake_remote_;
   std::uint64_t remote_bytes_{};
   std::uint64_t hydration_debt_{};
   std::uint64_t pending_uploads_{};

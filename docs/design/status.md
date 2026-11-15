@@ -64,7 +64,9 @@ names the drips saved since the last change as one change through libliquid's cu
 showing what it gathers ([`../editor/cut.md`](../editor/cut.md)). While a modal dialog is open,
 typed text reaches only the dialog, never the source behind it. F9 is Push: it pushes to the
 repository's sync remote or the lake it was cloned from, and with neither offers Set Lake
-([`../editor/build.md`](../editor/build.md)).
+([`../editor/build.md`](../editor/build.md)). Request Review asks lake to review the current change;
+the Review panel uses the repository's lake, teaches when it is empty, and never names a
+command-line flag ([`../editor/review.md`](../editor/review.md)).
 The searchable settings surface reads a user `.liquid` file plus repository overrides and applies
 theme, fonts, editor behavior, keymaps, optional AI, lake accounts and default-off telemetry live.
 Parser and typed validation errors remain inline, group reset is local, and credential values never

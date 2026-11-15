@@ -41,6 +41,7 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | Review | Next Comment | `review.next-comment` | `Option+C` | `Alt+C` | `Alt+C` | Move to the next review comment. |
 | Review | New Comment | `review.new-comment` | `Cmd+Option+C` | `Ctrl+Alt+C` | `Ctrl+Alt+C` | Create a cursor-anchored comment. |
 | Review | Approve | `review.approve` | `Cmd+Option+A` | `Ctrl+Alt+A` | `Ctrl+Alt+A` | Approve the open review. |
+| Review | Request Review | `review.request` | `—` | `—` | `—` | Ask people on lake to review the current change. |
 | Assistant | Ask Assistant | `assistant.ask` | `Cmd+Shift+A` | `Ctrl+Shift+A` | `Ctrl+Shift+A` | Ask with inspectable graph context. |
 | Assistant | Explain Diagnostic | `assistant.explain-diagnostic` | `Cmd+Shift+E` | `Ctrl+Shift+E` | `Ctrl+Shift+E` | Explain the active diagnostic. |
 | Assistant | Propose Edit | `assistant.propose-edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` | `Ctrl+Shift+I` | Request an edit preview without changing the repository. |

@@ -4,6 +4,7 @@
 #include "../src/repository_view.hpp"
 #include "forge_double.hpp"
 #include "liquid/drive.hpp"
+#include "liquid/forge.hpp"
 #include "liquid/identity.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
@@ -673,6 +674,98 @@ void NativeAcceptance::opened_clone_push(const std::filesystem::path &output) {
           "#104: the lake serves the pushed edit to a fresh clone");
 }
 
+void NativeAcceptance::request_review(const std::filesystem::path &output) {
+  // A repository with no lake: the Review panel teaches and offers Set lake.
+  {
+    const auto local = output / ("local-" + std::to_string(std::chrono::steady_clock::now()
+                                                              .time_since_epoch()
+                                                              .count()));
+    create_repository(local);
+    App app({.repository_path = local});
+    require(launch(app, 2) == 0, "real native application window initialized");
+    app.panels_.focus(PanelId::review);
+    app.shell_state_.sidebar_visible = true;
+    pulse(app);
+    require(app.review_ == nullptr &&
+                app.frame_layout().controls.contains("review/set-lake"),
+            "#105: with no lake the Review panel offers Set lake, no flag");
+    capture_themes(app, output, "review-no-lake");
+  }
+  auto lake = liquid::test::forge_double{};
+  require(lake.advance_head("main.cpp", source).has_value(),
+          "test lake holds main.cpp");
+  const auto stamp = std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count());
+  const auto folder = output / ("clone-" + stamp);
+  static_cast<void>(lake_file(lake.url(), folder, "main.cpp"));
+  const auto before = recorded_lake_remote(folder);
+  std::printf("review: recorded_before='%s' error='%s'\n",
+              before ? before->c_str() : "", before ? "" : before.error().message.c_str());
+  App app({.repository_path = folder});
+  require(launch(app, 2) == 0, "real native application window initialized");
+  pulse(app);
+  std::printf("review: lake_url='%s' status='%s'\n",
+              app.options_.lake_url.value_or("").c_str(), app.editor_status_.c_str());
+  require(app.review_ != nullptr,
+          "#105: the Review panel uses the lake the repository came from");
+  app.panels_.focus(PanelId::review);
+  app.shell_state_.sidebar_visible = true;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (app.review_->snapshot().busy &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  pulse(app);
+  require(app.frame_layout().controls.contains("review/request-empty"),
+          "#105: the empty Review panel offers Request review");
+  capture_themes(app, output, "review-empty");
+  app.panels_.focus(PanelId::repository);
+  pulse(app);
+  open_file(app);
+  edit_save_cut(app, "/* please review */", "Ask for review");
+  push(app);
+  require(!app.editor_graph_->snapshot().deploy.failure,
+          "the change was pushed");
+  app.panels_.focus(PanelId::review);
+  app.shell_state_.sidebar_visible = true;
+  pulse(app);
+  click(app, app.frame_layout().controls.at("review/request"));
+  pulse(app);
+  require(popup("Request Review"), "Request review opened its dialog");
+  text(app, "ana, bo");
+  require(app.request_review_reviewers_ == "ana, bo", "reviewers typed");
+  capture_themes(app, output, "request-review");
+  click(app, app.frame_layout().controls.at("request-review/submit"));
+  while ((app.review_->snapshot().busy ||
+          !app.review_->snapshot().review.selected) &&
+         std::chrono::steady_clock::now() < deadline + std::chrono::seconds(30)) {
+    pulse(app);
+  }
+  const auto snapshot = app.review_->snapshot();
+  std::printf("review: selected=%s error='%s'\n",
+              snapshot.review.selected ? snapshot.review.selected->id.c_str() : "",
+              snapshot.error.c_str());
+  require(snapshot.review.selected.has_value(),
+          "#105: Request review created the review and opened it");
+  auto client = liquid::forge_client{lake.url()};
+  const auto reviews = liquid::runtime::block_on(client.list_reviews());
+  require(reviews.has_value(), "the test lake lists reviews");
+  auto repository = liquid::runtime::block_on(liquid::repository::open(folder));
+  require(repository.has_value(), "repository reopened");
+  const auto head = repository->status()->head;
+  const auto found = std::ranges::find_if(*reviews, [&](const auto &review) {
+    return review.id == snapshot.review.selected->id;
+  });
+  require(found != reviews->end() && head &&
+              liquid::to_string(found->change.value) ==
+                  liquid::to_string(head->value) &&
+              found->reviewers == std::vector<std::string>{"ana", "bo"},
+          "#105: the lake holds the same review, of the current change, with "
+          "its reviewers");
+  capture_themes(app, output, "review-opened");
+}
+
 void NativeAcceptance::wait_for_repository_operation(App &app) {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -791,6 +884,11 @@ void NativeAcceptance::clone_failures(App &app,
 int NativeAcceptance::run(std::string_view scenario,
                           const std::filesystem::path &output) {
   std::filesystem::create_directories(output);
+  if (scenario == "request-review") {
+    request_review(output);
+    std::printf("native acceptance: PASS request-review\n");
+    return 0;
+  }
   if (scenario == "opened-clone-push") {
     opened_clone_push(output);
     std::printf("native acceptance: PASS opened-clone-push\n");
