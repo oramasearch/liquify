@@ -15,6 +15,19 @@ param(
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 
+# A release is never self-signed (liquify#77). LIQUIFY_RELEASE=1, or a build of a v* tag, requires a
+# real certificate (-PfxPath) and its publisher; the self-signed CN=Liquify CI path is for local and
+# test builds only.
+$isRelease = ($env:LIQUIFY_RELEASE -eq '1') -or ("$env:GITHUB_REF" -like 'refs/tags/v*')
+if ($isRelease) {
+    if ([string]::IsNullOrWhiteSpace($PfxPath) -or -not (Test-Path $PfxPath)) {
+        throw 'refusing to package a release without a signing certificate (-PfxPath)'
+    }
+    if ([string]::IsNullOrWhiteSpace($Publisher) -or $Publisher -eq 'CN=Liquify CI') {
+        throw 'refusing to package a release under the test publisher CN=Liquify CI'
+    }
+}
+
 if ($PackageVersion -notmatch '^(\d+)\.(\d+)\.(\d+)\.(\d+)$') {
     throw 'PackageVersion must contain four numeric components'
 }

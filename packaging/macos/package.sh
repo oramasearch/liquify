@@ -23,6 +23,26 @@ if [[ ! -x "$binary_path" ]]; then
     exit 1
 fi
 
+# A release is never ad hoc signed or unnotarized (liquify#77). LIQUIFY_RELEASE=1, or a build of a
+# v* tag, requires the Developer ID application and installer identities and the notary key; the
+# ad hoc path, whose entitlements allow any library to load, is for local and test builds only.
+release=false
+if [[ "${LIQUIFY_RELEASE:-}" == 1 || "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+    release=true
+fi
+if [[ "$release" == true ]]; then
+    missing=()
+    [[ -n "$application_identity" ]] || missing+=(LIQUIFY_APPLE_APPLICATION_IDENTITY)
+    [[ -n "$installer_identity" ]] || missing+=(LIQUIFY_APPLE_INSTALLER_IDENTITY)
+    [[ -n "$notary_key_path" ]] || missing+=(LIQUIFY_APPLE_NOTARY_KEY_PATH)
+    [[ -n "$notary_key_id" ]] || missing+=(LIQUIFY_APPLE_NOTARY_KEY_ID)
+    [[ -n "$notary_issuer_id" ]] || missing+=(LIQUIFY_APPLE_NOTARY_ISSUER_ID)
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "refusing to package a release without signing and notarization: missing ${missing[*]}" >&2
+        exit 1
+    fi
+fi
+
 mkdir -p "$output_directory"
 output_directory="$(cd "$output_directory" && pwd)"
 work_directory="$(mktemp -d "${TMPDIR:-/tmp}/liquify-package.XXXXXX")"
