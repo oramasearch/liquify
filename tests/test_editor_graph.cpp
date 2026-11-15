@@ -57,6 +57,20 @@ auto create_repository(const std::filesystem::path& path, std::string_view sourc
     return repository;
 }
 
+// liquify#79: the analysis cache is per user and per repository, never inside the repository, so a
+// repository cannot ship a crafted cache that the editor reads on open.
+TEST(EditorGraph, AnalysisCacheLivesOutsideTheRepository) {
+  const auto root = std::filesystem::temp_directory_path() / "liquify-cache-root";
+  const auto repository = std::filesystem::temp_directory_path() / "liquify-cache-repo";
+  const auto other = std::filesystem::temp_directory_path() / "liquify-cache-other";
+  const auto cache = liquify::analysis_cache_directory(repository, root);
+  EXPECT_TRUE(cache.generic_string().starts_with((root / "analysis").generic_string()));
+  const auto inside = std::ranges::mismatch(repository, cache).in1 == repository.end();
+  EXPECT_FALSE(inside) << cache;
+  EXPECT_EQ(cache, liquify::analysis_cache_directory(repository, root)) << "stable";
+  EXPECT_NE(cache, liquify::analysis_cache_directory(other, root)) << "one per repository";
+}
+
 TEST(EditorGraph, PublishesOverlayQueriesAndRepositoryStatus) {
     TemporaryDirectory location;
     const auto source = std::string{"int answer = 42;\nint use() { return answer; }\n"};

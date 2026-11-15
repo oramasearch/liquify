@@ -23,6 +23,14 @@
 
 namespace liquify {
 
+// Where the editor keeps a repository's analysis cache (liquify#79): a per-user directory keyed by
+// the repository's canonical path, beside liquify's other per-user state, never inside the
+// repository, so a repository cannot ship a crafted cache. `state_root` defaults to the directory of
+// default_first_run_state_path().
+[[nodiscard]] auto analysis_cache_directory(const std::filesystem::path &repository_path,
+                                            std::optional<std::filesystem::path> state_root =
+                                                std::nullopt) -> std::filesystem::path;
+
 class PluginHost;
 
 enum class BuildActionState : std::uint8_t {
