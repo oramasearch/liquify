@@ -38,16 +38,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(LIQUIFY_BUILD_TESTS "Build the test suite" ON)
 option(LIQUIFY_NATIVE_WINDOW_TESTS "Test real windows (requires a desktop session)" ${APPLE})
 
-# liquid is not vendored here. One pin, in liquid-bridge, is the single source of truth;
-# a second submodule pointer in this repo could disagree with it. The default is the
-# sibling checkout in that bridge (../liquid); CI and standalone builds pass the path.
+# liquid is not vendored here: a submodule pointer in this repo could disagree with the
+# liquid revision the rest of the project builds against. The default is a sibling
+# checkout (../liquid); CI and other layouts pass the path.
 set(LIQUIFY_LIQUID_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../liquid"
     CACHE PATH "Path to the liquid source tree providing libliquid")
 if(NOT EXISTS "${LIQUIFY_LIQUID_SOURCE_DIR}/CMakeLists.txt")
   message(FATAL_ERROR
     "LIQUIFY_LIQUID_SOURCE_DIR does not contain a liquid source tree: ${LIQUIFY_LIQUID_SOURCE_DIR}\n"
-    "liquid is a sibling module of liquid-bridge, not a submodule of liquify. Build liquify from "
-    "the bridge checkout, or pass -DLIQUIFY_LIQUID_SOURCE_DIR=<path to oramasearch/liquid>.")
+    "liquid is not a submodule of liquify. Clone liquid next to liquify (../liquid), "
+    "or pass -DLIQUIFY_LIQUID_SOURCE_DIR=<path to a liquid checkout>.")
 endif()
 
 # Release numbers are provisional; identify the actual IDE and library artifacts.

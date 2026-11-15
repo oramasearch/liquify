@@ -1,0 +1,4 @@
+# Paths left out of the public export of this repository (gitignore syntax).
+# Only internal-only documentation folders belong here. Agent files (CLAUDE.md, AGENTS.md,
+# .claude/) are never listed: they ship. liquify has no internal-only folders, so nothing is
+# excluded beyond the export tool's built-ins.

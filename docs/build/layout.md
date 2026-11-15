@@ -36,7 +36,7 @@ libliquid's public API.
 | `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `--command NAME`, `docs commands|keymap`, `--screenshot STATE --out PNG`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest, including screenshot pixel-region assertions; `ctest --test-dir build` |
 | `tools/ui/` | refreshes every named screenshot under `docs/ui/screenshots/` |
-| `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* module of `liquid-bridge`, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
+| `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* checkout, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 | `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |
 | `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |
 | `docs/` | one folder per topic ([`../README.md`](../README.md)) |

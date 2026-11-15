@@ -98,7 +98,7 @@ signature rewriting are left for a semantic refactoring layer.
 
 ## Agent surface and ownership
 
-Bridge decision 30 places the permanent agent edit operation in libliquid so it can be used without
+The permanent agent edit operation lives in libliquid so it can be used without
 the IDE. The pinned liquid now owns fingerprinted edit preview, atomic multi-file application,
 attribution and the grouped operation record. `StructuralEditor` remains the UI/headless adapter:
 it validates the selected syntax nodes, translates them to liquid's public edit records, refreshes

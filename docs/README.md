@@ -1,7 +1,7 @@
-# liquify — internal documentation
+# liquify — documentation
 
 One folder per topic, one file per subject; every change lands its doc here in the same change
-(bridge `CLAUDE.md`). `README.md` at the root is the front door and `CLAUDE.md` the agent
+(`CLAUDE.md`). `README.md` at the root is the front door and `CLAUDE.md` the agent
 instructions; both point here. The product specification is `oramasearch/liquid`
 `docs/features/21-liquify-ide.md`.
 

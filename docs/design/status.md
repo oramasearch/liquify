@@ -92,8 +92,8 @@ and repository operation history. Its interaction, worker and screenshot contrac
 
 ## The liquid pin
 
-liquid is pinned by `liquid-bridge` and resolved here through `LIQUIFY_LIQUID_SOURCE_DIR`
-(default `../liquid`); CI pins the same revision as the bridge in `.github/workflows/ci.yml`.
+liquid is a sibling checkout, resolved here through `LIQUIFY_LIQUID_SOURCE_DIR`
+(default `../liquid`).
 An independent CLI → IDE → CLI integration check exercises repository creation, file listing,
 editor save, read-back, and unsupported-format guidance; the artifact combinations are in
 [`../build/store-compatibility.md`](../build/store-compatibility.md). The pin includes liquid's compact-checkpoint repository

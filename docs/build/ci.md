@@ -11,14 +11,14 @@ required installer check fails its platform job. A fourth job downloads the Linu
 runs it on Fedora 42.
 
 **Checkout.** `actions/checkout` uses `submodules: recursive` and the organisation-level
-`ORAMA_SUBMODULES_TOKEN` secret, so the pinned private liquid checkout is present. The secret is
-a fine-grained token with read access to the organisation's private repositories. Steve creates
-and maintains it; this workflow neither creates nor changes the token. Until Steve adds the
-secret, a run fails during checkout, before the build commands. The root build keeps
+`ORAMA_SUBMODULES_TOKEN` secret, so the liquid checkout is present. The secret is
+a fine-grained token with read access to the organisation's private repositories. The maintainers
+create and maintain it; this workflow neither creates nor changes the token. Until the secret
+exists, a run fails during checkout, before the build commands. The root build keeps
 `LIQUID_BUILD_CLI` and `LIQUID_BUILD_TESTS` off and links the library target, which exercises the
 same library-only submodule configuration as a local build.
 
-liquify has two additional permitted private submodules: `modules/corosio` at
+liquify has two additional submodules: `modules/corosio` at
 `9f8e865a7b5728a4093e9345456bc077194dbeff` and `modules/http` at
 `af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4`. They pin the assistant transport independently of
 liquid. The pins match liquid's nested copies, so the single Boost target instances created while

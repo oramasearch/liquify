@@ -74,4 +74,4 @@ static: smoke: lines=50000 frames=30 visible_lines=43 avg_frame_ms=2.275 p95_fra
 shared: smoke: lines=50000 frames=30 visible_lines=43 avg_frame_ms=2.385 p95_frame_ms=2.680 achieved_hz=419.3 display_hz=60.0 avg_typing_ms=2.521 p95_typing_ms=2.683
 ```
 
-Linux proof is deferred under decision 33.
+Linux proof is deferred: it has not been run yet.

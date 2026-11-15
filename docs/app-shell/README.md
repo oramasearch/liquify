@@ -13,9 +13,9 @@ expanded, then published to the panel after the worker completes. Its second wor
 full tree and libliquid symbol records for navigation, drive and change annotations without
 blocking the render thread ([`../ui/navigation.md`](../ui/navigation.md)).
 
-**Decision.** liquify is a native, cross-platform IDE from the start (Steve, 2026-09-02), not an
+**Decision.** liquify is a native, cross-platform IDE from the start not an
 editor extension. The repository panel is its first Phase 1 client. The editor buffer is a retained
-GPU text layer inside Dear ImGui (bridge decision 15); ImGui continues to own chrome and panels.
+GPU text layer inside Dear ImGui; ImGui continues to own chrome and panels.
 Diagnostics and the incremental graph follow the liquid #20 and #21 interfaces.
 
 **Lifecycle** (mirrors Zetta `src/gui/app.cpp`): `SDL_Init(VIDEO)` → window at 70 % of the usable
@@ -100,13 +100,12 @@ checkouts and pin updates must initialize submodules recursively. The
 pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
 the liquid change it takes:
 
-liquid is **not** pinned here any more — `liquid-bridge` holds the one pin. Move it there,
-verify liquify against it, then bump the bridge pointer:
+liquid is **not** pinned here: liquify builds against the liquid checkout beside it. To move to
+a new liquid revision, check it out and verify liquify against it:
 
 ```sh
 git -C ../liquid fetch origin && git -C ../liquid checkout <sha>
 cmake --build build && ./build/liquify --smoke && ctest --test-dir build
-git -C .. add modules/liquid && git -C .. commit -m "Bump liquid to <sha>: <why>"
 ```
 
 CI resolves liquid from its own checkout, so bump the `ref:` in

@@ -36,7 +36,7 @@ without publishing an unsigned installer.
 
 ## Credentials
 
-Steve owns and rotates the release credentials. GitHub Actions receives them only from repository
+The maintainers own and rotate the release credentials. GitHub Actions receives them only from repository
 secrets; no certificate, private key, password, or API credential belongs in the repository.
 
 macOS uses these secrets:
@@ -117,7 +117,7 @@ $package = Get-AppxPackage OramaSearch.Liquify
 ## Projection follow-up
 
 Part B remains deferred while liquid #76 and #77 are open. Once both land, a dedicated follow-up
-issue will bump the bridge's liquid pin, build liquify under `liquid wrap`, replace the platform scripts
+issue will move to the liquid revision that carries them, build liquify under `liquid wrap`, replace the platform scripts
 with `liquid project macos-pkg|msix|appimage` and `liquid sign macos|windows`, and retain this tag
 release workflow. Those projected artifacts will carry liquid provenance. Auto-update, app-store
 submission, Snap, and another installer writer remain outside this issue.

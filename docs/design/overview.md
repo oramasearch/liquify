@@ -33,6 +33,5 @@ these choices are in `CLAUDE.md`.
 ## Where this sits
 
 liquify is part of the liquid project. The product specification is `oramasearch/liquid`
-`docs/features/21-liquify-ide.md`; the cross-module map and the action plan are in
-[`oramasearch/liquid-bridge`](https://github.com/oramasearch/liquid-bridge). What the source tree
-implements today is [`status.md`](status.md).
+`docs/features/21-liquify-ide.md`. What the source tree implements today is
+[`status.md`](status.md).

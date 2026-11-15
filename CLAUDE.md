@@ -1,10 +1,9 @@
 # CLAUDE.md — liquify
 
-The IDE for liquid. **Org-wide conventions** live in
-[`oramasearch/orama-bridge`](https://github.com/oramasearch/orama-bridge) `CLAUDE.md`
-and apply in full. Project conventions live in
-[`oramasearch/liquid`](https://github.com/oramasearch/liquid) `CLAUDE.md` — vocabulary,
-document rules, confidentiality, and the decisions not to drift past. Read both.
+The IDE for liquid. This file is the instruction file for every contributor and coding agent
+working in this repository; [`AGENTS.md`](AGENTS.md) points here. liquid's own `CLAUDE.md`
+carries the shared vocabulary (repository, drip, graph, lake) and applies to the parts of liquid
+that liquify uses.
 
 ## Status
 
@@ -95,17 +94,14 @@ signed and unsigned SHA-256 records; macOS notarization runs when the App Store 
 are available. Hand-built packaging remains in place until liquid's projection and
 platform-signing targets land.
 
-The liquid pin is `7ff6ed82f93b916ef206c5776e2761b19536d8f3`; CLI and IDE revisions plus supported
-store formats are displayed by `version`. The independent CLI → IDE → CLI compatibility test
+CLI and IDE revisions plus supported store formats are displayed by `version`. The independent CLI → IDE → CLI compatibility test
 and supported lake revision are recorded in [`docs/build/store-compatibility.md`](docs/build/store-compatibility.md).
 
 ## Decisions — recorded
 
-1. **liquify is a native, cross-platform IDE from the start** (Steve, 2026-09-02). Not a VS
-   Code extension, not a JetBrains plugin, not Electron. Those may exist later as adjuncts;
-   the product is the editor.
-2. **Private for now, open source eventually**, like liquid. Same licence decision as liquid
-   (bridge issue). **Never depends on Zetta** — Zetta is closed; liquify shares only its
+1. **liquify is a native, cross-platform IDE from the start.** Not a VS Code extension, not a
+   JetBrains plugin, not Electron. Those may exist later as adjuncts; the product is the editor.
+2. **Open source under MIT, like liquid.** **Never depends on Zetta**: liquify shares only its
    *choices* (SDL3 + Dear ImGui) and the same open libraries.
 3. **C++26**, CMake ≥ 3.28 + Ninja, Clang 17+ auto-selected the way liquid and Zetta do,
    GoogleTest. Dependencies via FetchContent; SDL linked static; one binary.
@@ -113,19 +109,16 @@ and supported lake revision are recorded in [`docs/build/store-compatibility.md`
    Zetta's headed mode proves on all three desktop platforms. The retained editor decision is
    recorded below.
 5. **liquify is a client of libliquid.** liquid is **not** a submodule here: it is a sibling
-   module of `liquid-bridge`, resolved by `LIQUIFY_LIQUID_SOURCE_DIR` (default `../liquid`),
-   built library-only and linked as `liquid::liquid`. Everything liquify knows about
-   repositories, drips, builds and search comes through that API; liquify never reimplements
-   it. The pin lives in the bridge — bump it there, and move the `ref:` in
-   `.github/workflows/ci.yml` to match.
-6. **The editor buffer is a retained GPU text layer inside Dear ImGui** (Steve, 2026-09-05).
-   SDL3 and ImGui remain the shell and panel toolkit; the buffer owns a glyph atlas and cached
-   per-blob line layout. This records bridge decision 15 and closes liquify #2's question.
-7. **AI is a first-class but optional editor surface and is off by default** (2026-09-05).
+   checkout, resolved by `LIQUIFY_LIQUID_SOURCE_DIR` (default `../liquid`), built library-only
+   and linked as `liquid::liquid`. Everything liquify knows about repositories, drips, builds
+   and search comes through that API; liquify never reimplements it.
+6. **The editor buffer is a retained GPU text layer inside Dear ImGui.** SDL3 and ImGui remain
+   the shell and panel toolkit; the buffer owns a glyph atlas and cached per-blob line layout.
+7. **AI is a first-class but optional editor surface and is off by default.**
    Its visible repository switch is the network boundary: off constructs no provider and opens no
    socket. Context comes from editor, symbol, build and dependency graph facts, is byte-budgeted,
    and is shown before sending. Proposed edits require user acceptance and produce one user drip.
-8. **The native plugin API extends liquid's frontend C boundary** (2026-09-06). Query kinds enter
+8. **The native plugin API extends liquid's frontend C boundary.** Query kinds enter
    the in-process graph by name, commands carry a default binding and canonical-CBOR argument
    schema, and panels return data-only canonical-CBOR view models; plugins never call ImGui.
 
@@ -133,17 +126,15 @@ and supported lake revision are recorded in [`docs/build/store-compatibility.md`
 
 - `src/app.cpp` is the **one** translation unit that includes SDL3 or ImGui. No other file
   may name an SDL or ImGui type; the shell exposes plain C++ (`liquify::App`).
-- Read Zetta only from the umbrella bridge
-  (`/Users/stevesperandeo/dev/homer6/orama-work/modules/zetta-bridge/modules/zetta`), and
-  only to learn its patterns (`src/gui/app.cpp` for the SDL/ImGui lifecycle). Never copy
-  Zetta source into this repository.
+- Zetta's GUI (`src/gui/app.cpp` in the Zetta repository) is a reference for the SDL/ImGui
+  lifecycle only. Never copy Zetta source into this repository.
 - The editor must not run ahead of the architecture: features that need the store, graph
-  or daemon wait for liquid's Phases 1 and 4. Until then liquify is a shell.
+  or daemon wait for liquid to provide them.
 - `--smoke` is the display-required self-test; keep it working, and keep `version` and the
   unit tests runnable without a display.
-- `../liquid` is a shared checkout, not liquify's working copy: never commit liquid changes
-  from inside liquify. Change liquid in its own repo, push, then bump the pin in
-  `liquid-bridge` (and the CI `ref:` here).
+- `../liquid` is a separate checkout, not liquify's working copy: never commit liquid changes
+  from inside liquify. Change liquid in its own repository, then build liquify against the new
+  liquid revision.
 - `src/ai_provider.cpp` is the only liquify network implementation. It uses the separately pinned
   Corosio and Boost.HTTP submodules on liquid's Capy runtime context. Do not add another network
   client or bypass the AI switch.
@@ -152,20 +143,26 @@ and supported lake revision are recorded in [`docs/build/store-compatibility.md`
 
 ## Never
 
-- Never depend on Zetta or on `oramasearch/lake`. liquify talks to liquid (the daemon), and
-  through liquid to lake.
-- Never make this repository public without the licence decision landed.
+- Never depend on Zetta or on lake. liquify talks to liquid (the daemon), and through liquid to
+  lake.
+- Never write the word "seam": name the mechanism (interface, extension point, injected
+  dependency, boundary).
+- Never add AI attribution to commits or pull requests: no `Co-Authored-By` for an assistant, no
+  "Generated with", no session or model trailers.
+- No time or size estimates in issues, pull requests or docs.
 
 ## Before finishing any change
 
-1. **Document the change in `docs/<topic>/*.md`** (see `docs/README.md`). This is a must.
+1. **Document the change in `docs/<topic>/*.md`** (see `docs/README.md`), in the same commit.
+   This is a must.
 2. `README.md` is the front door only (what it is, build and run, pointers); never append status or
    feature sections to it. Update `docs/design/status.md` for the status of your area and
    `docs/README.md` for any new page.
-3. Does this file's **Status**, **Decisions** and **Open decisions** still hold?
+3. Does this file's **Status** and **Decisions** still hold?
 4. The full local proof is green: `cmake -S . -B build -G Ninja && cmake --build build &&
    ctest --test-dir build --output-on-failure && ./build/liquify version &&
    ./build/liquify --smoke 30`.
-5. GitHub Actions are disabled (2026-11-15) and the workflow files are commented out; do not
-   re-enable them. Tests run when a release is cut.
-6. Commit means push.
+5. There is no hosted CI: GitHub Actions are off and the workflow files are commented out. Tests
+   run when a release is cut.
+6. Commits carry a DCO sign-off (`git commit -s`); pull requests target `dev` (see
+   `CONTRIBUTING.md`).
