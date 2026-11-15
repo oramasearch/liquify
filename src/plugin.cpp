@@ -1103,7 +1103,7 @@ auto plugin_empty_map_cbor() -> std::span<const std::byte> {
 auto load_global_plugins(
     std::optional<std::filesystem::path> global_config_path)
     -> liquid::result<ConfiguredPlugins> {
-  const auto config_path = global_config_path.value_or(global_ai_config_path());
+  const auto config_path = global_config_path.value_or(global_plugin_config_path());
   auto paths = configured_file_paths(config_path);
   if (!paths) {
     return std::unexpected(paths.error());
@@ -1232,6 +1232,11 @@ auto stage_trusted_plugin(std::span<const std::byte> bytes,
 
 } // namespace
 
+auto global_plugin_config_path() -> std::filesystem::path {
+  const auto settings = user_settings_path();
+  return settings.empty() ? std::filesystem::path{} : settings.parent_path() / "plugins";
+}
+
 auto plugin_trust_store_path() -> std::filesystem::path {
   return user_settings_path().parent_path() / "trusted-plugins";
 }
@@ -1338,7 +1343,7 @@ auto inspect_configured_plugins(
     std::optional<std::filesystem::path> trust_store_path)
     -> liquid::result<std::vector<PluginStatus>> {
   auto global = configured_file_paths(
-      global_config_path.value_or(global_ai_config_path()));
+      global_config_path.value_or(global_plugin_config_path()));
   if (!global) {
     return std::unexpected(global.error());
   }
@@ -1381,7 +1386,7 @@ auto load_configured_plugins(
     -> liquid::result<ConfiguredPlugins> {
   const auto store = trust_store_path.value_or(plugin_trust_store_path());
   auto global = configured_file_paths(
-      global_config_path.value_or(global_ai_config_path()));
+      global_config_path.value_or(global_plugin_config_path()));
   if (!global) {
     return std::unexpected(global.error());
   }

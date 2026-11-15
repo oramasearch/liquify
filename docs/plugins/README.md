@@ -58,6 +58,7 @@ user's **trust store**:
 
 | | |
 |---|---|
+| Global plugins | `plugins` beside the user settings file, its own file (liquify#72): `config.liquify.plugins=PATH[,PATH...]` lines, `#` starts a comment. It is not the settings file, so saving settings never breaks plugin loading and a plugin line never breaks the settings parse. A `config.liquify.plugins` line left in the settings file by an earlier version is no longer read; move it here. |
 | Trust store | `trusted-plugins` beside the user settings file (`~/Library/Application Support/liquify/` on macOS, `$XDG_CONFIG_HOME/liquify/` or `~/.config/liquify/` on Linux, `%APPDATA%\liquify\` on Windows). Never inside a repository; a `.liquid/trusted-plugins` or `.liquid/settings.liquid` in the repository is not read for plugins. |
 | Format | one `sha256:<hex>` per line, optionally followed by a tab and the path it was trusted from; `#` starts a comment. Remove a line to revoke. A malformed line is reported and nothing from the repository loads. |
 | Granting trust | `liquify plugin trust FILE` prints the plugin's file name, its origin directory and its digest, states that it is native code, and loads nothing. Trust is recorded only when the user types `yes` (or passes `--yes` on their own command line). The digest recorded is the one shown. |
