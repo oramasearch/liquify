@@ -2051,6 +2051,8 @@ bool App::invoke_command(std::string_view name) {
     open_set_lake_dialog();
   } else if (name == "review.request") {
     open_request_review();
+  } else if (name == "run.set-up-build") {
+    open_build_setup();
   } else if (name == "assistant.toggle") {
     toggle_assistant();
   } else if (name == "panel.reset-layout") {
@@ -6844,13 +6846,106 @@ auto App::status_failure(const EditorGraphSnapshot &graph) const
 // Actions a failure can offer besides Retry, which the caller supplies. An action liquify
 // cannot perform yet is not drawn: a button that does nothing is worse than none.
 auto App::error_action_available(ErrorAction action) const -> bool {
-  return action == ErrorAction::set_sync_remote && repository_ != nullptr;
+  return (action == ErrorAction::set_sync_remote ||
+          action == ErrorAction::set_up_build) &&
+         repository_ != nullptr;
 }
 
 void App::run_error_action(ErrorAction action) {
   if (action == ErrorAction::set_sync_remote) {
     open_set_lake_dialog();
+  } else if (action == ErrorAction::set_up_build) {
+    open_build_setup();
   }
+}
+
+void App::open_build_setup() {
+  if (!repository_) {
+    editor_status_ = "Open a repository to set up its build";
+    return;
+  }
+  auto names = std::vector<std::string>{};
+  for (const auto &entry : repository_->entries()) {
+    names.push_back(entry.name);
+  }
+  build_proposal_ = propose_build_command(names);
+  build_setup_command_ = build_proposal_.command;
+  build_setup_failure_ = {};
+  build_setup_requested_ = true;
+}
+
+void App::poll_build_setup() {
+  if (!build_setup_operation_ ||
+      build_setup_operation_->wait_for(std::chrono::milliseconds::zero()) !=
+          std::future_status::ready) {
+    return;
+  }
+  build_setup_failure_ = build_setup_operation_->get();
+  build_setup_operation_.reset();
+  if (build_setup_failure_.empty()) {
+    build_setup_close_requested_ = true;
+    editor_status_ = "Build recorded: " + build_setup_command_;
+    request_build();
+  }
+}
+
+void App::draw_build_setup_dialog() {
+  poll_build_setup();
+  if (build_setup_requested_) {
+    ImGui::OpenPopup("Set Up Build");
+    build_setup_requested_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Set Up Build", nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  if (build_setup_close_requested_) {
+    build_setup_close_requested_ = false;
+    ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return;
+  }
+  ImGui::PushTextWrapPos(580.0F);
+  ImGui::TextUnformatted(
+      "liquid records the command that builds this repository once, by "
+      "running it, then F7 builds with it.");
+  ImGui::TextDisabled("%s", build_proposal_.reason.c_str());
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Build command");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(580.0F);
+  ImGui::InputText("##build-command", &build_setup_command_);
+  frame_layout_.controls["build-setup/command"] = item_rectangle();
+  ImGui::TextDisabled("Runs in the repository folder with /bin/sh.");
+  if (!build_setup_failure_.empty()) {
+    draw_user_error(build_setup_failure_, "build-setup-failure");
+  }
+  ImGui::Spacing();
+  ImGui::BeginDisabled(build_setup_command_.empty() ||
+                       build_setup_operation_.has_value());
+  if (ImGui::Button(build_setup_operation_ ? "Recording..."
+                                           : "Record and build")) {
+    build_setup_failure_ = {};
+    build_setup_operation_.emplace(std::async(
+        std::launch::async,
+        [path = repository_path(), command = build_setup_command_] {
+          return record_build_command(path, command);
+        }));
+    request_repaint();
+  }
+  frame_layout_.controls["build-setup/submit"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
 }
 
 void App::open_set_lake_dialog() {
@@ -7806,6 +7901,7 @@ void App::frame(bool present) {
   draw_cut_composer();
   draw_set_lake_dialog();
   draw_request_review_dialog();
+  draw_build_setup_dialog();
   draw_navigation_popups();
   draw_repository_action_popup();
   draw_navigation_results();
@@ -7918,6 +8014,7 @@ auto App::async_work_in_flight() const -> bool {
          (identity_operation_ && identity_operation_->valid()) ||
          (cut_preview_ && cut_preview_->valid()) ||
          (cut_operation_ && cut_operation_->valid()) ||
+         (build_setup_operation_ && build_setup_operation_->valid()) ||
          multiplayer_refresh_.valid();
 }
 

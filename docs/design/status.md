@@ -67,7 +67,9 @@ typed text reaches only the dialog, never the source behind it. F9 is Push: it p
 repository's sync remote or the lake it was cloned from, and with neither offers Set Lake
 ([`../editor/build.md`](../editor/build.md)). Request Review asks lake to review the current change;
 the Review panel uses the repository's lake, teaches when it is empty, and never names a
-command-line flag ([`../editor/review.md`](../editor/review.md)).
+command-line flag ([`../editor/review.md`](../editor/review.md)). F7 on a repository with no
+recorded build offers Set up build, which proposes a command from the repository and records it
+through libliquid's wrap API ([`../editor/build.md`](../editor/build.md)).
 The searchable settings surface reads a user `.liquid` file plus repository overrides and applies
 theme, fonts, editor behavior, keymaps, optional AI, lake accounts and default-off telemetry live.
 Parser and typed validation errors remain inline, group reset is local, and credential values never

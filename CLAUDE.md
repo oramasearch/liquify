@@ -82,7 +82,8 @@ opens no connection. Native plugins use liquid's versioned frontend C boundary t
 queries, commands, and canonical-CBOR panels through checked static or configured dynamic loading;
 a plugin named by repository metadata loads only once the user has trusted its SHA-256 digest with
 `liquify plugin trust` (per-user trust store, never the repository); their commands and data-only panels appear in the editor surface. F7 plans and starts a configured
-build through the attached daemon and renders its action stream, critical path and scheduling
+build (and, with none recorded, offers Set up build, which records a proposed command through
+libliquid's wrap API) through the attached daemon and renders its action stream, critical path and scheduling
 choice. F8 lists and runs test actions; F9 pushes saved drips to the configured sync remote and
 renders each reference outcome. Failed action diagnostics are line diagnostics in the retained
 editor. The (now disabled) pull-request CI packaged the release binary as a self-contained, hardened-runtime macOS
