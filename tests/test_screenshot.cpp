@@ -263,3 +263,27 @@ TEST(Screenshot, TypeScaleSeparatesTitlesHeadingsAndBody) {
 
 } // namespace
 } // namespace liquify
+
+namespace liquify {
+namespace {
+
+// liquify#101: the Search panel's fields fill its width, with their labels above them.
+TEST(Screenshot, SearchFieldsFillTheirPanel) {
+  for (const auto *state : {"editor-view-light", "editor-view-dark"}) {
+    const auto rendered = render_diagnostics(state);
+    const auto &controls = rendered.layout.controls;
+    ASSERT_TRUE(controls.contains("search/query") && controls.contains("search/replace"))
+        << state;
+    const auto query = controls.at("search/query");
+    const auto replace = controls.at("search/replace");
+    EXPECT_FLOAT_EQ(query.width, replace.width) << state;
+    EXPECT_FLOAT_EQ(query.x, replace.x) << state;
+    const auto panel = rendered.layout.panels.find(PanelId::search);
+    if (panel != rendered.layout.panels.end() && panel->second.content.width > 0) {
+      EXPECT_GE(query.width, panel->second.content.width * 0.85F) << state;
+    }
+  }
+}
+
+} // namespace
+} // namespace liquify

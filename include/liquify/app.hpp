@@ -97,6 +97,13 @@ private:
   void draw_line_attribution(std::size_t line);
   void draw_status_bar();
   void draw_welcome();
+  enum class ButtonKind : std::uint8_t { primary, secondary, quiet, destructive };
+  auto kit_button(const char *label, ButtonKind kind, float width = 0.0F,
+                  float height = 0.0F) -> bool;
+  auto checkbox(const char *label, bool *value) -> bool;
+  void field_label(const char *label);
+  auto text_field(const char *label, std::string *value, const char *hint = nullptr) -> bool;
+  auto slider_int(const char *label, int *value, int minimum, int maximum) -> bool;
   void type_title(std::string_view text, std::string_view id = {});
   void type_heading(std::string_view text, std::string_view id = {});
   [[nodiscard]] auto begin_dialog(const char *title, int flags) -> bool;
