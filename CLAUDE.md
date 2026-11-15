@@ -80,7 +80,7 @@ their commands and data-only panels appear in the editor surface. F7 plans and s
 build through the attached daemon and renders its action stream, critical path and scheduling
 choice. F8 lists and runs test actions; F9 pushes saved drips to the configured sync remote and
 renders each reference outcome. Failed action diagnostics are line diagnostics in the retained
-editor. Pull-request CI packages the release binary as a self-contained, hardened-runtime macOS
+editor. The (now disabled) pull-request CI packaged the release binary as a self-contained, hardened-runtime macOS
 `pkg` and `dmg`, a signed and install-tested Windows MSIX, and an AppImage verified on Ubuntu and
 Fedora. The macOS build audits every bundled Mach-O for non-system absolute dependencies and
 launches a relocated copy from the mounted dmg. Tag releases publish those installers and their
@@ -159,5 +159,6 @@ and supported lake revision are recorded in [`docs/build/store-compatibility.md`
 4. The full local proof is green: `cmake -S . -B build -G Ninja && cmake --build build &&
    ctest --test-dir build --output-on-failure && ./build/liquify version &&
    ./build/liquify --smoke 30`.
-5. Workflow changes have green Linux, macOS and Windows jobs.
+5. GitHub Actions are disabled (2026-11-15) and the workflow files are commented out; do not
+   re-enable them. Tests run when a release is cut.
 6. Commit means push.

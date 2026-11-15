@@ -1,5 +1,9 @@
 # Continuous integration
 
+> **Disabled 2026-11-15.** GitHub Actions are turned off for this repository and every workflow file
+> is commented out (no hosted CI in oramasearch repositories). Builds, installers and their checks run
+> locally; tests run when a release is cut. What follows describes the workflows as they were.
+
 **What.** `.github/workflows/ci.yml` builds, tests, packages, and verifies liquify on every
 main-branch push and pull request. The reusable matrix uses `ubuntu-24.04`, `macos-15`, and
 `windows-2022`; any failed configure, build, test, version, smoke, installer construction, or

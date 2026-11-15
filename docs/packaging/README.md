@@ -1,5 +1,9 @@
 # Release packaging
 
+> **Disabled 2026-11-15.** GitHub Actions are turned off for this repository and every workflow file
+> is commented out (no hosted CI in oramasearch repositories). Builds, installers and their checks run
+> locally; tests run when a release is cut. What follows describes the workflows as they were.
+
 Liquify packages the existing release executable directly until liquid issues
 [#76](https://github.com/oramasearch/liquid/issues/76) and
 [#77](https://github.com/oramasearch/liquid/issues/77) provide platform projection and signing.
