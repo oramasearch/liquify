@@ -33,6 +33,7 @@ libliquid's public API.
 | `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
 | `packaging/` | hand-built macOS, Windows, AppImage, and Flatpak release inputs used until liquid's projection targets land |
 | `tools/spdx-headers.py`, `tools/third-party-licenses.py` | add the `SPDX-License-Identifier: MIT` line to every source file (`--check` lists the missing ones) and regenerate `THIRD_PARTY_LICENSES` |
+| `tools/sbom.py`, `sbom.spdx.json`, `sbom.cdx.json` | the committed SBOM of the source tree (SPDX 2.3 and CycloneDX 1.7), made with `syft`; `python3 tools/sbom.py --check` says when it is stale |
 | `LICENSE`, `COPYRIGHT`, `THIRD_PARTY_LICENSES`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` | the MIT licence and its holder, the components written by others with their licences, how to contribute (DCO sign-off), the code of conduct, and how to report a vulnerability |
 | `bench/` | stub-tree benchmarks, built with `LIQUIFY_BUILD_BENCH` |
 | `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `--command NAME`, `docs commands|keymap`, `--screenshot STATE --out PNG`, `version`, `--smoke [N]`, `--help` |

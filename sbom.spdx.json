@@ -1,0 +1,286 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "liquify-f137f3468dda",
+  "documentNamespace": "https://github.com/oramasearch/liquify/sbom/f137f3468ddab4d648ce5c2aebfd21bc5bb11308",
+  "creationInfo": {
+    "created": "2026-11-15T19:31:15Z",
+    "creators": [
+      "Organization: OramaSearch, Inc.",
+      "Tool: tools/sbom.py",
+      "Tool: syft"
+    ],
+    "licenseListVersion": "3.29",
+    "comment": "Made from source commit f137f3468ddab4d648ce5c2aebfd21bc5bb11308 by tools/sbom.py."
+  },
+  "documentDescribes": [
+    "SPDXRef-DocumentRoot"
+  ],
+  "packages": [
+    {
+      "name": "corosio",
+      "SPDXID": "SPDXRef-Component-corosio-1db3e02efab6842b",
+      "versionInfo": "9f8e865a7b5728a4093e9345456bc077194dbeff",
+      "downloadLocation": "git+https://github.com/oramasearch/corosio.git@9f8e865a7b5728a4093e9345456bc077194dbeff",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSL-1.0",
+      "comment": "Orama's fork of cppalliance/corosio. How it is used: submodule, linked (assistant transport). Listed in THIRD_PARTY_LICENSES.",
+      "homepage": "https://github.com/oramasearch/corosio",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/oramasearch/corosio@9f8e865a7b5728a4093e9345456bc077194dbeff"
+        }
+      ]
+    },
+    {
+      "name": "Dear ImGui",
+      "SPDXID": "SPDXRef-Component-Dear-ImGui-7597987723e4d3fe",
+      "versionInfo": "v1.91.5",
+      "downloadLocation": "https://github.com/ocornut/imgui",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "comment": "How it is used: fetched at build (CMake FetchContent), linked. Listed in THIRD_PARTY_LICENSES.",
+      "homepage": "https://github.com/ocornut/imgui",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/ocornut/imgui@v1.91.5"
+        }
+      ]
+    },
+    {
+      "name": "GoogleTest",
+      "SPDXID": "SPDXRef-Component-GoogleTest-34101f2b39cec8bc",
+      "versionInfo": "v1.17.0",
+      "downloadLocation": "https://github.com/google/googletest",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSD-3-Clause",
+      "comment": "How it is used: fetched at build, tests only. Listed in THIRD_PARTY_LICENSES.",
+      "homepage": "https://github.com/google/googletest",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/google/googletest@v1.17.0"
+        }
+      ]
+    },
+    {
+      "name": "http",
+      "SPDXID": "SPDXRef-Component-http-358a9beabd5949fb",
+      "versionInfo": "af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4",
+      "downloadLocation": "git+https://github.com/oramasearch/http.git@af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "BSL-1.0",
+      "comment": "Orama's fork of cppalliance/http. How it is used: submodule, linked (assistant transport). Listed in THIRD_PARTY_LICENSES.",
+      "homepage": "https://github.com/oramasearch/http",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/oramasearch/http@af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4"
+        }
+      ]
+    },
+    {
+      "name": "IBM Plex Sans and IBM Plex Mono",
+      "SPDXID": "SPDXRef-Component-IBM-Plex-Sans-and-IBM-Plex-Mono-9836f46bf5669da7",
+      "versionInfo": "as vendored",
+      "downloadLocation": "https://github.com/IBM/plex",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "OFL-1.1",
+      "comment": "design/fonts. How it is used: vendored font files, embedded in the binary. Listed in THIRD_PARTY_LICENSES.",
+      "homepage": "https://github.com/IBM/plex",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/IBM/plex@as vendored"
+        }
+      ]
+    },
+    {
+      "name": "liquify",
+      "SPDXID": "SPDXRef-DocumentRoot",
+      "versionInfo": "f137f3468dda",
+      "downloadLocation": "git+https://github.com/oramasearch/liquify.git",
+      "homepage": "https://github.com/oramasearch/liquify",
+      "filesAnalyzed": false,
+      "supplier": "Organization: OramaSearch, Inc.",
+      "originator": "Organization: OramaSearch, Inc.",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (c) 2026 OramaSearch, Inc.",
+      "primaryPackagePurpose": "SOURCE",
+      "comment": "The source tree of liquify. Packages found by syft in the files git tracks, plus the C and C++ components of THIRD_PARTY_LICENSES and the git submodules."
+    },
+    {
+      "name": "Orama design tokens",
+      "SPDXID": "SPDXRef-Component-Orama-design-tokens-163282b2d124a134",
+      "versionInfo": "as vendored",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "comment": "design/vendor/orama-design. How it is used: vendored design tokens, compiled into a generated header. Listed in THIRD_PARTY_LICENSES."
+    },
+    {
+      "name": "SDL3",
+      "SPDXID": "SPDXRef-Component-SDL3-fb1f1dd95106898f",
+      "versionInfo": "release-3.2.0",
+      "downloadLocation": "https://github.com/libsdl-org/SDL",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Zlib",
+      "comment": "How it is used: fetched at build (CMake FetchContent), linked static. Listed in THIRD_PARTY_LICENSES.",
+      "homepage": "https://github.com/libsdl-org/SDL",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/libsdl-org/SDL@release-3.2.0"
+        }
+      ]
+    },
+    {
+      "name": "tree-sitter",
+      "SPDXID": "SPDXRef-Component-tree-sitter-25c632c3f623ff36",
+      "versionInfo": "d97971e24500218865c05ed1febdee2acf41bae1",
+      "downloadLocation": "git+https://github.com/tree-sitter/tree-sitter.git@d97971e24500218865c05ed1febdee2acf41bae1",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "comment": "How it is used: submodule, linked. Listed in THIRD_PARTY_LICENSES.",
+      "homepage": "https://github.com/tree-sitter/tree-sitter",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/tree-sitter/tree-sitter@d97971e24500218865c05ed1febdee2acf41bae1"
+        }
+      ]
+    },
+    {
+      "name": "tree-sitter-c",
+      "SPDXID": "SPDXRef-Component-tree-sitter-c-509d5fce8a95c723",
+      "versionInfo": "b780e47fc780ddc8da13afa35a3f4ed5c157823d",
+      "downloadLocation": "git+https://github.com/tree-sitter/tree-sitter-c.git@b780e47fc780ddc8da13afa35a3f4ed5c157823d",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "comment": "How it is used: submodule, generated grammar linked. Listed in THIRD_PARTY_LICENSES.",
+      "homepage": "https://github.com/tree-sitter/tree-sitter-c",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/tree-sitter/tree-sitter-c@b780e47fc780ddc8da13afa35a3f4ed5c157823d"
+        }
+      ]
+    },
+    {
+      "name": "tree-sitter-cpp",
+      "SPDXID": "SPDXRef-Component-tree-sitter-cpp-47d148c88a9d34dd",
+      "versionInfo": "f41e1a044c8a84ea9fa8577fdd2eab92ec96de02",
+      "downloadLocation": "git+https://github.com/tree-sitter/tree-sitter-cpp.git@f41e1a044c8a84ea9fa8577fdd2eab92ec96de02",
+      "filesAnalyzed": false,
+      "supplier": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "comment": "How it is used: submodule, generated grammar linked. Listed in THIRD_PARTY_LICENSES.",
+      "homepage": "https://github.com/tree-sitter/tree-sitter-cpp",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/tree-sitter/tree-sitter-cpp@f41e1a044c8a84ea9fa8577fdd2eab92ec96de02"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "relatedSpdxElement": "SPDXRef-Component-Dear-ImGui-7597987723e4d3fe",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Component-GoogleTest-34101f2b39cec8bc",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Component-IBM-Plex-Sans-and-IBM-Plex-Mono-9836f46bf5669da7",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Component-Orama-design-tokens-163282b2d124a134",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Component-SDL3-fb1f1dd95106898f",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Component-corosio-1db3e02efab6842b",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Component-http-358a9beabd5949fb",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Component-tree-sitter-25c632c3f623ff36",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Component-tree-sitter-c-509d5fce8a95c723",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-Component-tree-sitter-cpp-47d148c88a9d34dd",
+      "relationshipType": "DEPENDS_ON",
+      "spdxElementId": "SPDXRef-DocumentRoot"
+    },
+    {
+      "relatedSpdxElement": "SPDXRef-DocumentRoot",
+      "relationshipType": "DESCRIBES",
+      "spdxElementId": "SPDXRef-DOCUMENT"
+    }
+  ]
+}
