@@ -47,3 +47,17 @@ cmake --build build --target liquify-token-gate
 
 CTest runs the same gate as `liquify-token-gate`. Build and deployment do not generate tokens;
 Node.js participates only in configure-time test availability and the explicit gate.
+
+## Table headers
+
+Tables (the command palette's results, the front door's Recent repositories) use lake's compact
+table header: the `surface` role behind it, labels in the `text_secondary` (muted ink) role, and a
+`border_subtle` hairline under the row (`table_headers` in `src/app.cpp`; `TableHeaderBg`,
+`TableBorderStrong`, `TableBorderLight` in `App::apply_theme`). Rows alternate between transparent
+and the `layer` role. ImGui's default header, a near-black bar with dark labels, is never shown
+(liquify#109).
+
+`Screenshot.TableHeadersReadAtAAContrastInBothThemes` renders the palette and the front door in
+light and dark, takes each header row's most common colour as its background and the pixel that
+differs most as its ink, and fails below 4.5:1. The native scenario `table-headers` captures both
+tables in the real window.
