@@ -4,6 +4,9 @@
 #include <array>
 #include <atomic>
 #include <filesystem>
+#include <format>
+#include <random>
+#include <string>
 #include <span>
 #include <string_view>
 #include <system_error>
@@ -21,7 +24,7 @@ class TemporaryRepository {
 public:
     TemporaryRepository()
         : path_(std::filesystem::temp_directory_path() /
-                ("liquify-review-" + std::to_string(next_++))) {
+                ("liquify-review-" + process_suffix() + "-" + std::to_string(next_++))) {
         auto ignored = std::error_code{};
         std::filesystem::remove_all(path_, ignored);
     }
@@ -36,6 +39,16 @@ public:
     }
 
 private:
+    // ctest runs each test in its own process, where the counter restarts at zero; a
+    // per-process random suffix keeps parallel tests out of each other's directories.
+    static auto process_suffix() -> const std::string& {
+        static const auto suffix = [] {
+            auto device = std::random_device{};
+            return std::format("{:08x}{:08x}", device(), device());
+        }();
+        return suffix;
+    }
+
     inline static std::atomic_uint64_t next_{};
     std::filesystem::path path_;
 };
