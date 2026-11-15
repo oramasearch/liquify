@@ -64,7 +64,7 @@ auto print_tree(const std::filesystem::path &path) -> int {
 
   std::println("name\tkind\tmode");
   for (const auto &entry : view.entries()) {
-    std::println("{}\t{}\t{:06o}", entry.name,
+    std::println("{}\t{}\t{:06o}", liquify::printable_name(entry.name),
                  liquify::node_kind_name(entry.kind), entry.mode);
   }
   return 0;

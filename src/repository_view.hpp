@@ -15,6 +15,15 @@
 
 namespace liquify {
 
+// liquify#78: a tree entry name from a repository is used only when it is one path component:
+// non-empty, not "." or "..", without '/' or '\\', and without NUL or other control characters.
+// Entries with other names are left out of the view, so they never become a path or reach a
+// terminal.
+[[nodiscard]] auto valid_entry_name(std::string_view name) -> bool;
+
+// `name` with every control character written as \xHH, safe to print to a terminal (liquify#78).
+[[nodiscard]] auto printable_name(std::string_view name) -> std::string;
+
 class RepositoryView {
 public:
   [[nodiscard]] static RepositoryView open(std::filesystem::path path);

@@ -20,6 +20,40 @@
 #include "repository_error.hpp"
 
 namespace liquify {
+
+auto valid_entry_name(std::string_view name) -> bool {
+  if (name.empty() || name == "." || name == "..") {
+    return false;
+  }
+  return std::ranges::none_of(name, [](char character) {
+    const auto value = static_cast<unsigned char>(character);
+    return character == '/' || character == '\\' || value < 0x20 || value == 0x7f;
+  });
+}
+
+auto printable_name(std::string_view name) -> std::string {
+  auto output = std::string{};
+  output.reserve(name.size());
+  for (const auto character : name) {
+    const auto value = static_cast<unsigned char>(character);
+    if (value < 0x20 || value == 0x7f) {
+      output += std::format("\\x{:02x}", value);
+    } else {
+      output += character;
+    }
+  }
+  return output;
+}
+
+namespace {
+
+// Leaves out entries whose names are not one safe path component (liquify#78).
+auto valid_entries(std::vector<liquid::tree_entry> entries) -> std::vector<liquid::tree_entry> {
+  std::erase_if(entries, [](const liquid::tree_entry &entry) { return !valid_entry_name(entry.name); });
+  return entries;
+}
+
+} // namespace
 namespace {
 
 std::mutex repository_worker_mutex;
@@ -550,7 +584,7 @@ RepositoryView RepositoryView::load(std::filesystem::path path) {
     return view;
   }
 
-  view.entries_ = std::move(root->entries);
+  view.entries_ = valid_entries(std::move(root->entries));
   auto annotations = load_annotations(*opened);
   view.modified_paths_ = std::move(annotations.modified);
   view.in_change_paths_ = std::move(annotations.in_change);
@@ -673,7 +707,7 @@ auto RepositoryView::load_directory(std::filesystem::path repository_path,
     output.error = error_message(tree.error());
     return output;
   }
-  output.entries = std::move(tree->entries);
+  output.entries = valid_entries(std::move(tree->entries));
   return output;
 }
 
@@ -742,7 +776,7 @@ auto RepositoryView::move_path(std::filesystem::path repository_path,
     output.error = error_message(root.error());
     return output;
   }
-  output.entries = std::move(root->entries);
+  output.entries = valid_entries(std::move(root->entries));
   auto annotations = load_annotations(*opened);
   output.modified = std::move(annotations.modified);
   output.in_change = std::move(annotations.in_change);
@@ -771,7 +805,7 @@ auto RepositoryView::create_file(std::filesystem::path repository_path,
     output.error = error_message(root.error());
     return output;
   }
-  output.entries = std::move(root->entries);
+  output.entries = valid_entries(std::move(root->entries));
   auto annotations = load_annotations(*opened);
   output.modified = std::move(annotations.modified);
   output.in_change = std::move(annotations.in_change);

@@ -3477,7 +3477,13 @@ void App::poll_editor_graph() {
   }
   if (snapshot.definition_generation != definition_generation_) {
     definition_generation_ = snapshot.definition_generation;
-    if (snapshot.definition) {
+    // liquify#78: a definition opens only a path inside the repository.
+    if (snapshot.definition &&
+        (snapshot.definition->path.is_absolute() ||
+         std::ranges::any_of(snapshot.definition->path,
+                             [](const auto &part) { return part == ".."; }))) {
+      editor_status_ = "go to definition: the result is not a path inside the repository";
+    } else if (snapshot.definition) {
       const auto target = snapshot.definition->path.generic_string();
       if (pending_definition_origin_) {
         navigation_history_.replace_current(*pending_definition_origin_);

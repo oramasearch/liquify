@@ -46,7 +46,7 @@ inline diagnostics layer, diagnostics/completion and configured plugin panels, p
 the shared command registry, fuzzy palette and native macOS menus, and a daemon status line;
 `liquify --lake <repository-url> <path>` adds the review panel and reads its bearer from
 `LIQUID_TOKEN`;
-`liquify --print-tree <path>` prints name, kind and mode without a display;
+`liquify --print-tree <path>` prints name, kind and mode without a display, with every control character in a name written as `\xHH` (liquify#78);
 `liquify --apply-edits <file> <path>` applies canonical-CBOR structural edits without a display
 and writes the result record to standard output
 ([`../editor/structural-editing.md`](../editor/structural-editing.md));
@@ -129,3 +129,16 @@ live-safe defaults, validation, reset, search, and credential-free serialization
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.
+
+## Input from a repository (liquify#78)
+
+A repository may be hostile, so what it supplies is bounded before use:
+
+- **Names.** A tree entry is shown, opened or printed only when its name is one path component:
+  non-empty, not `.` or `..`, without `/` or `\`, and without control characters
+  (`valid_entry_name`). Other entries are left out of the view.
+- **Blobs.** A file opens in the editor only when it is at most 16 MiB and its first 8 KiB hold no
+  NUL byte; otherwise the editor shows why and opens nothing.
+- **Go to definition** opens only a relative path inside the repository, never an absolute path or
+  one with a `..` component.
+- Not yet done: running tree-sitter's scanners under AddressSanitizer with upstream corpora.
