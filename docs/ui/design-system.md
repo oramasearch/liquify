@@ -1,7 +1,8 @@
 # Orama design system
 
-liquify compiles its native product-interface constants from the same pinned
-`oramasearch/orama-design` DTCG snapshot as lake. The source is deterministic and offline:
+liquify compiles its native product-interface constants from a pinned DTCG snapshot of Orama's
+design system, the same snapshot lake uses. The tokens are OramaSearch, Inc.'s own work and the
+vendored copy is released under the MIT License with the rest of this repository (`COPYRIGHT`). The source is deterministic and offline:
 `design/vendor/orama-design/` carries only the eight token JSON files and `UPSTREAM.json` records
 the upstream commit plus a SHA-256 digest for each file.
 

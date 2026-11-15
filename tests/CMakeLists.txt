@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 add_executable(liquify-tests
   test_ai.cpp
   test_redraw.cpp

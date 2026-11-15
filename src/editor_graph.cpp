@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/editor_graph.hpp"
 
 #include <algorithm>

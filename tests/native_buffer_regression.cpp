@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "native_buffer_regression.hpp"
 
 #include "../src/editor_buffer.hpp"

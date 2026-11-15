@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 """Exercise independent CLI and IDE artifacts; never create a repository through the IDE library."""
 
 import argparse

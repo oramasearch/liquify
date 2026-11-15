@@ -36,6 +36,8 @@ libliquid's public API.
 | `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `--command NAME`, `docs commands|keymap`, `--screenshot STATE --out PNG`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest, including screenshot pixel-region assertions; `ctest --test-dir build` |
 | `tools/ui/` | refreshes every named screenshot under `docs/ui/screenshots/` |
+| `tools/spdx-headers.py`, `tools/third-party-licenses.py` | add the `SPDX-License-Identifier: MIT` line to every source file (`--check` lists the missing ones) and regenerate `THIRD_PARTY_LICENSES` |
+| `LICENSE`, `COPYRIGHT`, `THIRD_PARTY_LICENSES`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` | the MIT licence and its holder, the components written by others with their licences, how to contribute (DCO sign-off), the code of conduct, and how to report a vulnerability |
 | `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* checkout, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 | `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |
 | `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |

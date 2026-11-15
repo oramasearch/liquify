@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/stub_tree.hpp"
 
 #include <algorithm>

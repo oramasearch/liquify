@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // The one translation unit that knows SDL3 and Dear ImGui. The shell uses
 // ImGui; the editor submits retained line geometry directly through
 // SDL_Renderer with ImGui's GPU glyph atlas.

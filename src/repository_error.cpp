@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "repository_error.hpp"
 
 #include <array>

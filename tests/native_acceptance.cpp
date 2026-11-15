@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "native_acceptance.hpp"
 
 #include "../src/editor_buffer.hpp"
