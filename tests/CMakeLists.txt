@@ -78,7 +78,7 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
       front-door-clone-failures cut
       front-door-clone-push set-lake-push opened-clone-push
       request-review front-door-actions set-up-build
-      table-headers)
+      table-headers look)
     add_test(NAME liquify-native-acceptance-${scenario}
       COMMAND liquify-native-acceptance ${scenario}
         ${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario})

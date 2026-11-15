@@ -1735,8 +1735,7 @@ void App::draw_request_review_dialog() {
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
   ImGui::SetNextWindowSize(ImVec2(560.0F, 0.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Request Review", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!begin_dialog("Request Review", ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
   ImGui::PushTextWrapPos(540.0F);
@@ -2257,6 +2256,13 @@ void App::load_font_atlas(float scale) {
       heading_font_index_ = io.Fonts->Fonts.Size - 1;
     }
   }
+  // The type scale's emphasis faces: titles and headings are IBM Plex Sans SemiBold, as lake's.
+  title_font_index_ = -1;
+  section_font_index_ = -1;
+  add_font(design::ibm_plex_sans_semibold, design::text24, "IBM Plex Sans SemiBold");
+  title_font_index_ = io.Fonts->Fonts.Size - 1;
+  add_font(design::ibm_plex_sans_semibold, design::text16, "IBM Plex Sans SemiBold");
+  section_font_index_ = io.Fonts->Fonts.Size - 1;
   for (const auto size : {design::text12, design::text14, design::text16}) {
     add_font(design::ibm_plex_mono_regular, size, "IBM Plex Mono");
     const auto distance =
@@ -4351,11 +4357,10 @@ void App::draw_review_panel() {
 
 void App::draw_review_comment_popup() {
   if (review_comment_popup_open_) {
-    ImGui::OpenPopup("Review comment");
+    ImGui::OpenPopup("Review Comment");
     review_comment_popup_open_ = false;
   }
-  if (!ImGui::BeginPopupModal("Review comment", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!begin_dialog("Review Comment", ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
   ImGui::TextUnformatted("Comment on the current cursor");
@@ -4466,7 +4471,7 @@ void App::draw_repository_entries(std::string_view directory) {
         repository_action_target_ = path;
         repository_move_open_ = true;
       }
-      if (ImGui::MenuItem("New file")) {
+      if (ImGui::MenuItem("New File")) {
         auto base = std::filesystem::path(path);
         if (entry.kind == liquid::node_kind::blob) {
           base = base.parent_path();
@@ -4491,11 +4496,10 @@ void App::draw_navigation_popups() {
   const auto navigation_screenshot =
       screenshot != nullptr && screenshot->view == ScreenshotView::navigation;
   if (quick_open_open_) {
-    ImGui::OpenPopup("Quick open");
+    ImGui::OpenPopup("Quick Open");
     quick_open_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Quick open", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("Quick Open", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
     ImGui::SetNextItemWidth(620.0F);
     const auto quick_open_flags = navigation_screenshot
@@ -4538,11 +4542,10 @@ void App::draw_navigation_popups() {
   }
 
   if (symbol_search_open_) {
-    ImGui::OpenPopup("Symbol search");
+    ImGui::OpenPopup("Symbol Search");
     symbol_search_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Symbol search", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("Symbol Search", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
     ImGui::SetNextItemWidth(620.0F);
     ImGui::InputTextWithHint("##symbol-search", "Type a symbol",
@@ -4574,11 +4577,10 @@ void App::draw_navigation_popups() {
   }
 
   if (open_recent_open_) {
-    ImGui::OpenPopup("Open recent");
+    ImGui::OpenPopup("Open Recent");
     open_recent_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Open recent", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("Open Recent", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
     if (navigation_history_.recent().empty()) {
       ImGui::TextDisabled("No recently opened paths.");
@@ -4603,11 +4605,10 @@ void App::draw_navigation_popups() {
 
 void App::draw_repository_action_popup() {
   if (repository_move_open_) {
-    ImGui::OpenPopup("Move or rename path");
+    ImGui::OpenPopup("Move or Rename Path");
     repository_move_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Move or rename path", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("Move or Rename Path", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
     ImGui::Text("Source: %s", repository_action_source_.c_str());
     ImGui::SetNextItemWidth(520.0F);
@@ -4628,11 +4629,10 @@ void App::draw_repository_action_popup() {
   }
 
   if (repository_new_file_open_) {
-    ImGui::OpenPopup("New file");
+    ImGui::OpenPopup("New File");
     repository_new_file_open_ = false;
   }
-  if (ImGui::BeginPopupModal("New file", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("New File", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
     ImGui::SetNextItemWidth(520.0F);
     ImGui::InputText("Path", &repository_action_target_);
@@ -4707,7 +4707,7 @@ void App::draw_assistant() {
   const auto snapshot = assistant_->snapshot();
   ImGui::Text("Assistant: %s", snapshot.status.c_str());
   ImGui::SameLine();
-  if (ImGui::SmallButton("What will be sent")) {
+  if (ImGui::SmallButton("What Will Be Sent")) {
     request_assistant_context(std::nullopt);
   }
   ImGui::InputTextWithHint("##assistant-prompt",
@@ -4754,11 +4754,10 @@ void App::draw_assistant() {
     }
   }
   if (context_preview_open_) {
-    ImGui::OpenPopup("What will be sent");
+    ImGui::OpenPopup("What Will Be Sent");
     context_preview_open_ = false;
   }
-  if (ImGui::BeginPopupModal("What will be sent", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("What Will Be Sent", ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::Text("Structured graph context: %zu bytes", context_preview_.size());
     if (!context_omissions_.empty()) {
       ImGui::TextWrapped("Omissions: %s", context_omissions_.front().c_str());
@@ -4835,12 +4834,11 @@ void App::execute_panel_command(std::string_view command) {
 void App::draw_command_palette() {
   command_palette_visible_ = false;
   if (command_palette_open_) {
-    ImGui::OpenPopup("Command palette");
+    ImGui::OpenPopup("Command Palette");
     command_palette_open_ = false;
   }
   ImGui::SetNextWindowSize(ImVec2(760.0F, 520.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Command palette", nullptr,
-                              ImGuiWindowFlags_NoSavedSettings)) {
+  if (!begin_dialog("Command Palette", ImGuiWindowFlags_NoSavedSettings)) {
     return;
   }
   command_palette_visible_ = true;
@@ -4914,8 +4912,7 @@ void App::draw_settings() {
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
   ImGui::SetNextWindowSize(ImVec2(900.0F, 650.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Settings", nullptr,
-                              ImGuiWindowFlags_NoSavedSettings)) {
+  if (!begin_dialog("Settings", ImGuiWindowFlags_NoSavedSettings)) {
     settings_popup_visible_ = false;
     return;
   }
@@ -5188,11 +5185,10 @@ void App::draw_structural_editing() {
     return;
   }
   if (rename_open_) {
-    ImGui::OpenPopup("Rename symbol");
+    ImGui::OpenPopup("Rename Symbol");
     rename_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Rename symbol", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("Rename Symbol", ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::InputText("New name", &structural_name_);
     if (ImGui::Button("Preview") && editor_graph_ && editor_) {
       const auto byte = editor_->byte_offset(editor_->cursor());
@@ -5212,11 +5208,10 @@ void App::draw_structural_editing() {
   }
 
   if (extract_function_open_) {
-    ImGui::OpenPopup("Extract function");
+    ImGui::OpenPopup("Extract Function");
     extract_function_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Extract function", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("Extract Function", ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::InputText("Function name", &structural_name_);
     if (ImGui::Button("Preview") && editor_graph_ && editor_) {
       if (const auto selection = editor_->selection()) {
@@ -5684,7 +5679,7 @@ void App::draw_editor_modes() {
     if (ImGui::MenuItem("Rename")) {
       open_rename();
     }
-    if (ImGui::MenuItem("Extract function")) {
+    if (ImGui::MenuItem("Extract Function")) {
       open_extract_function();
     }
     ImGui::EndPopup();
@@ -6445,7 +6440,8 @@ void App::draw_panel_header(PanelId id) {
   }
   ImGui::PushID(panel_id_name(id).data());
   const auto label = icon_label(panel_label(id), 0.0F);
-  ImGui::TextUnformatted(label.c_str());
+  type_heading(label, std::string("panel/") + std::string(panel_id_name(id)) +
+                          "/title");
   item_icon(panel_icon(id));
   ImGui::SameLine();
   if (ImGui::SmallButton("...")) {
@@ -6490,10 +6486,10 @@ void App::draw_panel(PanelId id) {
     }
     break;
   case PanelId::search:
-    if (ImGui::Button("Quick open", ImVec2(-1.0F, 0.0F))) {
+    if (ImGui::Button("Quick Open", ImVec2(-1.0F, 0.0F))) {
       invoke_navigation_action(NavigationAction::quick_open);
     }
-    if (ImGui::Button("Symbol search", ImVec2(-1.0F, 0.0F))) {
+    if (ImGui::Button("Symbol Search", ImVec2(-1.0F, 0.0F))) {
       invoke_navigation_action(NavigationAction::symbol_search);
     }
     ImGui::Separator();
@@ -6665,16 +6661,34 @@ void App::draw_editor_area() {
   const auto has_visible_panel = std::ranges::any_of(
       editor_panels, [this](PanelId id) { return panels_.layout(id).visible; });
   if (!editor_ && !has_visible_panel) {
+    // Centered as one block: title, supporting copy, the next step.
     const auto available = ImGui::GetContentRegionAvail();
-    ImGui::SetCursorPosY(std::max(available.y * 0.28F, design::space8));
-    ImGui::SetCursorPosX(std::max(available.x * 0.16F, design::space8));
-    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[heading_font_index_]);
-    ImGui::TextUnformatted("liquify");
+    const auto origin = ImGui::GetCursorPos();
+    const auto hint = std::string_view{"Select a file in the repository sidebar to "
+                                       "start editing."};
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[title_font_index_]);
+    const auto title_width = ImGui::CalcTextSize("liquify").x;
+    const auto title_height = ImGui::GetTextLineHeightWithSpacing();
     ImGui::PopFont();
-    ImGui::TextDisabled("The IDE for liquid");
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Open a repository, then select a file from the "
-                           "repository sidebar.");
+    const auto hint_width =
+        ImGui::CalcTextSize(hint.data(), hint.data() + hint.size()).x;
+    const auto top = origin.y +
+                     std::max((available.y - title_height -
+                               ImGui::GetTextLineHeightWithSpacing() * 2.0F) *
+                                  0.42F,
+                              design::space8);
+    ImGui::SetCursorPos(
+        ImVec2(origin.x + std::max((available.x - title_width) * 0.5F, 0.0F), top));
+    type_title("liquify", "editor/empty-title");
+    const auto copy = std::string_view{"The IDE for liquid"};
+    ImGui::SetCursorPosX(origin.x + std::max((available.x -
+                                              ImGui::CalcTextSize(copy.data(), copy.data() + copy.size()).x) *
+                                                 0.5F,
+                                             0.0F));
+    ImGui::TextDisabled("%s", copy.data());
+    ImGui::SetCursorPosX(origin.x +
+                         std::max((available.x - hint_width) * 0.5F, 0.0F));
+    ImGui::TextUnformatted(hint.data(), hint.data() + hint.size());
     return;
   }
 
@@ -6924,8 +6938,7 @@ void App::draw_build_setup_dialog() {
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
   ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Set Up Build", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!begin_dialog("Set Up Build", ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
   if (build_setup_close_requested_) {
@@ -6992,8 +7005,7 @@ void App::draw_set_lake_dialog() {
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
   ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Set Lake", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!begin_dialog("Set Lake", ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
   ImGui::PushTextWrapPos(580.0F);
@@ -7035,6 +7047,34 @@ void App::draw_set_lake_dialog() {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
+}
+
+// The type scale (liquify#100), from the design tokens lake uses: a title (24, semibold), a
+// section heading (16, semibold), body (the UI size) and captions (disabled ink).
+void App::type_title(std::string_view text, std::string_view id) {
+  ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[title_font_index_]);
+  ImGui::TextUnformatted(text.data(), text.data() + text.size());
+  ImGui::PopFont();
+  if (!id.empty()) {
+    frame_layout_.controls[std::string(id)] = item_rectangle();
+  }
+}
+
+void App::type_heading(std::string_view text, std::string_view id) {
+  ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[section_font_index_]);
+  ImGui::TextUnformatted(text.data(), text.data() + text.size());
+  ImGui::PopFont();
+  if (!id.empty()) {
+    frame_layout_.controls[std::string(id)] = item_rectangle();
+  }
+}
+
+// A modal dialog whose title bar uses the heading face. Every dialog title is Title Case.
+auto App::begin_dialog(const char *title, int flags) -> bool {
+  ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[section_font_index_]);
+  const auto open = ImGui::BeginPopupModal(title, nullptr, flags);
+  ImGui::PopFont();
+  return open;
 }
 
 void App::draw_user_error(const UserError &failure, std::string_view id,
@@ -7139,8 +7179,7 @@ void App::draw_cut_composer() {
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
   ImGui::SetNextWindowSize(ImVec2(620.0F, 0.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Cut Change", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!begin_dialog("Cut Change", ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
   if (cut_close_requested_) {
@@ -7247,8 +7286,7 @@ void App::draw_clone_dialog() {
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
   ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Clone from Lake", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!begin_dialog("Clone from Lake", ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
   ImGui::PushTextWrapPos(580.0F);
@@ -7321,8 +7359,7 @@ void App::draw_new_repository_dialog() {
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
   ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("New Repository", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!begin_dialog("New Repository", ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
   ImGui::PushTextWrapPos(580.0F);
@@ -7376,9 +7413,15 @@ void App::draw_welcome() {
       "first-run-card",
       ImVec2(card_width, std::max(available.y - design::space8 * 2.0F, 1.0F)),
       ImGuiChildFlags_Border, ImGuiWindowFlags_AlwaysUseWindowPadding);
-  ImGui::TextUnformatted("Welcome to liquify");
-  ImGui::TextDisabled(
+  type_title("Welcome to liquify", "welcome/title");
+  ImGui::PushStyleColor(ImGuiCol_Text,
+                        imgui_color(effective_palette(applied_dark_theme_,
+                                                      applied_high_contrast_)
+                                        .text_secondary));
+  ImGui::TextUnformatted(
       "Build software locally. Collaborate through lake when it is reachable.");
+  frame_layout_.controls["welcome/copy"] = item_rectangle();
+  ImGui::PopStyleColor();
   ImGui::TextDisabled("Open or create a repository here, or clone one from "
                       "lake.");
   ImGui::Spacing();
@@ -7496,7 +7539,7 @@ void App::draw_welcome() {
   }
 
   ImGui::Spacing();
-  ImGui::SeparatorText("Recent repositories");
+  type_heading("Recent Repositories", "welcome/recent-heading");
   if (first_run_.recent().empty()) {
     ImGui::TextDisabled("Repositories you open will appear here.");
   } else if (ImGui::BeginTable("recent-repositories", 4,
@@ -7910,6 +7953,8 @@ void App::frame(bool present) {
   editor_visible_ = false;
   frame_layout_ = {};
   frame_layout_.drawable_scale = {framebuffer_scale.x, framebuffer_scale.y};
+  frame_layout_.controls["type/body"] =
+      InputRectangle{0.0F, 0.0F, 0.0F, ImGui::GetTextLineHeight()};
 
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -8885,7 +8930,7 @@ private:
     app.command_palette_open_ = true;
     auto with_source = capture(app);
     save(prefix.string() + "-palette.png", with_source);
-    auto *window = ImGui::FindWindowByName("Command palette");
+    auto *window = ImGui::FindWindowByName("Command Palette");
     require(window != nullptr && window->Active,
             "command palette did not open");
     // The antialiased outer border blends with whatever is behind the popup.
@@ -8899,7 +8944,7 @@ private:
     replace_buffer(app, "");
     auto without_source = capture(app);
     save(prefix.string() + "-palette-empty-editor.png", without_source);
-    compare_overlay(with_source, without_source, "Command palette",
+    compare_overlay(with_source, without_source, "Command Palette",
                     palette_content);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
     capture(app);

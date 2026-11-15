@@ -235,3 +235,31 @@ TEST(Screenshot, TableHeadersReadAtAAContrastInBothThemes) {
 
 } // namespace
 } // namespace liquify
+
+namespace liquify {
+namespace {
+
+// liquify#100: titles, headings and body are different sizes, measured on rendered text rows.
+TEST(Screenshot, TypeScaleSeparatesTitlesHeadingsAndBody) {
+  for (const auto *state : {"welcome-light", "welcome-dark"}) {
+    const auto rendered = render_diagnostics(state);
+    const auto &controls = rendered.layout.controls;
+    ASSERT_TRUE(controls.contains("welcome/title") && controls.contains("welcome/copy") &&
+                controls.contains("welcome/recent-heading"))
+        << state;
+    const auto body = controls.at("welcome/copy").height;
+    EXPECT_GE(controls.at("welcome/title").height, body * 1.5F) << state;
+    EXPECT_GT(controls.at("welcome/recent-heading").height, body) << state;
+  }
+  for (const auto *state : {"repository-light", "repository-dark"}) {
+    const auto rendered = render_diagnostics(state);
+    const auto &controls = rendered.layout.controls;
+    ASSERT_TRUE(controls.contains("panel/repository/title") && controls.contains("type/body"))
+        << state;
+    EXPECT_GT(controls.at("panel/repository/title").height, controls.at("type/body").height)
+        << state;
+  }
+}
+
+} // namespace
+} // namespace liquify

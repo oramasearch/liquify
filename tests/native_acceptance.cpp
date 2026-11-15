@@ -186,7 +186,7 @@ void NativeAcceptance::geometry(App &app, const std::filesystem::path &output) {
   test::require_editor(image, app.frame_layout());
   save_image(output / "resized.png", image);
   key(app, "p", true, true);
-  require(popup("Command palette"), "keyboard opened modal over real source");
+  require(popup("Command Palette"), "keyboard opened modal over real source");
   save_image(output / "palette.png", capture(app));
 }
 
@@ -195,7 +195,7 @@ void NativeAcceptance::modal_input(App &app) {
   click(app, app.frame_layout().editor);
   const auto before = std::string(app.editor_->text());
   key(app, "p", true, true);
-  require(popup("Command palette"), "palette opened over focused source");
+  require(popup("Command Palette"), "palette opened over focused source");
   text(app, "modal query");
   require(app.command_palette_query_ == "modal query",
           "modal query received native text");
@@ -208,7 +208,7 @@ void NativeAcceptance::modal_input(App &app) {
 void NativeAcceptance::quick_open(App &app) {
   open_file(app);
   key(app, "p", true);
-  require(popup("Quick open"), "Primary+P opened Quick Open");
+  require(popup("Quick Open"), "Primary+P opened Quick Open");
   text(app, "other.cpp");
   std::printf("quick-open: query='%s' expected='other.cpp'\n",
               app.quick_open_query_.c_str());
@@ -217,20 +217,20 @@ void NativeAcceptance::quick_open(App &app) {
   key(app, "Down");
   key(app, "Enter");
   require(app.editor_ && app.editor_->display_path() == "other.cpp" &&
-              !popup("Quick open"),
+              !popup("Quick Open"),
           "#33: Down/Enter opens selected result and closes Quick Open");
 }
 
 void NativeAcceptance::edit(App &app, const std::filesystem::path &output) {
   open_file(app);
   key(app, "p", true);
-  require(popup("Quick open"), "Quick Open opened before focus transition");
+  require(popup("Quick Open"), "Quick Open opened before focus transition");
   click(app, app.frame_layout().controls.at("quick-open/query"));
   text(app, "main.cpp");
   require(app.quick_open_query_ == "main.cpp",
           "SDL text reached focused ImGui field");
   click(app, app.frame_layout().controls.at("quick-open/main.cpp"));
-  require(!popup("Quick open"), "SDL pointer selected Quick Open result");
+  require(!popup("Quick Open"), "SDL pointer selected Quick Open result");
   source_tab(app);
   click(app, app.frame_layout().editor);
   const auto before = std::string(app.editor_->text());
@@ -262,16 +262,16 @@ void NativeAcceptance::palette(App &app) {
   open_file(app);
   const auto before = app.shell_state_.bottom_panel_visible;
   key(app, "p", true, true);
-  require(popup("Command palette"), "Primary+Shift+P opened palette");
+  require(popup("Command Palette"), "Primary+Shift+P opened palette");
   text(app, "Toggle bottom panel");
   require(app.command_palette_query_ == "Toggle bottom panel",
           "palette receives keyboard query");
   key(app, "Down");
   key(app, "Enter");
   std::printf("palette: visible=%d bottom_before=%d bottom_after=%d\n",
-              popup("Command palette"), before,
+              popup("Command Palette"), before,
               app.shell_state_.bottom_panel_visible);
-  require(!popup("Command palette") &&
+  require(!popup("Command Palette") &&
               app.shell_state_.bottom_panel_visible != before,
           "palette Down/Enter dispatches selected command");
 }
@@ -907,7 +907,7 @@ void NativeAcceptance::set_up_build(const std::filesystem::path &output) {
 void NativeAcceptance::table_headers(App &app, const std::filesystem::path &output) {
   open_file(app);
   key(app, "p", true, true);
-  require(popup("Command palette"), "palette opened");
+  require(popup("Command Palette"), "palette opened");
   require(app.frame_layout().controls.contains("palette/header"),
           "#109: the palette draws its header row");
   capture_themes(app, output, "palette-header");
@@ -917,6 +917,34 @@ void NativeAcceptance::table_headers(App &app, const std::filesystem::path &outp
   require(app.frame_layout().controls.contains("recent-repositories/header"),
           "#109: the front door draws Recent repositories with its header row");
   capture_themes(app, output, "recent-header");
+}
+
+// liquify#100-#102: the screens the look issues name, in the real window and both themes:
+// the empty editor, a panel header, the command palette, Settings and the front door.
+void NativeAcceptance::look(App &app, const std::filesystem::path &output) {
+  require(app.frame_layout().controls.contains("editor/empty-title"),
+          "#100: the empty editor shows its title");
+  require(app.frame_layout().controls.at("editor/empty-title").height >
+              app.frame_layout().controls.at("type/body").height * 1.5F,
+          "#100: the empty editor title is set in the title size");
+  capture_themes(app, output, "look-empty-editor");
+  key(app, "p", true, true);
+  require(popup("Command Palette"), "palette opened");
+  capture_themes(app, output, "look-palette");
+  key(app, "Escape");
+  static_cast<void>(app.invoke_command("settings.open"));
+  pulse(app);
+  require(popup("Settings"), "Settings opened");
+  capture_themes(app, output, "look-settings");
+  key(app, "Escape");
+  open_file(app);
+  capture_themes(app, output, "look-editor");
+  app.first_run_.return_to_welcome();
+  pulse(app);
+  require(app.frame_layout().controls.at("welcome/title").height >=
+              app.frame_layout().controls.at("welcome/copy").height * 1.5F,
+          "#100: the front door title is set in the title size");
+  capture_themes(app, output, "look-front-door");
 }
 
 void NativeAcceptance::wait_for_repository_operation(App &app) {
@@ -1097,6 +1125,8 @@ int NativeAcceptance::run(std::string_view scenario,
     tabs(app);
   } else if (scenario == "build") {
     build(app, output);
+  } else if (scenario == "look") {
+    look(app, output);
   } else if (scenario == "table-headers") {
     table_headers(app, output);
   } else if (scenario == "cut") {
