@@ -391,6 +391,7 @@ enum class ShellIcon {
   header,
   markdown,
   settings,
+  build_file,
   data
 };
 
@@ -430,7 +431,7 @@ auto file_icon(NavigationFileKind kind) -> ShellIcon {
   case NavigationFileKind::markdown:
     return ShellIcon::markdown;
   case NavigationFileKind::cmake:
-    return ShellIcon::settings;
+    return ShellIcon::build_file;
   case NavigationFileKind::json:
   case NavigationFileKind::binary:
     return ShellIcon::data;
@@ -480,6 +481,11 @@ void draw_shell_icon(ShellIcon icon, ImVec2 origin) {
     line(1, 8, 15, 8);
     line(3, 3, 13, 13);
     line(3, 13, 13, 3);
+    break;
+  case ShellIcon::build_file:
+    // A build description: a page with the build triangle on it, not the plugin's plug.
+    draw->AddRect(point(2, 1), point(14, 15), color, 1, 0, 1.5F);
+    draw->AddTriangleFilled(point(6, 5), point(11, 8), point(6, 11), color);
     break;
   case ShellIcon::plugin:
   case ShellIcon::structure:
@@ -923,7 +929,8 @@ public:
     const auto last_line =
         std::min(buffer.line_count(), first_line + available_lines);
     draw_gutter(renderer, buffer, diagnostics, folds, attribution, presence,
-                drive, palette, x, y, first_line, last_line, line_height);
+                drive, palette, x, y, first_line, last_line, line_height,
+                height);
     draw_review_backgrounds(renderer, review_lines, x, y, width, first_line,
                             last_line, line_height);
     draw_selection(renderer, buffer, layouts, x, y, width, first_line,
@@ -1054,13 +1061,12 @@ private:
                           const std::optional<liquid::drive_path_status> &drive,
                           const design::Palette &palette, float x, float y,
                           std::size_t first_line, std::size_t last_line,
-                          float line_height) {
+                          float line_height, float height) {
     SDL_SetRenderDrawColorFloat(renderer, palette.layer.red,
                                 palette.layer.green, palette.layer.blue,
                                 palette.layer.alpha);
-    const SDL_FRect background{x, y, editor_gutter_width,
-                               static_cast<float>(last_line - first_line) *
-                                   line_height};
+    // The gutter runs the editor's full height, not only to the last line (liquify#102).
+    const SDL_FRect background{x, y, editor_gutter_width, height};
     SDL_RenderFillRect(renderer, &background);
     SDL_SetRenderDrawColorFloat(
         renderer, palette.border_subtle.red, palette.border_subtle.green,
@@ -2397,6 +2403,13 @@ void App::apply_theme() {
   colors[ImGuiCol_TabDimmedSelected] = imgui_color(palette.surface);
   colors[ImGuiCol_TextSelectedBg] = imgui_color(palette.selection);
   colors[ImGuiCol_NavCursor] = imgui_color(palette.focus);
+  // The modal scrim (liquify#102): the theme's canvas, translucent, so a dialog dims the window
+  // in the theme's own direction instead of washing dark mode out with mid-grey.
+  {
+    auto scrim = imgui_color(palette.canvas);
+    scrim.w = dark ? 0.72F : 0.55F;
+    colors[ImGuiCol_ModalWindowDimBg] = scrim;
+  }
   applied_dark_theme_ = dark;
   applied_high_contrast_ = high_contrast;
 }
@@ -6236,8 +6249,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
   const auto available = ImGui::GetContentRegionAvail();
   ImGui::BeginChild(
       "build-panel",
-      ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F)),
-      ImGuiChildFlags_Border);
+      ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F)));
   if (screenshot_mode()) {
     const auto palette =
         effective_palette(applied_dark_theme_, applied_high_contrast_);
@@ -7822,9 +7834,71 @@ void App::draw_status_bar() {
   ImGui::EndTable();
 }
 
+// The shell (liquify#102): regions share their edges, separated by hairlines, with no inset
+// frames or gaps; only overlays have shadows. Each region reports its rectangle so a property
+// test can check that neighbours touch.
+void App::shell_region_begin(const char *id, float width, float height) {
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0F);
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 0.0F);
+  ImGui::BeginChild(id, ImVec2(width, height), ImGuiChildFlags_AlwaysUseWindowPadding);
+  ImGui::PopStyleVar(2);
+  // Regions touch; their contents keep the kit's spacing.
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                      ImVec2(design::space2, design::space2));
+}
+
+void App::shell_region_end(const char *id) {
+  ImGui::PopStyleVar();
+  ImGui::EndChild();
+  const auto min = ImGui::GetItemRectMin();
+  const auto max = ImGui::GetItemRectMax();
+  frame_layout_.controls[std::string("region/") + id] =
+      InputRectangle{min.x, min.y, max.x - min.x, max.y - min.y};
+}
+
+void App::hairline(float x0, float y0, float x1, float y1) {
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  ImGui::GetWindowDrawList()->AddLine(
+      ImVec2(x0, y0), ImVec2(x1, y1),
+      packed_color(applied_high_contrast_ ? palette.border_strong
+                                          : palette.border_subtle),
+      1.0F);
+}
+
+// A splitter that sits on the shared edge: its hit area straddles the hairline without
+// taking space between the regions.
+auto App::edge_splitter(const char *id, float x, float y, float width,
+                        float height) -> float {
+  const auto delta_axis_x = height > width;
+  const auto grab = design::space1;
+  const auto bb = delta_axis_x
+                      ? ImRect(ImVec2(x - grab, y), ImVec2(x + grab, y + height))
+                      : ImRect(ImVec2(x, y - grab), ImVec2(x + width, y + grab));
+  const auto item = ImGui::GetID(id);
+  ImGui::ItemAdd(bb, item, nullptr, ImGuiItemFlags_NoNav);
+  auto hovered = false;
+  auto held = false;
+  ImGui::ButtonBehavior(bb, item, &hovered, &held, ImGuiButtonFlags_None);
+  if (hovered || held) {
+    ImGui::SetMouseCursor(delta_axis_x ? ImGuiMouseCursor_ResizeEW
+                                       : ImGuiMouseCursor_ResizeNS);
+  }
+  if (ImGui::IsItemDeactivated()) {
+    persist_shell_state();
+  }
+  if (!held) {
+    return 0.0F;
+  }
+  return delta_axis_x ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y;
+}
+
 void App::draw_contents() {
+  // One compact row, as dense as lake's top bar.
   const auto status_bar_height =
-      ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0F;
+      ImGui::GetTextLineHeight() + design::space2 * 2.0F;
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0F, 0.0F));
+  const auto origin = ImGui::GetCursorScreenPos();
   const auto available = ImGui::GetContentRegionAvail();
   const auto *screenshot =
       options_.screenshot_state
@@ -7837,49 +7911,57 @@ void App::draw_contents() {
   const auto show_first_run =
       !options_.smoke && !screenshot_workspace &&
       first_run_.phase() != RepositoryLifecyclePhase::open;
-  if (show_first_run) {
-    const auto content_height = std::max(available.y - status_bar_height -
-                                             ImGui::GetStyle().ItemSpacing.y,
-                                         1.0F);
-    ImGui::BeginChild("first-run", ImVec2(available.x, content_height));
-    draw_welcome();
-    ImGui::EndChild();
-    ImGui::BeginChild("status-bar", ImVec2(available.x, status_bar_height),
-                      ImGuiChildFlags_Border);
+  const auto center_height =
+      std::max(available.y - status_bar_height, 1.0F);
+  const auto draw_status = [&] {
+    ImGui::PopStyleVar();
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + center_height));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+                        ImVec2(design::space3, design::space1));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                        ImVec2(design::space2, 0.0F));
+    shell_region_begin("status-bar", available.x, status_bar_height);
     draw_status_bar();
+    shell_region_end("status-bar");
+    ImGui::PopStyleVar(2);
+    hairline(origin.x, origin.y + center_height, origin.x + available.x,
+             origin.y + center_height);
+  };
+  if (show_first_run) {
+    ImGui::BeginChild("first-run", ImVec2(available.x, center_height));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                        ImVec2(design::space2, design::space2));
+    draw_welcome();
+    ImGui::PopStyleVar();
     ImGui::EndChild();
+    draw_status();
     return;
   }
-  const auto center_height = std::max(
-      available.y - status_bar_height - ImGui::GetStyle().ItemSpacing.y, 1.0F);
-  ImGui::BeginChild("activity-bar", ImVec2(activity_bar_width, center_height),
-                    ImGuiChildFlags_Border);
+  shell_region_begin("activity-bar", activity_bar_width, center_height);
   draw_activity_bar();
-  ImGui::EndChild();
+  shell_region_end("activity-bar");
+  auto edge = origin.x + activity_bar_width;
+  hairline(edge, origin.y, edge, origin.y + center_height);
   ImGui::SameLine(0.0F, 0.0F);
 
   if (shell_state_.sidebar_visible) {
-    ImGui::BeginChild("sidebar",
-                      ImVec2(shell_state_.sidebar_width, center_height),
-                      ImGuiChildFlags_Border);
+    shell_region_begin("sidebar", shell_state_.sidebar_width, center_height);
     draw_sidebar();
-    ImGui::EndChild();
-    ImGui::SameLine(0.0F, 0.0F);
-    ImGui::InvisibleButton("sidebar-divider",
-                           ImVec2(divider_size, center_height));
-    if (ImGui::IsItemActive()) {
+    shell_region_end("sidebar");
+    edge += shell_state_.sidebar_width;
+    hairline(edge, origin.y, edge, origin.y + center_height);
+    if (const auto moved = edge_splitter("sidebar-divider", edge, origin.y,
+                                         1.0F, center_height);
+        moved != 0.0F) {
       shell_state_.sidebar_width =
-          std::clamp(shell_state_.sidebar_width + ImGui::GetIO().MouseDelta.x,
-                     180.0F, 520.0F);
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-      persist_shell_state();
+          std::clamp(shell_state_.sidebar_width + moved, 180.0F, 520.0F);
     }
     ImGui::SameLine(0.0F, 0.0F);
   }
 
   const auto workspace_width = std::max(ImGui::GetContentRegionAvail().x, 1.0F);
   ImGui::BeginChild("workspace", ImVec2(workspace_width, center_height));
+  const auto workspace_origin = ImGui::GetCursorScreenPos();
   const auto workspace = ImGui::GetContentRegionAvail();
   const auto maximum_panel = std::max(workspace.y - 160.0F, 120.0F);
   shell_state_.bottom_panel_height =
@@ -7887,39 +7969,26 @@ void App::draw_contents() {
   const auto bottom_height = shell_state_.bottom_panel_visible
                                  ? shell_state_.bottom_panel_height
                                  : 0.0F;
-  const auto bottom_spacing = shell_state_.bottom_panel_visible
-                                  ? ImGui::GetStyle().ItemSpacing.y * 2.0F
-                                  : 0.0F;
-  const auto editor_height =
-      std::max(workspace.y - bottom_height -
-                   (shell_state_.bottom_panel_visible ? divider_size : 0.0F) -
-                   bottom_spacing,
-               1.0F);
-  ImGui::BeginChild("editor-area", ImVec2(workspace.x, editor_height));
+  const auto editor_height = std::max(workspace.y - bottom_height, 1.0F);
+  shell_region_begin("editor-area", workspace.x, editor_height);
   draw_editor_area();
-  ImGui::EndChild();
+  shell_region_end("editor-area");
   if (shell_state_.bottom_panel_visible) {
-    ImGui::InvisibleButton("bottom-divider", ImVec2(workspace.x, divider_size));
-    if (ImGui::IsItemActive()) {
+    const auto top = workspace_origin.y + editor_height;
+    hairline(workspace_origin.x, top, workspace_origin.x + workspace.x, top);
+    if (const auto moved = edge_splitter("bottom-divider", workspace_origin.x,
+                                         top, workspace.x, 1.0F);
+        moved != 0.0F) {
       shell_state_.bottom_panel_height = std::clamp(
-          shell_state_.bottom_panel_height - ImGui::GetIO().MouseDelta.y,
-          120.0F, maximum_panel);
+          shell_state_.bottom_panel_height - moved, 120.0F, maximum_panel);
     }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-      persist_shell_state();
-    }
-    ImGui::BeginChild("bottom-panel",
-                      ImVec2(workspace.x, shell_state_.bottom_panel_height),
-                      ImGuiChildFlags_Border);
+    shell_region_begin("bottom-panel", workspace.x,
+                       shell_state_.bottom_panel_height);
     draw_bottom_panel();
-    ImGui::EndChild();
+    shell_region_end("bottom-panel");
   }
   ImGui::EndChild();
-
-  ImGui::BeginChild("status-bar", ImVec2(available.x, status_bar_height),
-                    ImGuiChildFlags_Border);
-  draw_status_bar();
-  ImGui::EndChild();
+  draw_status();
 }
 
 void App::render_editor(InputRectangle clip_bounds) {
@@ -8056,9 +8125,13 @@ void App::frame(bool present) {
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->WorkPos);
   ImGui::SetNextWindowSize(viewport->WorkSize);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
   ImGui::Begin("liquify", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_NoSavedSettings);
+  ImGui::PopStyleVar(3);
   const auto window_position = ImGui::GetWindowPos();
   const auto window_size = ImGui::GetWindowSize();
   frame_layout_.window = {window_position.x, window_position.y, window_size.x,

@@ -106,3 +106,23 @@ binding by its command's title, not its id.
 `Screenshot.SearchFieldsFillTheirPanel` checks the Search panel's fields share one width and fill
 their panel; the native scenario `look` captures the toolbar, Search, Settings and the front door
 in the real window.
+
+## Surfaces
+
+Lake's direction is flat surfaces and hairline boundaries, with shadows only on overlays
+(liquify#102). The shell's regions (activity bar, sidebar, editor, bottom panel, status bar) are
+children with no border, no rounding and no gap: they share edges, and a `border_subtle` hairline
+is drawn on each shared edge (`App::shell_region_begin`, `App::hairline`). The sidebar and bottom
+panel resize from a splitter that straddles the hairline without taking space
+(`App::edge_splitter`). The root window has no padding, so regions reach the window's edges.
+
+- The status bar is one compact row: a body line with `space2` above and below.
+- The editor gutter fills the editor's height, not only the lines that exist.
+- File-kind icons come from one table (`file_icon`); a CMake file has its own build-file glyph
+  instead of the plugin's plug.
+- The modal scrim is the theme's canvas, translucent (`ModalWindowDimBg`), so a dialog dims dark
+  mode instead of washing it out with mid-grey.
+
+`Screenshot.ShellRegionsShareEdges` checks in both themes that neighbouring regions share an edge,
+that the regions reach the window's edges, and the status bar's height. The native scenario `look`
+captures the whole window and a dialog open in dark.

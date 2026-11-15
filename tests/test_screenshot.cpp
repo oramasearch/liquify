@@ -287,3 +287,38 @@ TEST(Screenshot, SearchFieldsFillTheirPanel) {
 
 } // namespace
 } // namespace liquify
+
+namespace liquify {
+namespace {
+
+// liquify#102: shell regions share their edges (no inset frames or gaps), and the status bar
+// is one compact row.
+TEST(Screenshot, ShellRegionsShareEdges) {
+  for (const auto *state : {"build-light", "build-dark"}) {
+    const auto rendered = render_diagnostics(state);
+    const auto &controls = rendered.layout.controls;
+    for (const auto *region : {"region/activity-bar", "region/sidebar", "region/editor-area",
+                               "region/bottom-panel", "region/status-bar"}) {
+      ASSERT_TRUE(controls.contains(region)) << state << " " << region;
+    }
+    const auto &activity = controls.at("region/activity-bar");
+    const auto &sidebar = controls.at("region/sidebar");
+    const auto &editor = controls.at("region/editor-area");
+    const auto &bottom = controls.at("region/bottom-panel");
+    const auto &status = controls.at("region/status-bar");
+    EXPECT_NEAR(activity.x + activity.width, sidebar.x, 0.5F) << state;
+    EXPECT_NEAR(sidebar.x + sidebar.width, editor.x, 0.5F) << state;
+    EXPECT_NEAR(editor.y + editor.height, bottom.y, 0.5F) << state;
+    EXPECT_NEAR(activity.y + activity.height, status.y, 0.5F) << state;
+    EXPECT_NEAR(bottom.y + bottom.height, status.y, 0.5F) << state;
+    EXPECT_NEAR(activity.x, rendered.layout.window.x, 0.5F) << state;
+    EXPECT_NEAR(status.y + status.height, rendered.layout.window.y + rendered.layout.window.height,
+                0.5F)
+        << state;
+    // One row: no taller than a body line plus the kit's vertical padding.
+    EXPECT_LE(status.height, controls.at("type/body").height + 2.0F * 8.0F + 0.5F) << state;
+  }
+}
+
+} // namespace
+} // namespace liquify

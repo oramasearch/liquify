@@ -35,7 +35,7 @@ text-anchor mapping, syntax modules, attribution, presence, operation history, a
 forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
 embedded IBM Plex Sans (Regular, SemiBold) and Mono assets and a title/heading/body/caption type scale and a controls kit
-mirroring lake's (`docs/ui/design-system.md`); its gate rejects changed source and output bytes. The
+mirroring lake's (`docs/ui/design-system.md`), on flat regions that share hairline edges; its gate rejects changed source and output bytes. The
 light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel,
 floating panels and status bar from those roles. Shell and retained editor share logical
 coordinates with one frame-level drawable scale; native GPU window and workflow acceptance tests
