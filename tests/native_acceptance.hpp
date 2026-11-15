@@ -46,6 +46,9 @@ private:
   static void set_lake_push(App &app, const std::filesystem::path &output);
   static void opened_clone_push(const std::filesystem::path &output);
   static void request_review(const std::filesystem::path &output);
+  static void front_door(App &app, const std::filesystem::path &output);
+  static void fill_clone(App &app, const std::string &remote,
+                         const std::string &folder);
   static void wait_for_repository_operation(App &app);
   static void capture_themes(App &app, const std::filesystem::path &output,
                              std::string_view name);

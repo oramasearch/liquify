@@ -76,7 +76,7 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
   foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette modal-input tabs build
       front-door-clone-failures cut
       front-door-clone-push set-lake-push opened-clone-push
-      request-review)
+      request-review front-door-actions)
     add_test(NAME liquify-native-acceptance-${scenario}
       COMMAND liquify-native-acceptance ${scenario}
         ${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario})
