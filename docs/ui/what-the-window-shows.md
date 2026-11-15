@@ -19,7 +19,7 @@ Anything else is absent until someone deliberately opens its details. This is th
 | Group | Controls |
 |---|---|
 | File | Save |
-| Build | Build (F7), Tests (F8), Deploy (F9) |
+| Build | Build (F7), Tests (F8), Push (F9) |
 | View | Split, Hide panel |
 | Mode | Standard, structural editing, optional assistant |
 

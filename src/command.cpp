@@ -19,7 +19,7 @@
 namespace liquify {
 namespace {
 
-using DefinitionArray = std::array<CommandDefinition, 42>;
+using DefinitionArray = std::array<CommandDefinition, 43>;
 
 const DefinitionArray definitions{{
     {"file.close",
@@ -89,7 +89,7 @@ const DefinitionArray definitions{{
     {"view.build", "Show Build", "View", "Open the Build sidebar.", {}},
     {"view.multiplayer", "Show Multiplayer", "View", "Open the Multiplayer sidebar.", {}},
     {"panel.diagnostics", "Show Diagnostics Panel", "View", "Open the Diagnostics panel.", {}},
-    {"panel.build", "Show Build Panel", "View", "Open the build, test, and deploy panel.", {}},
+    {"panel.build", "Show Build Panel", "View", "Open the build, test, and push panel.", {}},
     {"panel.assistant", "Show Assistant Panel", "View", "Open the Assistant panel.", {}},
     {"panel.plugins", "Show Plugins Panel", "View", "Open the Plugins panel.", {}},
     {"go.definition", "Go to Definition", "Go", "Open the selected symbol definition.", {"F12"}},
@@ -111,7 +111,12 @@ const DefinitionArray definitions{{
      {"Primary+Shift+X"}},
     {"run.build", "Build", "Run", "Plan and start the configured build.", {"F7"}},
     {"run.tests", "Run All Tests", "Run", "List and run all configured test actions.", {"F8"}},
-    {"run.deploy", "Deploy", "Run", "Push saved drips to the configured sync remote.", {"F9"}},
+    {"run.push", "Push", "Run", "Push changes to the lake this repository came from.", {"F9"}},
+    {"run.set-lake",
+     "Set Lake",
+     "Run",
+     "Choose the lake repository this one pushes to.",
+     {}},
     {"change.cut",
      "Cut Change",
      "Change",
@@ -219,18 +224,18 @@ const std::array<CommandDefinition, 27> trailing_definitions{{
      {"Primary+Comma"}},
     {"build.start",
      "Build",
-     "Build, test and deploy",
+     "Build, test and push",
      "Start the configured build from the build panel.",
      {}},
     {"build.test",
      "Run All Tests",
-     "Build, test and deploy",
+     "Build, test and push",
      "Run all configured test actions from the build panel.",
      {}},
-    {"build.deploy",
-     "Deploy",
-     "Build, test and deploy",
-     "Push saved drips from the build panel.",
+    {"build.push",
+     "Push",
+     "Build, test and push",
+     "Push changes from the build panel.",
      {}},
     {"assistant.explain",
      "Explain Diagnostic",

@@ -70,7 +70,7 @@ enum NativeMenuCommand : std::int32_t {
   menu_hover,
   menu_build,
   menu_tests,
-  menu_deploy,
+  menu_push,
   menu_next_hunk,
   menu_previous_hunk,
   menu_next_comment,
@@ -187,7 +187,7 @@ static void install_native_menu() {
   add_native_menu(main_menu, @"Run",
                   {{@"Build", @"", 0, menu_build},
                    {@"Test", @"", 0, menu_tests},
-                   {@"Deploy", @"", 0, menu_deploy}});
+                   {@"Push", @"", 0, menu_push}});
   add_native_menu(main_menu, @"Review",
                   {{@"Next Hunk", @"", 0, menu_next_hunk},
                    {@"Previous Hunk", @"", 0, menu_previous_hunk},
@@ -804,7 +804,7 @@ auto build_action_state_name(BuildActionState state) -> std::string_view {
   return "unknown";
 }
 
-auto deploy_outcome_name(liquid::sync_ref_outcome_kind outcome)
+auto push_outcome_name(liquid::sync_ref_outcome_kind outcome)
     -> std::string_view {
   switch (outcome) {
   case liquid::sync_ref_outcome_kind::applied:
@@ -1967,10 +1967,12 @@ bool App::invoke_command(std::string_view name) {
     request_build();
   } else if (name == "run.tests") {
     request_tests();
-  } else if (name == "run.deploy") {
-    request_deploy();
+  } else if (name == "run.push") {
+    request_push();
   } else if (name == "change.cut") {
     open_cut_composer();
+  } else if (name == "run.set-lake") {
+    open_set_lake_dialog();
   } else if (name == "assistant.toggle") {
     toggle_assistant();
   } else if (name == "panel.reset-layout") {
@@ -3156,9 +3158,9 @@ void App::request_tests(std::string filter) {
   }
 }
 
-void App::request_deploy() {
+void App::request_push() {
   if (editor_graph_) {
-    editor_graph_->request_deploy();
+    editor_graph_->request_push();
   }
 }
 
@@ -3765,8 +3767,8 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
     request_tests();
     return;
   }
-  if (command_matches(settings_, "deploy.run", "F9", key, modifiers)) {
-    request_deploy();
+  if (command_matches(settings_, "push.run", "F9", key, modifiers)) {
+    request_push();
     return;
   }
   if (command_matches(settings_, "change.cut", "Primary+Shift+K", key,
@@ -4668,8 +4670,8 @@ void App::execute_panel_command(std::string_view command) {
     request_build();
   } else if (command == "build.test") {
     request_tests();
-  } else if (command == "build.deploy") {
-    request_deploy();
+  } else if (command == "build.push") {
+    request_push();
   } else if (command == "assistant.ask") {
     request_assistant_context(AssistantAction::ask);
   } else if (command == "assistant.explain") {
@@ -4894,7 +4896,7 @@ void App::draw_settings() {
         std::pair{"settings.open", "Cmd+,"},
         std::pair{"build.run", "F7"},
         std::pair{"tests.run", "F8"},
-        std::pair{"deploy.run", "F9"},
+        std::pair{"push.run", "F9"},
     };
     for (const auto &[command, default_binding] : commands) {
       auto &binding = settings_.keymap[command];
@@ -5610,8 +5612,8 @@ void App::draw_editor_toolbar() {
     request_tests();
   }
   ImGui::SameLine();
-  if (ImGui::Button("Deploy (F9)")) {
-    request_deploy();
+  if (ImGui::Button("Push (F9)")) {
+    request_push();
   }
   next_group("View", 180.0F);
   if (ImGui::Button(shell_state_.editor_split ? "Unsplit" : "Split")) {
@@ -6113,7 +6115,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
     ImGui::TextDisabled("requires liquify-core");
     ImGui::Separator();
     ImGui::TextUnformatted("Tests 49 passed · 0 failed");
-    ImGui::TextDisabled("Deploy: no saved drips pending");
+    ImGui::TextDisabled("Push: nothing waiting");
     ImGui::EndChild();
     return;
   }
@@ -6125,8 +6127,8 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
     request_tests();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Deploy saved drips")) {
-    request_deploy();
+  if (ImGui::SmallButton("Push")) {
+    request_push();
   }
   if (snapshot.build_error) {
     draw_user_error(
@@ -6196,22 +6198,23 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
       !snapshot.deploy.references.empty()) {
     ImGui::Separator();
     if (snapshot.deploy.running) {
-      ImGui::TextUnformatted("Deploying saved drips...");
+      ImGui::TextUnformatted("Pushing...");
     }
     if (snapshot.deploy.failure) {
       draw_user_error(describe_push_failure(*snapshot.deploy.failure,
                                             snapshot.deploy.remote,
                                             repository_path()),
-                      "push-failure", [this] { request_deploy(); });
+                      "push-failure", [this] { request_push(); });
     }
     if (!snapshot.deploy.references.empty()) {
-      ImGui::Text("Transferred %llu objects, %llu bytes",
+      ImGui::Text("Pushed to %s: %llu objects, %llu bytes",
+                  lake_host(snapshot.deploy.remote).c_str(),
                   static_cast<unsigned long long>(snapshot.deploy.objects),
                   static_cast<unsigned long long>(snapshot.deploy.bytes));
     }
     for (const auto &reference : snapshot.deploy.references) {
       ImGui::Text("%s: %s", reference.name.c_str(),
-                  deploy_outcome_name(reference.outcome).data());
+                  push_outcome_name(reference.outcome).data());
       if (!reference.reason.empty()) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", reference.reason.c_str());
@@ -6739,11 +6742,73 @@ auto App::status_failure(const EditorGraphSnapshot &graph) const
 // Actions a failure can offer besides Retry, which the caller supplies. An action liquify
 // cannot perform yet is not drawn: a button that does nothing is worse than none.
 auto App::error_action_available(ErrorAction action) const -> bool {
-  static_cast<void>(action);
-  return false;
+  return action == ErrorAction::set_sync_remote && repository_ != nullptr;
 }
 
-void App::run_error_action(ErrorAction action) { static_cast<void>(action); }
+void App::run_error_action(ErrorAction action) {
+  if (action == ErrorAction::set_sync_remote) {
+    open_set_lake_dialog();
+  }
+}
+
+void App::open_set_lake_dialog() {
+  if (!repository_) {
+    editor_status_ = "Open a repository to choose its lake";
+    return;
+  }
+  set_lake_requested_ = true;
+  set_lake_failure_ = {};
+  set_lake_url_ = options_.lake_url.value_or(std::string{});
+}
+
+void App::draw_set_lake_dialog() {
+  if (set_lake_requested_) {
+    ImGui::OpenPopup("Set Lake");
+    set_lake_requested_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Set Lake", nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::PushTextWrapPos(580.0F);
+  ImGui::TextUnformatted(
+      "Choose the lake repository this one pushes to and is reviewed on. Copy "
+      "its address from the repository's page on lake.");
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Lake repository address");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(580.0F);
+  ImGui::InputTextWithHint("##set-lake-url",
+                           "https://lake.example/v1/repositories/…",
+                           &set_lake_url_);
+  frame_layout_.controls["set-lake/url"] = item_rectangle();
+  if (!set_lake_failure_.empty()) {
+    draw_user_error(set_lake_failure_, "set-lake-failure");
+  }
+  ImGui::Spacing();
+  ImGui::BeginDisabled(set_lake_url_.empty());
+  if (ImGui::Button("Set lake")) {
+    set_lake_failure_ = record_lake_remote(repository_path(), set_lake_url_);
+    if (set_lake_failure_.empty()) {
+      options_.lake_url = set_lake_url_;
+      editor_status_ = "Pushes to " + lake_host(set_lake_url_);
+      ImGui::CloseCurrentPopup();
+    }
+  }
+  frame_layout_.controls["set-lake/submit"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
 
 void App::draw_user_error(const UserError &failure, std::string_view id,
                           const std::function<void()> &retry) {
@@ -7518,6 +7583,7 @@ void App::frame(bool present) {
   draw_floating_panels();
   draw_command_palette();
   draw_cut_composer();
+  draw_set_lake_dialog();
   draw_navigation_popups();
   draw_repository_action_popup();
   draw_navigation_results();
@@ -7785,8 +7851,8 @@ int App::run() {
         case menu_tests:
           request_tests();
           break;
-        case menu_deploy:
-          request_deploy();
+        case menu_push:
+          request_push();
           break;
         case menu_cut_change:
           static_cast<void>(invoke_command("change.cut"));
@@ -8080,6 +8146,11 @@ void NativeAcceptance::key(App &app, std::string_view name, bool primary,
 }
 
 void NativeAcceptance::text(App &app, std::string_view value) {
+  // A person types some frames after the click that focused a field; give SDL's text input
+  // the same frames to activate before requiring it.
+  for (int frame = 0; frame < 20 && !SDL_TextInputActive(app.window_); ++frame) {
+    pulse(app);
+  }
   const auto content = std::string(value);
   std::printf("native text: input_active=%d bytes=%zu\n",
               SDL_TextInputActive(app.window_), content.size());

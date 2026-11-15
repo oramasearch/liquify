@@ -338,6 +338,14 @@ auto describe_push_failure(const liquid::error& error, std::string_view remote,
         return output;
     }
     const auto host = lake_host(remote);
+    if (error.code == liquid::errc::conflict &&
+        error.message.find("identity") != std::string::npos) {
+        output.kind = FailureKind::refused;
+        output.summary = std::format("{} holds a different repository", host);
+        output.next_step = "That lake repository already has its own history. Push to an empty "
+                           "lake repository, or clone this one from lake into a new folder.";
+        return output;
+    }
     output.kind = classify_lake_failure(error);
     output.action = ErrorAction::retry;
     output.action_label = "Push again";

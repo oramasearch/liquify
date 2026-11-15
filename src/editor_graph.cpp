@@ -26,6 +26,7 @@
 #include "liquid/sync.hpp"
 #include "liquify/editor_model.hpp"
 #include "liquify/first_run.hpp"
+#include "liquify/lake_remote.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/stub_tree.hpp"
 
@@ -1039,19 +1040,33 @@ struct EditorGraph::Impl {
       record_deploy_error(source.error());
       return;
     }
-    const auto remote = source->remote_configuration();
-    if (!remote) {
+    // The push goes to the repository's configured sync remote, or else to the lake it was
+    // cloned from (or that Set Lake recorded), which libliquid's drive client keeps.
+    auto endpoint_url = std::string{};
+    auto token = lake_token();
+    if (const auto remote = source->remote_configuration()) {
+      endpoint_url = remote->endpoint;
+      token = bearer_token(*remote);
+    } else {
+      auto recorded = recorded_lake_remote(repository_path);
+      if (!recorded) {
+        record_deploy_error(recorded.error());
+        return;
+      }
+      endpoint_url = std::move(*recorded);
+    }
+    if (endpoint_url.empty()) {
       record_deploy_error({liquid::errc::not_configured,
                            "repository has no configured sync remote", ""});
       return;
     }
     {
       auto lock = std::lock_guard(mutex);
-      current.deploy.remote = remote->endpoint;
+      current.deploy.remote = endpoint_url;
     }
     auto endpoint = liquid::sync_endpoint{
-        remote->endpoint,
-        liquid::sync_endpoint_options{.bearer_token = bearer_token(*remote),
+        endpoint_url,
+        liquid::sync_endpoint_options{.bearer_token = std::move(token),
                                       .atomic = false}};
     auto pushed = liquid::runtime::block_on(endpoint.push(*source));
     auto lock = std::lock_guard(mutex);
@@ -1667,7 +1682,7 @@ void EditorGraph::refresh_tests() {
       {[implementation = impl_.get()] { implementation->load_tests(); }});
 }
 
-void EditorGraph::request_deploy() {
+void EditorGraph::request_push() {
   impl_->enqueue(
       {[implementation = impl_.get()] { implementation->deploy(); }});
 }

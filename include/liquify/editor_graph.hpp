@@ -194,7 +194,7 @@ public:
     void request_build(liquid::build_target target = {});
     void request_tests(std::string filter = {});
     void refresh_tests();
-    void request_deploy();
+    void request_push();
     void publish_build_event(liquid::build_event event);
     void publish_deploy_report(liquid::sync_report report);
     void note_saved_drip(std::uint64_t repository_pending_drips);

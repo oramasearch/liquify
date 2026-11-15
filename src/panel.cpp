@@ -21,7 +21,7 @@ constexpr auto review_commands = std::to_array<PanelCommand>({
 constexpr auto build_commands = std::to_array<PanelCommand>({
     {"build.start", "Build (F7)"},
     {"build.test", "Run all tests (F8)"},
-    {"build.deploy", "Deploy (F9)"},
+    {"build.push", "Push (F9)"},
 });
 constexpr auto multiplayer_commands = std::array<PanelCommand, 0>{};
 constexpr auto diagnostics_commands = std::array<PanelCommand, 0>{};
@@ -52,8 +52,8 @@ constexpr auto descriptors = std::to_array<PanelDescriptor>({
      "Open a repository to search its files."},
     {PanelId::review, "Review", "V", PanelPlacement::sidebar, review_commands,
      "No reviews are available."},
-    {PanelId::build, "Build, test and deploy", "B", PanelPlacement::bottom,
-     build_commands, "No build, test, or deploy activity yet."},
+    {PanelId::build, "Build, test and push", "B", PanelPlacement::bottom,
+     build_commands, "No build, test, or push activity yet."},
     {PanelId::multiplayer, "Multiplayer", "M", PanelPlacement::sidebar,
      multiplayer_commands, "No one else is connected to this repository."},
     {PanelId::diagnostics, "Diagnostics", "D", PanelPlacement::bottom,
