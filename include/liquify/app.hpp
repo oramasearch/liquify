@@ -93,6 +93,7 @@ private:
   void draw_line_attribution(std::size_t line);
   void draw_status_bar();
   void draw_welcome();
+  void draw_user_error(const UserError &failure, std::string_view id);
   void draw_clone_dialog();
   void draw_split_editor();
   void draw_repository_tree();
@@ -384,6 +385,8 @@ private:
   bool sync_was_running_{};
   bool hydration_was_running_{};
   bool assistant_was_running_{};
+  // Which error components show liquid's raw message, by component id.
+  std::map<std::string, bool, std::less<>> error_details_open_;
   bool clone_dialog_open_{};
   bool folder_dialog_open_{};
   bool repository_operation_is_clone_{};

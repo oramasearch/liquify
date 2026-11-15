@@ -1484,7 +1484,10 @@ App::App(AppOptions options) : options_(std::move(options)) {
     } else if (screenshot->view == ScreenshotView::lake_offline) {
       first_run_.begin_clone("https://lake.orama.com/orama/example",
                              "/Users/ora/projects/example");
-      first_run_.clone_failed("lake.orama.com is unreachable", true);
+      first_run_.clone_failed(describe_clone_failure(
+          {liquid::errc::unavailable, "nodename nor servname provided, or not known",
+           "lake.orama.com"},
+          "https://lake.orama.com/orama/example"));
     }
   }
   if (screenshot != nullptr && screenshot->view != ScreenshotView::welcome &&
@@ -1742,8 +1745,13 @@ void App::poll_repository_lifecycle() {
     auto repository = repository_operation_->get();
     if (!repository->error().empty()) {
       if (repository_operation_is_clone_) {
-        first_run_.clone_failed(std::string{repository->error()},
-                                repository->offline());
+        auto failure = repository->clone_failure();
+        if (failure.empty()) {
+          failure = {.summary = "The clone did not finish",
+                     .next_step = "Retry the clone.",
+                     .details = without_absolute_paths(repository->error())};
+        }
+        first_run_.clone_failed(std::move(failure));
       } else {
         first_run_.open_failed(first_run_.pending_path(),
                                std::string{repository->error()});
@@ -1758,7 +1766,9 @@ void App::poll_repository_lifecycle() {
     }
   } catch (const std::exception &error) {
     if (repository_operation_is_clone_) {
-      first_run_.clone_failed(error.what(), false);
+      first_run_.clone_failed({.summary = "The clone did not finish",
+                               .next_step = "Retry the clone.",
+                               .details = without_absolute_paths(error.what())});
     } else {
       first_run_.open_failed(first_run_.pending_path(), error.what());
     }
@@ -6640,6 +6650,36 @@ void App::draw_floating_panels() {
   }
 }
 
+void App::draw_user_error(const UserError &failure, std::string_view id) {
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  ImGui::PushID(id.data(), id.data() + id.size());
+  ImGui::PushTextWrapPos(0.0F);
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.danger));
+  ImGui::TextUnformatted(failure.summary.c_str());
+  ImGui::PopStyleColor();
+  frame_layout_.controls[std::string(id) + "/summary"] = item_rectangle();
+  if (!failure.next_step.empty()) {
+    ImGui::TextUnformatted(failure.next_step.c_str());
+  }
+  ImGui::PopTextWrapPos();
+  if (!failure.details.empty()) {
+    auto &open = error_details_open_[std::string(id)];
+    if (ImGui::SmallButton(open ? "Hide details" : "Details")) {
+      open = !open;
+    }
+    frame_layout_.controls[std::string(id) + "/details"] = item_rectangle();
+    if (open) {
+      ImGui::PushTextWrapPos(0.0F);
+      ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+      ImGui::TextUnformatted(failure.details.c_str());
+      ImGui::PopStyleColor();
+      ImGui::PopTextWrapPos();
+    }
+  }
+  ImGui::PopID();
+}
+
 void App::draw_clone_dialog() {
   if (clone_dialog_open_) {
     ImGui::OpenPopup("Clone from lake");
@@ -6666,11 +6706,13 @@ void App::draw_clone_dialog() {
     begin_clone_repository(clone_remote_, clone_path_);
     ImGui::CloseCurrentPopup();
   }
+  frame_layout_.controls["clone/submit"] = item_rectangle();
   ImGui::EndDisabled();
   ImGui::SameLine();
   if (ImGui::Button("Cancel")) {
     ImGui::CloseCurrentPopup();
   }
+  frame_layout_.controls["clone/cancel"] = item_rectangle();
   ImGui::EndPopup();
 }
 
@@ -6708,18 +6750,17 @@ void App::draw_welcome() {
     ImGui::Separator();
   } else if (phase == RepositoryLifecyclePhase::offline ||
              phase == RepositoryLifecyclePhase::failed) {
-    ImGui::TextUnformatted(phase == RepositoryLifecyclePhase::offline
-                               ? "Lake is unreachable - offline is normal"
-                               : "Repository was not cloned");
-    ImGui::TextWrapped("%s", first_run_.error().c_str());
+    draw_user_error(first_run_.clone_failure(), "clone-failure");
     if (ImGui::Button("Retry clone")) {
       begin_clone_repository(first_run_.clone_remote(),
                              first_run_.pending_path());
     }
+    frame_layout_.controls["clone-failure/retry"] = item_rectangle();
     ImGui::SameLine();
     if (ImGui::Button("Back")) {
       first_run_.return_to_welcome();
     }
+    frame_layout_.controls["clone-failure/back"] = item_rectangle();
     ImGui::Separator();
   } else if (phase == RepositoryLifecyclePhase::opening ||
              phase == RepositoryLifecyclePhase::cloning) {
@@ -6734,14 +6775,17 @@ void App::draw_welcome() {
   if (ImGui::Button("Open folder", ImVec2(150.0F, 38.0F))) {
     show_folder_dialog();
   }
+  frame_layout_.controls["front-door/open"] = item_rectangle();
   ImGui::SameLine();
   if (ImGui::Button("Clone from lake", ImVec2(150.0F, 38.0F))) {
     clone_dialog_open_ = true;
   }
+  frame_layout_.controls["front-door/clone"] = item_rectangle();
   ImGui::SameLine();
   if (ImGui::Button("New window", ImVec2(150.0F, 38.0F))) {
     open_new_window();
   }
+  frame_layout_.controls["front-door/new-window"] = item_rectangle();
   ImGui::EndDisabled();
   ImGui::Spacing();
 

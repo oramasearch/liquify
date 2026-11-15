@@ -79,10 +79,17 @@ TEST(FirstRunState, DistinguishesUnreadableRepositoriesAndOfflineClones) {
     EXPECT_EQ(state.error(), "permission denied");
 
     state.begin_clone("https://lake.example/repository", "/repositories/new");
-    state.clone_failed("lake is unreachable", true);
+    state.clone_failed({.kind = liquify::FailureKind::offline,
+                        .summary = "Could not reach lake.example"});
     EXPECT_EQ(state.phase(), liquify::RepositoryLifecyclePhase::offline);
     EXPECT_EQ(state.clone_remote(), "https://lake.example/repository");
-    EXPECT_EQ(state.error(), "lake is unreachable");
+    EXPECT_EQ(state.error(), "Could not reach lake.example");
+
+    // A lake that answered is never presented as offline.
+    state.clone_failed({.kind = liquify::FailureKind::secure_connection,
+                        .summary = "lake.example answered, but a secure connection could not be made"});
+    EXPECT_EQ(state.phase(), liquify::RepositoryLifecyclePhase::failed);
+    EXPECT_EQ(state.clone_failure().kind, liquify::FailureKind::secure_connection);
 }
 
 TEST(FirstRunState, PersistsRecentRepositoriesAndIdentityWithoutSecrets) {

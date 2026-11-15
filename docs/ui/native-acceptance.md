@@ -25,6 +25,7 @@ controls, editor bounds and source ink. The driver does not add fixed sample rec
 | `modal-input` | Focus source, open the palette, type a query, and verify only the query changes | `WILL_FAIL`, liquify #39 |
 | `tabs` | Click every reported visible tab and require selected state plus visible content | Passes: Build, Diagnostics, Assistant, Plugins and Structural editing |
 | `build` | F7 and F9 through the real daemon path; require honest unavailable and offline state | Passes; successful sandboxed build execution is owed on a macFUSE-capable host |
+| `front-door-clone-failures` | No repository; click Clone from lake and its Clone repository button against a loopback responder (401, 403, 404, 503, 400, `https` to a plain socket) and a closed port; require each failure's kind, phase, sentence and Details; save light and dark framebuffers | Passes ([errors.md](errors.md)) |
 
 Both launch scenarios use `App::init()` with the normal high-density window flag. If the
 requested density is absent on the launch display, the driver moves the same window across the
