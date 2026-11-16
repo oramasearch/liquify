@@ -977,8 +977,8 @@ public:
          float height, std::size_t first_line, float line_height,
          float cell_width, float horizontal_scroll,
          std::span<const ReviewDiffLine> review_lines,
-         std::span<const std::size_t> comment_lines, bool show_whitespace)
-      -> std::size_t {
+         std::span<const std::size_t> comment_lines, bool show_whitespace,
+         bool focused) -> std::size_t {
     const auto color_changed =
         text_color_.red != palette.text_primary.red ||
         text_color_.green != palette.text_primary.green ||
@@ -999,12 +999,22 @@ public:
         static_cast<std::size_t>(std::ceil(height / line_height)) + 1;
     const auto last_line =
         std::min(buffer.line_count(), first_line + available_lines);
+    // The current line's band marks where the caret is while the editor has focus.
+    const auto current_line = buffer.cursor().line;
+    if (focused && current_line >= first_line && current_line < last_line) {
+      SDL_SetRenderDrawColorFloat(renderer, palette.layer.red, palette.layer.green,
+                                  palette.layer.blue, palette.layer.alpha);
+      const SDL_FRect band{x + editor_gutter_width,
+                           y + static_cast<float>(current_line - first_line) * line_height,
+                           width - editor_gutter_width, line_height};
+      SDL_RenderFillRect(renderer, &band);
+    }
     draw_gutter(renderer, buffer, diagnostics, folds, attribution, presence,
                 drive, palette, x, y, first_line, last_line, line_height,
                 height);
     draw_review_backgrounds(renderer, review_lines, x, y, width, first_line,
                             last_line, line_height);
-    draw_selection(renderer, buffer, layouts, x, y, width, first_line,
+    draw_selection(renderer, buffer, layouts, palette, x, y, width, first_line,
                    last_line, line_height, cell_width, horizontal_scroll);
     draw_bracket_match(renderer, buffer, layouts, palette, x, y, first_line,
                        last_line, line_height, cell_width, horizontal_scroll);
@@ -1025,6 +1035,40 @@ public:
                   x + editor_gutter_width + editor_padding - horizontal_scroll,
                   y + static_cast<float>(line - first_line) * line_height);
     }
+    // Line numbers are set in the editor's own face: tertiary ink, the current line's in
+    // secondary, right-aligned space4 before the gutter's hairline (the fold column).
+    gutter_vertices_.clear();
+    gutter_indices_.clear();
+    for (std::size_t line = first_line; line < last_line; ++line) {
+      const auto number = std::to_string(line + 1);
+      const auto role = line == current_line ? palette.text_secondary : palette.text_tertiary;
+      const SDL_FColor color{role.red, role.green, role.blue, role.alpha};
+      auto origin = x + editor_gutter_width - design::space4 -
+                    static_cast<float>(number.size()) * cell_width;
+      const auto top = y + static_cast<float>(line - first_line) * line_height;
+      for (const auto digit : number) {
+        if (const auto *glyph = font.FindGlyph(static_cast<ImWchar>(digit));
+            glyph != nullptr && glyph->Visible) {
+          const auto first = static_cast<int>(gutter_vertices_.size());
+          gutter_vertices_.push_back(
+              {{origin + glyph->X0, top + glyph->Y0}, color, {glyph->U0, glyph->V0}});
+          gutter_vertices_.push_back(
+              {{origin + glyph->X1, top + glyph->Y0}, color, {glyph->U1, glyph->V0}});
+          gutter_vertices_.push_back(
+              {{origin + glyph->X1, top + glyph->Y1}, color, {glyph->U1, glyph->V1}});
+          gutter_vertices_.push_back(
+              {{origin + glyph->X0, top + glyph->Y1}, color, {glyph->U0, glyph->V1}});
+          gutter_indices_.insert(gutter_indices_.end(), {first, first + 1, first + 2, first,
+                                                         first + 2, first + 3});
+        }
+        origin += cell_width;
+      }
+    }
+    if (!gutter_vertices_.empty()) {
+      SDL_RenderGeometry(renderer, texture, gutter_vertices_.data(),
+                         static_cast<int>(gutter_vertices_.size()), gutter_indices_.data(),
+                         static_cast<int>(gutter_indices_.size()));
+    }
     if (!frame_vertices_.empty()) {
       SDL_RenderGeometry(renderer, texture, frame_vertices_.data(),
                          static_cast<int>(frame_vertices_.size()),
@@ -1042,7 +1086,7 @@ public:
                          line_height);
     draw_scroll_markers(renderer, buffer, diagnostics, attribution, presence,
                         palette, x + width - 5.0F, y, height);
-    draw_cursor(renderer, buffer, layouts, x, y, first_line, last_line,
+    draw_cursor(renderer, buffer, layouts, palette, x, y, first_line, last_line,
                 line_height, cell_width, horizontal_scroll);
     return last_line - first_line;
   }
@@ -1133,26 +1177,14 @@ private:
                           const design::Palette &palette, float x, float y,
                           std::size_t first_line, std::size_t last_line,
                           float line_height, float height) {
-    SDL_SetRenderDrawColorFloat(renderer, palette.layer.red,
-                                palette.layer.green, palette.layer.blue,
-                                palette.layer.alpha);
-    // The gutter runs the editor's full height, not only to the last line (liquify#102).
-    const SDL_FRect background{x, y, editor_gutter_width, height};
-    SDL_RenderFillRect(renderer, &background);
+    // No block fill: the gutter is the editor's surface, divided from the text by a
+    // border_subtle hairline that runs the editor's full height (liquify#102, #127). The line
+    // numbers are glyphs from the editor's face, drawn in render().
     SDL_SetRenderDrawColorFloat(
         renderer, palette.border_subtle.red, palette.border_subtle.green,
         palette.border_subtle.blue, palette.border_subtle.alpha);
     SDL_RenderLine(renderer, x + editor_gutter_width - 1.0F, y,
-                   x + editor_gutter_width - 1.0F, y + background.h);
-    SDL_SetRenderDrawColorFloat(
-        renderer, palette.text_tertiary.red, palette.text_tertiary.green,
-        palette.text_tertiary.blue, palette.text_tertiary.alpha);
-    for (auto line = first_line; line < last_line; ++line) {
-      SDL_RenderDebugText(
-          renderer, x + 30.0F,
-          y + static_cast<float>(line - first_line) * line_height + 3.0F,
-          std::to_string(line + 1).c_str());
-    }
+                   x + editor_gutter_width - 1.0F, y + height);
     for (const auto &item : attribution) {
       if (item.line < first_line || item.line >= last_line) {
         continue;
@@ -1271,11 +1303,13 @@ private:
   }
 
   static void draw_selection(SDL_Renderer *renderer, EditorBuffer &buffer,
-                             TextLayoutCache &layouts, float x, float y,
+                             TextLayoutCache &layouts,
+                             const design::Palette &palette, float x, float y,
                              float width, std::size_t first_line,
                              std::size_t last_line, float line_height,
                              float cell_width, float horizontal_scroll) {
-    SDL_SetRenderDrawColor(renderer, 176, 207, 255, 255);
+    SDL_SetRenderDrawColorFloat(renderer, palette.selection.red, palette.selection.green,
+                                palette.selection.blue, palette.selection.alpha);
     for (const auto &selection : buffer.selections()) {
       const auto begin_line = std::max(first_line, selection.begin.line);
       const auto end_line = std::min(last_line, selection.end.line + 1);
@@ -1303,11 +1337,14 @@ private:
   }
 
   static void draw_cursor(SDL_Renderer *renderer, EditorBuffer &buffer,
-                          TextLayoutCache &layouts, float x, float y,
+                          TextLayoutCache &layouts,
+                          const design::Palette &palette, float x, float y,
                           std::size_t first_line, std::size_t last_line,
                           float line_height, float cell_width,
                           float horizontal_scroll) {
-    SDL_SetRenderDrawColor(renderer, 28, 35, 43, 255);
+    SDL_SetRenderDrawColorFloat(renderer, palette.text_primary.red,
+                                palette.text_primary.green, palette.text_primary.blue,
+                                palette.text_primary.alpha);
     for (const auto &cursor : buffer.cursors()) {
       if (cursor.line < first_line || cursor.line >= last_line) {
         continue;
@@ -1494,6 +1531,8 @@ private:
   std::vector<std::optional<LineGeometry>> lines_;
   std::vector<SDL_Vertex> frame_vertices_;
   std::vector<int> frame_indices_;
+  std::vector<SDL_Vertex> gutter_vertices_;
+  std::vector<int> gutter_indices_;
   float cell_width_{};
   float font_size_{};
   design::Rgba text_color_{};
@@ -6043,7 +6082,8 @@ void App::draw_editor_toolbar() {
   draw_editor_modes();
   ImGui::EndDisabled();
   ImGui::EndGroup();
-  ImGui::Separator();
+  // The hairline under the toolbar belongs to the editor chrome (draw_editor), drawn once the
+  // lines under the toolbar are known.
   const auto end = ImGui::GetItemRectMax();
   frame_layout_.toolbar = {origin.x, origin.y, available.x, end.y - origin.y};
 }
@@ -6186,68 +6226,18 @@ auto App::panel_label(PanelId id) const -> std::string {
 }
 
 void App::draw_editor() {
-  const auto path = std::string(editor_->display_path());
   const auto graph_snapshot =
       editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
-  auto symbol_name = std::optional<std::string_view>{};
-  if (const auto *symbol = navigation_symbol_at_cursor()) {
-    symbol_name = symbol->name;
-  } else if (screenshot_mode()) {
-    symbol_name = "greeting";
-  }
-  const auto path_breadcrumbs = breadcrumbs(path, symbol_name);
-  if (breadcrumb_focus_requested_) {
-    ImGui::SetKeyboardFocusHere();
-    breadcrumb_focus_requested_ = false;
-  }
-  for (std::size_t index = 0; index < path_breadcrumbs.size(); ++index) {
-    const auto &breadcrumb = path_breadcrumbs[index];
-    const auto label =
-        breadcrumb.label + "##breadcrumb-" + std::to_string(index);
-    if (kit_button(label.c_str(), ButtonKind::quiet, ButtonSize::compact) && !breadcrumb.symbol &&
-        breadcrumb.path == std::filesystem::path(path)) {
-      editor_focused_ = true;
-    }
-    if (index + 1 < path_breadcrumbs.size()) {
-      ImGui::SameLine();
-      ImGui::TextDisabled(">");
-      ImGui::SameLine();
-    }
-  }
-  if (editor_->dirty()) {
-    ImGui::SameLine();
-    ImGui::TextUnformatted("*");
-  }
-  if (review_diff_open_) {
-    ImGui::SameLine();
-    ImGui::TextDisabled("read-only text diff");
-  }
-  ImGui::SameLine();
-  if (kit_button("...##file-actions", ButtonKind::quiet, ButtonSize::compact)) {
-    ImGui::OpenPopup("file-actions");
-  }
-  if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("File actions and lease controls");
-  }
-  if (ImGui::BeginPopup("file-actions")) {
-    ImGui::BeginDisabled(review_diff_open_ || !options_.repository_path);
-    if (ImGui::MenuItem("Take lease")) {
-      take_editor_lease();
-    }
-    if (ImGui::MenuItem("Release lease")) {
-      release_editor_lease();
-    }
-    ImGui::EndDisabled();
-    if (ImGui::MenuItem("Collaboration details")) {
-      panels_.focus(PanelId::multiplayer);
-      shell_state_.sidebar_visible = true;
-      persist_shell_state();
-    }
-    ImGui::EndPopup();
-  }
+  // The toolbar and the lines under it keep the row's left edge; the text surface reaches the
+  // region's edges.
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto region_left = ImGui::GetWindowPos().x;
+  ImGui::SetCursorPosY(ImGui::GetCursorPosY() + design::space2);
+  ImGui::Indent(design::space3);
   draw_editor_toolbar();
   if (!editor_mutation_allowed()) {
-    ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
+    ImGui::TextColored(imgui_color(palette.danger),
                        "Read-only: another person holds a lease");
   }
   if (graph_snapshot.hover) {
@@ -6257,7 +6247,6 @@ void App::draw_editor() {
     }
   }
   if (find_open_) {
-    ImGui::Separator();
     ImGui::SetNextItemWidth(220.0F);
     if (ImGui::InputTextWithHint("##find-buffer", "Find in buffer",
                                  &find_query_)) {
@@ -6299,7 +6288,18 @@ void App::draw_editor() {
       find_open_ = false;
     }
   }
+  ImGui::Unindent(design::space3);
 
+  // One hairline closes the chrome, space2 under its last line, across the region.
+  const auto chrome_bottom = ImGui::GetItemRectMax().y + design::space2;
+  const auto region_right = region_left + ImGui::GetWindowSize().x;
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(region_left, chrome_bottom + 0.5F),
+                                      ImVec2(region_right, chrome_bottom + 0.5F),
+                                      packed_color(applied_high_contrast_
+                                                       ? palette.border_strong
+                                                       : palette.border_subtle),
+                                      1.0F);
+  ImGui::SetCursorScreenPos(ImVec2(region_left, chrome_bottom + 1.0F));
   const auto available = ImGui::GetContentRegionAvail();
   const auto size =
       ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F));
@@ -6310,8 +6310,6 @@ void App::draw_editor() {
                          ImGuiButtonFlags_MouseButtonLeft);
   const auto hovered = ImGui::IsItemHovered();
   auto *draw_list = ImGui::GetWindowDrawList();
-  const auto palette =
-      effective_palette(applied_dark_theme_, applied_high_contrast_);
   draw_list->AddRectFilled(position,
                            ImVec2(position.x + size.x, position.y + size.y),
                            packed_color(palette.surface));
@@ -6346,11 +6344,12 @@ void App::draw_editor() {
   } else if (ImGui::IsAnyItemFocused()) {
     editor_focused_ = false;
   }
-  if (editor_focused_ || input_.drop_target() == DropTarget::editor) {
-    const auto thickness =
-        input_.drop_target() == DropTarget::editor ? 3.0F : 2.0F;
-    draw_list->AddLine(position, ImVec2(position.x + size.x, position.y),
-                       packed_color(palette.focus), thickness);
+  // Focus is the caret and the current line's band, not a rule across the editor
+  // (liquify#127). A file dragged over the editor outlines it in the focus role.
+  if (input_.drop_target() == DropTarget::editor) {
+    draw_list->AddRect(ImVec2(position.x + 0.5F, position.y + 0.5F),
+                       ImVec2(position.x + size.x - 0.5F, position.y + size.y - 0.5F),
+                       packed_color(palette.focus), 0.0F, 0, 1.0F);
   }
 
   if (hovered) {
@@ -6991,82 +6990,248 @@ void App::draw_editor_area() {
     return;
   }
 
-  if (ImGui::BeginTabBar("editor-tabs", ImGuiTabBarFlags_Reorderable)) {
-    if (editor_) {
-      const auto path = std::string(editor_->display_path());
-      const auto label =
-          path + (editor_->dirty() ? " *" : "") + "###active-editor";
-      if (ImGui::BeginTabItem(label.c_str())) {
-        if (shell_state_.editor_split) {
-          const auto available = ImGui::GetContentRegionAvail();
-          const auto content_width = std::max(available.x - divider_size, 1.0F);
-          const auto primary_width =
-              content_width * shell_state_.editor_split_ratio;
-          ImGui::BeginChild("primary-editor",
-                            ImVec2(primary_width, available.y));
-          draw_editor();
-          ImGui::EndChild();
-          ImGui::SameLine(0.0F, 0.0F);
-          ImGui::InvisibleButton("editor-split-divider",
-                                 ImVec2(divider_size, available.y));
-          if (ImGui::IsItemActive()) {
-            const auto change = ImGui::GetIO().MouseDelta.x / content_width;
-            shell_state_.editor_split_ratio = std::clamp(
-                shell_state_.editor_split_ratio + change, 0.25F, 0.75F);
-          }
-          if (ImGui::IsItemDeactivatedAfterEdit()) {
-            persist_shell_state();
-          }
-          ImGui::SameLine(0.0F, 0.0F);
-          ImGui::BeginChild(
-              "secondary-editor",
-              ImVec2(std::max(content_width - primary_width, 1.0F),
-                     available.y),
-              ImGuiChildFlags_Border);
-          draw_split_editor();
-          ImGui::EndChild();
-        } else {
-          draw_editor();
-        }
-        ImGui::EndTabItem();
-      }
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  auto visible_panels = std::vector<PanelId>{};
+  for (const auto id : editor_panels) {
+    if (panels_.layout(id).visible) {
+      visible_panels.push_back(id);
     }
-    for (const auto id : editor_panels) {
-      if (!panels_.layout(id).visible) {
-        continue;
-      }
-      auto open = true;
-      const auto label =
-          icon_label(panel_label(id), ImGui::GetStyle().FramePadding.x) +
-          "###panel-" + std::string(panel_id_name(id));
-      const auto flags =
-          panels_.focus_requested(id) ? ImGuiTabItemFlags_SetSelected : 0;
-      const auto selected = ImGui::BeginTabItem(label.c_str(), &open, flags);
-      frame_layout_.panels[id].tab = item_rectangle();
-      frame_layout_.panels[id].selected = selected;
-      item_icon(panel_icon(id));
-      if (ImGui::BeginPopupContextItem()) {
-        draw_panel_menu(id);
-        ImGui::EndPopup();
-      }
-      if (panels_.focus_requested(id)) {
-        panels_.clear_focus_request();
-      }
-      if (ImGui::IsItemActivated()) {
-        panels_.focus(id);
-        panels_.clear_focus_request();
-        persist_shell_state();
-      }
-      if (selected) {
-        draw_panel(id);
-        ImGui::EndTabItem();
-      }
-      if (!open) {
+  }
+  // Which tab is shown: a newly opened file takes the row, a panel asked for takes it back.
+  const auto path = editor_ ? std::string(editor_->display_path()) : std::string{};
+  if (path != editor_area_path_) {
+    editor_area_path_ = path;
+    if (editor_) {
+      editor_area_panel_.reset();
+    }
+  }
+  for (const auto id : visible_panels) {
+    if (panels_.focus_requested(id)) {
+      editor_area_panel_ = id;
+      panels_.clear_focus_request();
+    }
+  }
+  if (editor_area_panel_ && !std::ranges::contains(visible_panels, *editor_area_panel_)) {
+    editor_area_panel_.reset();
+  }
+  if (!editor_ && !editor_area_panel_ && !visible_panels.empty()) {
+    editor_area_panel_ = visible_panels.front();
+  }
+
+  // One row carries the file (liquify#127): lake's tabs when a panel shares the editor area,
+  // then the breadcrumb and the file menu. With only the file open, the breadcrumb is the row.
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(design::space1, 0.0F));
+  const auto row = ImGui::GetCursorScreenPos();
+  const auto row_width = ImGui::GetContentRegionAvail().x;
+  const auto tabs_shown = !visible_panels.empty();
+  // The first label's ink lines up with the toolbar's left edge (space3): a tab centres its
+  // label in space2 of padding, a quiet breadcrumb button pads it by space2.
+  ImGui::SetCursorScreenPos(ImVec2(row.x + design::space3 - design::space2, row.y));
+  const auto tab = [&](const std::string &label, const char *id, bool selected,
+                       std::optional<ShellIcon> icon) {
+    ImGui::PushID(id);
+    // The label is centred in space2 of padding; an icon sits in the first space2 + 16 of it.
+    const auto shown = icon ? icon_label(label, design::space2, design::space2) : label;
+    const auto width = ImGui::CalcTextSize(shown.c_str()).x + design::space4;
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.5F, 0.5F));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(selected ? palette.text_primary
+                                                              : palette.text_secondary));
+    const auto clicked =
+        ImGui::Selectable(shown.c_str(), selected, 0, ImVec2(width, design::control_sm));
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar();
+    if (icon) {
+      item_icon(*icon, design::space2);
+    }
+    if (selected) {
+      const auto min = ImGui::GetItemRectMin();
+      const auto max = ImGui::GetItemRectMax();
+      ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(min.x, max.y - 2.0F), max,
+                                                packed_color(palette.action));
+    }
+    ImGui::PopID();
+    return clicked;
+  };
+  if (tabs_shown && editor_) {
+    const auto name = std::filesystem::path(path).filename().generic_string();
+    if (tab(name + (editor_->dirty() ? " *" : ""), "editor-file-tab", !editor_area_panel_,
+            std::nullopt)) {
+      editor_area_panel_.reset();
+      editor_focused_ = true;
+    }
+    frame_layout_.controls["editor/file-tab"] = item_rectangle();
+    ImGui::SameLine();
+  }
+  for (const auto id : visible_panels) {
+    const auto selected = editor_area_panel_ == id;
+    if (tab(panel_label(id), panel_id_name(id).data(), selected, panel_icon(id))) {
+      editor_area_panel_ = id;
+      panels_.focus(id);
+      panels_.clear_focus_request();
+      persist_shell_state();
+    }
+    frame_layout_.panels[id].tab = item_rectangle();
+    frame_layout_.panels[id].selected = selected;
+    if (ImGui::BeginPopupContextItem()) {
+      if (ImGui::MenuItem("Close tab")) {
         panels_.set_visible(id, false);
         persist_shell_state();
       }
+      ImGui::Separator();
+      draw_panel_menu(id);
+      ImGui::EndPopup();
     }
-    ImGui::EndTabBar();
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("%s · Right-click to close or move",
+                        panels_.descriptor(id).title.data());
+    }
+    ImGui::SameLine();
+  }
+  if (editor_ && !editor_area_panel_) {
+    if (tabs_shown) {
+      ImGui::SameLine(0.0F, design::space4);
+    }
+    draw_editor_file_row(tabs_shown);
+  } else {
+    ImGui::Dummy(ImVec2(0.0F, design::control_sm));
+  }
+  ImGui::PopStyleVar();
+  const auto row_bottom = row.y + design::control_sm;
+  hairline(row.x, row_bottom + 0.5F, row.x + row_width, row_bottom + 0.5F);
+  ImGui::SetCursorScreenPos(ImVec2(row.x, row_bottom + 1.0F));
+
+  if (editor_ && !editor_area_panel_) {
+    if (shell_state_.editor_split) {
+      const auto available = ImGui::GetContentRegionAvail();
+      const auto content_width = std::max(available.x - divider_size, 1.0F);
+      const auto primary_width = content_width * shell_state_.editor_split_ratio;
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+      ImGui::BeginChild("primary-editor", ImVec2(primary_width, available.y));
+      draw_editor();
+      ImGui::EndChild();
+      ImGui::PopStyleVar();
+      ImGui::SameLine(0.0F, 0.0F);
+      ImGui::InvisibleButton("editor-split-divider", ImVec2(divider_size, available.y));
+      if (ImGui::IsItemActive()) {
+        const auto change = ImGui::GetIO().MouseDelta.x / content_width;
+        shell_state_.editor_split_ratio =
+            std::clamp(shell_state_.editor_split_ratio + change, 0.25F, 0.75F);
+      }
+      if (ImGui::IsItemDeactivatedAfterEdit()) {
+        persist_shell_state();
+      }
+      ImGui::SameLine(0.0F, 0.0F);
+      ImGui::BeginChild("secondary-editor",
+                        ImVec2(std::max(content_width - primary_width, 1.0F), available.y),
+                        ImGuiChildFlags_Border);
+      draw_split_editor();
+      ImGui::EndChild();
+    } else {
+      draw_editor();
+    }
+  } else if (editor_area_panel_) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(design::space3, design::space3));
+    ImGui::BeginChild("editor-tab-panel", ImVec2(0.0F, 0.0F),
+                      ImGuiChildFlags_AlwaysUseWindowPadding);
+    draw_panel(*editor_area_panel_);
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+  }
+}
+
+// The file's row right of any tabs: the breadcrumb (path, then the enclosing symbol), the
+// unsaved mark, and the file menu at the row's right edge. Tabs already name the file, so with
+// tabs the breadcrumb starts at the folder.
+void App::draw_editor_file_row(bool tabs_shown) {
+  const auto path = std::string(editor_->display_path());
+  auto symbol_name = std::optional<std::string_view>{};
+  if (const auto *symbol = navigation_symbol_at_cursor()) {
+    symbol_name = symbol->name;
+  } else if (screenshot_mode()) {
+    symbol_name = "greeting";
+  }
+  auto path_breadcrumbs = breadcrumbs(path, symbol_name);
+  if (tabs_shown) {
+    std::erase_if(path_breadcrumbs, [&](const auto &item) {
+      return !item.symbol && item.path == std::filesystem::path(path);
+    });
+  }
+  const auto row_y = ImGui::GetCursorScreenPos().y;
+  const auto compact_y = row_y + (design::control_sm - design::space6) * 0.5F;
+  // Drawn, not laid out as text: same-line text after a framed button takes the frame's
+  // baseline offset and would sit below the labels.
+  const auto separator = [&] {
+    ImGui::SameLine();
+    const auto at = ImGui::GetCursorScreenPos();
+    const auto width = ImGui::CalcTextSize("/").x;
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(at.x, row_y + (design::control_sm - ImGui::GetTextLineHeight()) * 0.5F),
+        ImGui::GetColorU32(ImGuiCol_TextDisabled), "/");
+    ImGui::Dummy(ImVec2(width, 1.0F));
+    ImGui::SameLine();
+  };
+  if (breadcrumb_focus_requested_) {
+    ImGui::SetKeyboardFocusHere();
+    breadcrumb_focus_requested_ = false;
+  }
+  for (std::size_t index = 0; index < path_breadcrumbs.size(); ++index) {
+    const auto &breadcrumb = path_breadcrumbs[index];
+    const auto label = breadcrumb.label + "##breadcrumb-" + std::to_string(index);
+    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, compact_y));
+    if (kit_button(label.c_str(), ButtonKind::quiet, ButtonSize::compact) && !breadcrumb.symbol &&
+        breadcrumb.path == std::filesystem::path(path)) {
+      editor_focused_ = true;
+    }
+    if (!breadcrumb.symbol && breadcrumb.path == std::filesystem::path(path)) {
+      frame_layout_.controls["editor/file-tab"] = item_rectangle();
+    }
+    if (index + 1 < path_breadcrumbs.size()) {
+      separator();
+    }
+  }
+  const auto row_text = [&](const char *text, ImGuiCol color) {
+    ImGui::SameLine(0.0F, design::space2);
+    const auto at = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(at.x, row_y + (design::control_sm - ImGui::GetTextLineHeight()) * 0.5F),
+        ImGui::GetColorU32(color), text);
+    ImGui::Dummy(ImVec2(ImGui::CalcTextSize(text).x, 1.0F));
+  };
+  if (editor_->dirty() && !tabs_shown) {
+    row_text("*", ImGuiCol_Text);
+  }
+  if (review_diff_open_) {
+    row_text("read-only text diff", ImGuiCol_TextDisabled);
+  }
+  // The file menu sits at the row's right edge, space3 in, like the toolbar's left edge.
+  ImGui::SameLine();
+  const auto menu_width = ImGui::CalcTextSize("...").x + design::space2 * 2.0F;
+  const auto right = ImGui::GetWindowPos().x + ImGui::GetWindowSize().x - design::space3;
+  ImGui::SetCursorScreenPos(
+      ImVec2(std::max(ImGui::GetCursorScreenPos().x, right - menu_width), compact_y));
+  if (kit_button("...##file-actions", ButtonKind::quiet, ButtonSize::compact)) {
+    ImGui::OpenPopup("file-actions");
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("File actions and lease controls");
+  }
+  if (ImGui::BeginPopup("file-actions")) {
+    ImGui::BeginDisabled(review_diff_open_ || !options_.repository_path);
+    if (ImGui::MenuItem("Take lease")) {
+      take_editor_lease();
+    }
+    if (ImGui::MenuItem("Release lease")) {
+      release_editor_lease();
+    }
+    ImGui::EndDisabled();
+    if (ImGui::MenuItem("Collaboration details")) {
+      panels_.focus(PanelId::multiplayer);
+      shell_state_.sidebar_visible = true;
+      persist_shell_state();
+    }
+    ImGui::EndPopup();
   }
 }
 
@@ -8767,7 +8932,13 @@ void App::draw_contents() {
                                  ? shell_state_.bottom_panel_height
                                  : 0.0F;
   const auto editor_height = std::max(workspace.y - bottom_height, 1.0F);
+  // The editor area lays out its own edges: its rows keep space3 inside, the text reaches them.
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
   shell_region_begin("editor-area", workspace.x, editor_height);
+  // Restore the padding for windows opened inside (popups, tooltips), keeping the region's
+  // item spacing that shell_region_end pops.
+  ImGui::PopStyleVar(2);
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(design::space2, design::space2));
   draw_editor_area();
   shell_region_end("editor-area");
   if (shell_state_.bottom_panel_visible) {
@@ -8872,7 +9043,7 @@ void App::render_editor(InputRectangle clip_bounds) {
       screenshot_mode() ? 1 : graph_snapshot.syntax_generation, editor_x_,
       editor_y_, editor_width_, editor_height_, scroll_line_, line_height_,
       cell_width_, horizontal_scroll_, review_lines, comment_lines,
-      settings_.editor.whitespace);
+      settings_.editor.whitespace, editor_focused_);
   frame_layout_.editor_text =
       text_layer_->visible_text(clip_bounds, line_height_);
 }
@@ -9580,24 +9751,12 @@ void NativeAcceptance::fonts(App &app) {
 }
 
 void NativeAcceptance::source_tab(App &app) {
-  auto &bars = ImGui::GetCurrentContext()->TabBars;
-  for (int index = 0; index < bars.GetMapSize(); ++index) {
-    auto *bar = bars.TryGetMapData(index);
-    if (bar == nullptr) {
-      continue;
-    }
-    for (auto &tab : bar->Tabs) {
-      if (std::string_view(ImGui::TabBarGetTabName(bar, &tab))
-              .ends_with("###active-editor")) {
-        const auto bounds =
-            InputRectangle{bar->BarRect.Min.x + tab.Offset, bar->BarRect.Min.y,
-                           tab.Width, bar->BarRect.GetHeight()};
-        click(app, bounds);
-        return;
-      }
-    }
+  // The open file's tab, or its breadcrumb segment when it is the only thing open.
+  const auto found = app.frame_layout_.controls.find("editor/file-tab");
+  if (found == app.frame_layout_.controls.end()) {
+    throw std::runtime_error("source tab was not laid out");
   }
-  throw std::runtime_error("source tab was not laid out");
+  click(app, found->second);
 }
 
 // The display test stays here to preserve the single SDL/ImGui translation
@@ -9788,43 +9947,29 @@ private:
   }
 
   static void focus_source_tab(App &app) {
-    auto &bars = ImGui::GetCurrentContext()->TabBars;
-    for (int index = 0; index < bars.GetMapSize(); ++index) {
-      auto *bar = bars.TryGetMapData(index);
-      if (bar == nullptr) {
-        continue;
-      }
-      for (auto &tab : bar->Tabs) {
-        if (!std::string_view(ImGui::TabBarGetTabName(bar, &tab))
-                 .ends_with("###active-editor")) {
-          continue;
-        }
-        const auto x = bar->BarRect.Min.x + tab.Offset + tab.Width * 0.5F;
-        const auto y = bar->BarRect.GetCenter().y;
-        SDL_Event event{};
-        event.type = SDL_EVENT_MOUSE_MOTION;
-        event.motion.windowID = SDL_GetWindowID(app.window_);
-        event.motion.x = x;
-        event.motion.y = y;
-        SDL_PushEvent(&event);
-        event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
-        event.button.windowID = SDL_GetWindowID(app.window_);
-        event.button.button = SDL_BUTTON_LEFT;
-        event.button.down = true;
-        event.button.x = x;
-        event.button.y = y;
-        SDL_PushEvent(&event);
-        capture(app);
-        event.type = SDL_EVENT_MOUSE_BUTTON_UP;
-        event.button.down = false;
-        SDL_PushEvent(&event);
-        capture(app);
-        require(app.editor_visible_,
-                "source tab click did not expose the editor");
-        return;
-      }
-    }
-    require(false, "source tab was not created");
+    const auto found = app.frame_layout_.controls.find("editor/file-tab");
+    require(found != app.frame_layout_.controls.end(), "source tab was not created");
+    const auto x = found->second.x + found->second.width * 0.5F;
+    const auto y = found->second.y + found->second.height * 0.5F;
+    SDL_Event event{};
+    event.type = SDL_EVENT_MOUSE_MOTION;
+    event.motion.windowID = SDL_GetWindowID(app.window_);
+    event.motion.x = x;
+    event.motion.y = y;
+    SDL_PushEvent(&event);
+    event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    event.button.windowID = SDL_GetWindowID(app.window_);
+    event.button.button = SDL_BUTTON_LEFT;
+    event.button.down = true;
+    event.button.x = x;
+    event.button.y = y;
+    SDL_PushEvent(&event);
+    capture(app);
+    event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    event.button.down = false;
+    SDL_PushEvent(&event);
+    capture(app);
+    require(app.editor_visible_, "source tab click did not expose the editor");
   }
 
   static void check_displays(App &app) {

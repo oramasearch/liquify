@@ -87,6 +87,7 @@ private:
   void draw_activity_bar();
   void draw_sidebar();
   void draw_editor_area();
+  void draw_editor_file_row(bool tabs_shown);
   void draw_bottom_panel();
   void draw_floating_panels();
   void draw_panel(PanelId id);
@@ -428,6 +429,10 @@ private:
   bool repository_move_open_{};
   bool repository_new_file_open_{};
   bool breadcrumb_focus_requested_{};
+  // The editor-area tab a person chose: a panel opened as an editor tab, or none for the open
+  // file. A newly opened file takes the row back.
+  std::optional<PanelId> editor_area_panel_;
+  std::string editor_area_path_;
   bool repository_focused_{};
   bool context_preview_open_{};
   bool review_diff_open_{};
