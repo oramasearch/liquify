@@ -27,10 +27,13 @@ add_executable(liquify-tests
   test_user_error.cpp
   test_stub_tree.cpp
   test_version.cpp)
+# test_ai.cpp parses the request body the provider sends (liquify#73), so the tests use
+# Boost.JSON directly; liquify-core links it privately (liquify#133).
 target_link_libraries(liquify-tests PRIVATE
   liquify-app
   liquid_forge_double
   liquify-sample-plugin-static
+  Boost::json
   GTest::gtest_main)
 add_dependencies(liquify-tests liquify-sample-plugin)
 target_compile_definitions(liquify-tests PRIVATE LIQUIFY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
