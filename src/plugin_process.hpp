@@ -37,7 +37,8 @@ public:
 
   [[nodiscard]] auto manifest() const -> const plugin_protocol::Manifest & { return manifest_; }
 
-  // Thread-safe: graph workers and the UI thread share one host, one call at a time.
+  // Thread-safe: graph workers and the plugin's dispatcher worker share one host, one call at a
+  // time.
   [[nodiscard]] auto call(plugin_protocol::Kind kind, std::string_view name,
                           std::span<const std::byte> input, std::chrono::milliseconds deadline)
       -> liquid::result<std::vector<std::byte>>;

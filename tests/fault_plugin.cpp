@@ -2,7 +2,8 @@
 
 // A plugin that misbehaves on purpose (liquify#82): it crashes, hangs, and tries to write a
 // file, open a network socket and read the environment, so the tests can show each is confined
-// to its `liquify-plugin-host` process.
+// to its `liquify-plugin-host` process. Its hanging panel and command (`fault.hang`,
+// `fault.sleep`) also show the window never waits for them (liquify#149).
 
 #include <cerrno>
 #include <chrono>
@@ -129,6 +130,7 @@ constexpr std::uint8_t empty_schema[] = {0xa0};
 
 const liquify_plugin_command_v1 commands[] = {
     {"fault.crash", "", {empty_schema, sizeof(empty_schema)}, crash},
+    {"fault.sleep", "", {empty_schema, sizeof(empty_schema)}, hang},
     {"fault.write", "", {empty_schema, sizeof(empty_schema)}, write_file},
     {"fault.network", "", {empty_schema, sizeof(empty_schema)}, open_network},
     {"fault.environment", "", {empty_schema, sizeof(empty_schema)}, read_environment},

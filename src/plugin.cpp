@@ -401,7 +401,8 @@ private:
 namespace protocol = plugin_protocol;
 
 // How long one call may take before its host is ended and the call fails (liquify#82). Panels
-// and events are asked for on the UI thread, so they get the shorter deadline.
+// and events refresh what the window shows, so they get the shorter deadline. Neither is waited
+// for on the UI thread: `PluginDispatcher` sends them from a worker (liquify#149).
 constexpr auto operation_deadline = std::chrono::milliseconds(10'000);
 constexpr auto view_deadline = std::chrono::milliseconds(2'000);
 
@@ -1013,6 +1014,38 @@ auto PluginHost::panels(std::span<const std::byte> context_cbor)
     -> std::vector<PluginPanelSnapshot> {
   auto output = std::vector<PluginPanelSnapshot>{};
   for (const auto &module : impl_->modules) {
+    auto panels = this->panels(module->name, context_cbor);
+    std::ranges::move(panels, std::back_inserter(output));
+  }
+  return output;
+}
+
+auto PluginHost::panel_list() const -> std::vector<PluginPanelSnapshot> {
+  auto output = std::vector<PluginPanelSnapshot>{};
+  for (const auto &module : impl_->modules) {
+    for (const auto &panel : module->panels) {
+      output.push_back({panel.plugin, panel.name, {}, {}, true});
+    }
+  }
+  return output;
+}
+
+auto PluginHost::plugin_names() const -> std::vector<std::string> {
+  auto output = std::vector<std::string>{};
+  for (const auto &module : impl_->modules) {
+    output.push_back(module->name);
+  }
+  return output;
+}
+
+auto PluginHost::panels(std::string_view plugin,
+                        std::span<const std::byte> context_cbor)
+    -> std::vector<PluginPanelSnapshot> {
+  auto output = std::vector<PluginPanelSnapshot>{};
+  for (const auto &module : impl_->modules) {
+    if (module->name != plugin) {
+      continue;
+    }
     for (const auto &panel : module->panels) {
       auto snapshot = PluginPanelSnapshot{panel.plugin, panel.name, {}, {}};
       auto value = invoke_operation(panel, module->context(), context_cbor);
@@ -1069,35 +1102,45 @@ auto PluginHost::invoke_query(std::string_view name,
   return invoke_operation(*query, module->context(), arguments_cbor);
 }
 
-void PluginHost::publish_presence(const liquid::presence &value) {
+void PluginHost::publish_presence(const liquid::presence &value,
+                                  std::string_view plugin) {
   auto event = presence_event(value);
   if (!event) {
     return;
   }
   for (const auto &module : impl_->modules) {
+    if (!plugin.empty() && module->name != plugin) {
+      continue;
+    }
     module->publish(module->events.presence, "presence", *event);
   }
 }
 
 void PluginHost::publish_lease(const liquid::semantic_lease &value,
-                               bool active) {
+                               bool active, std::string_view plugin) {
   auto event = lease_event(value, active);
   if (!event) {
     return;
   }
   for (const auto &module : impl_->modules) {
+    if (!plugin.empty() && module->name != plugin) {
+      continue;
+    }
     module->publish(module->events.lease, "lease", *event);
   }
 }
 
 void PluginHost::publish_attribution(
     std::string_view path, const liquid::change_id &change,
-    std::span<const liquid::line_attribution> lines) {
+    std::span<const liquid::line_attribution> lines, std::string_view plugin) {
   auto event = attribution_event(path, change, lines);
   if (!event) {
     return;
   }
   for (const auto &module : impl_->modules) {
+    if (!plugin.empty() && module->name != plugin) {
+      continue;
+    }
     module->publish(module->events.attribution, "attribution", *event);
   }
 }

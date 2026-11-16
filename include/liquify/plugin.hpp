@@ -3,7 +3,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -35,6 +37,15 @@ struct PluginPanelSnapshot {
   std::string name;
   std::vector<std::byte> view_model_cbor;
   std::string error;
+  // No answer yet (liquify#149): the panel has been asked and draws its loading state.
+  bool loading = false;
+};
+
+// What a command sent through `PluginDispatcher` came back with.
+struct PluginCommandOutcome {
+  std::string name;
+  std::vector<std::byte> result_cbor;
+  std::string error; // empty when the command succeeded
 };
 
 struct PluginTextPanel {
@@ -98,6 +109,14 @@ public:
       -> liquid::result<std::vector<std::byte>>;
   [[nodiscard]] auto panels(std::span<const std::byte> context_cbor)
       -> std::vector<PluginPanelSnapshot>;
+  // The panels of one plugin, asked in registration order.
+  [[nodiscard]] auto panels(std::string_view plugin,
+                            std::span<const std::byte> context_cbor)
+      -> std::vector<PluginPanelSnapshot>;
+  // Every panel, unasked: each entry is `loading`.
+  [[nodiscard]] auto panel_list() const -> std::vector<PluginPanelSnapshot>;
+  // The loaded plugins, in load order.
+  [[nodiscard]] auto plugin_names() const -> std::vector<std::string>;
 
   [[nodiscard]] auto register_queries(liquid::query_registry &registry) const
       -> liquid::result<void>;
@@ -105,15 +124,66 @@ public:
                                   std::span<const std::byte> arguments_cbor)
       -> liquid::result<std::vector<std::byte>>;
 
+  // An empty `plugin` publishes to every plugin; a name, to that plugin only.
+  void publish_presence(const liquid::presence &value,
+                        std::string_view plugin = {});
+  void publish_lease(const liquid::semantic_lease &value, bool active = true,
+                     std::string_view plugin = {});
+  void publish_attribution(std::string_view path,
+                           const liquid::change_id &change,
+                           std::span<const liquid::line_attribution> lines,
+                           std::string_view plugin = {});
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+
+// Sends panel refreshes, commands and events to the plugins from worker threads, so the UI
+// thread never waits on a plugin (liquify#149). Each plugin has its own worker, which runs that
+// plugin's requests one at a time in the order they were sent: a plugin that hangs delays only
+// its own requests, each for at most its deadline (the host's, unchanged). The window reads the
+// last answer of every panel, or its loading state, from `panels()`.
+//
+// No member waits for a plugin, the destructor included: a request still running when the
+// dispatcher is destroyed finishes on its worker, which then exits, and its answer is dropped.
+class PluginDispatcher {
+public:
+  // `on_answer` runs on a worker after each answer is recorded (to ask the window for a frame).
+  // It must not call back into the dispatcher.
+  explicit PluginDispatcher(std::shared_ptr<PluginHost> host,
+                            std::function<void()> on_answer = {});
+  ~PluginDispatcher();
+  PluginDispatcher(const PluginDispatcher &) = delete;
+  auto operator=(const PluginDispatcher &) -> PluginDispatcher & = delete;
+
+  // Asks every plugin with panels for a refresh, unless one is already queued or running.
+  void refresh_panels(std::span<const std::byte> context_cbor);
+  // Queues the command on its plugin's worker; `not_found` when no plugin registered it.
+  [[nodiscard]] auto invoke_command(std::string_view name,
+                                    std::span<const std::byte> arguments_cbor)
+      -> liquid::result<void>;
   void publish_presence(const liquid::presence &value);
   void publish_lease(const liquid::semantic_lease &value, bool active = true);
   void publish_attribution(std::string_view path,
                            const liquid::change_id &change,
                            std::span<const liquid::line_attribution> lines);
 
+  // Every panel in registration order: its last answer (view model or error), or `loading`.
+  [[nodiscard]] auto panels() const -> std::vector<PluginPanelSnapshot>;
+  // The commands that have answered since the last call, in the order they answered.
+  [[nodiscard]] auto take_command_outcomes() -> std::vector<PluginCommandOutcome>;
+  // The commands sent and not yet answered.
+  [[nodiscard]] auto running_commands() const -> std::vector<std::string>;
+  // Requests queued or running, on every worker.
+  [[nodiscard]] auto pending() const -> std::size_t;
+  // Counts the answers recorded; changes whenever `panels()` or the outcomes do.
+  [[nodiscard]] auto generation() const -> std::uint64_t;
+
+  struct State;
+
 private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
+  std::shared_ptr<State> state_;
 };
 
 [[nodiscard]] auto canonical_plugin_cbor(std::span<const std::byte> value)

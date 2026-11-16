@@ -1208,6 +1208,83 @@ void NativeAcceptance::clone_failures(App &app,
   }
 }
 
+// liquify#149: the fault plugin's hanging panel and command, in their own host process, never
+// stall a frame. Before the fix each refresh waited up to the 2 s panel deadline on the UI
+// thread and the command up to its 10 s; now every frame is drawn while they wait, the panel
+// shows its loading state, and the deadlines end both calls as before.
+void NativeAcceptance::plugin_hang(App &app, const std::filesystem::path &output) {
+  using namespace std::chrono_literals;
+  require(app.plugin_dispatcher_ != nullptr, "#149: plugin dispatcher created for the repository");
+  for (const auto &failure : app.plugin_failures_) {
+    std::printf("plugin failure: %s: %s\n", failure.path.string().c_str(), failure.error.c_str());
+  }
+  require(app.plugin_failures_.empty(), "#149: fault plugin loaded in its host process");
+  app.panels_.focus(PanelId::plugins);
+  auto slowest = std::chrono::steady_clock::duration{};
+  auto frames = 0;
+  // One pulse is four production frames; a frame that waited on a plugin would take the
+  // panel's 2 s deadline, so a pulse under half of it cannot contain one.
+  const auto frame = [&] {
+    const auto start = std::chrono::steady_clock::now();
+    pulse(app);
+    slowest = std::max(slowest, std::chrono::steady_clock::now() - start);
+    frames += 4;
+  };
+  const auto slowest_ms = [&] {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(slowest).count();
+  };
+  const auto panel = [&](std::string_view name) {
+    const auto found = std::ranges::find(app.plugin_panels_, name, &PluginPanelSnapshot::name);
+    if (found == app.plugin_panels_.end()) {
+      require(false, std::string("#149: panel listed: ") + std::string(name));
+    }
+    return *found;
+  };
+
+  frame();
+  require(panel("fault.hang").loading, "#149: the hanging panel draws its loading state");
+  save_image(output / "plugin-loading.png", capture(app));
+
+  key(app, "p", true, true);
+  require(popup("Command Palette"), "#149: Primary+Shift+P opened the palette");
+  text(app, "fault.sleep");
+  const auto results = app.commands_->search(app.command_palette_query_);
+  require(!results.empty() && results[app.command_palette_selection_].name == "fault.sleep",
+          "#149: the palette selects the hanging plugin command");
+  const auto before_enter = std::chrono::steady_clock::now();
+  key(app, "Enter");
+  require(std::chrono::steady_clock::now() - before_enter < 1s,
+          "#149: Enter returns while the plugin command hangs");
+  require(app.editor_status_ == "plugin command running: fault.sleep",
+          "#149: the status bar says the command is running");
+
+  // The panel answers after its deadline; the command after its own, queued behind it.
+  const auto until = std::chrono::steady_clock::now() + 60s;
+  auto panel_answered = false;
+  auto command_answered = false;
+  auto status_seen = false;
+  while (std::chrono::steady_clock::now() < until &&
+         !(panel_answered && command_answered && status_seen)) {
+    frame();
+    panel_answered = panel_answered || !panel("fault.hang").loading;
+    command_answered = command_answered || app.plugin_dispatcher_->running_commands().empty();
+    status_seen = status_seen ||
+                  (app.editor_status_.find("fault:fault.sleep") != std::string::npos &&
+                   app.editor_status_.find("did not answer in time") != std::string::npos);
+  }
+  std::printf("plugin hang: frames=%d slowest_pulse_ms=%lld hang=\"%s\" status=\"%s\"\n",
+              frames, static_cast<long long>(slowest_ms()), panel("fault.hang").error.c_str(),
+              app.editor_status_.c_str());
+  require(panel_answered &&
+              panel("fault.hang").error.find("did not answer in time") != std::string::npos,
+          "#149: the hanging panel ends at its deadline and shows that error");
+  require(command_answered && status_seen,
+          "#149: the hanging command ends at its deadline in the status bar");
+  require(slowest < 1s, "#149: no frame waited on the plugin (slowest four-frame pulse " +
+                            std::to_string(slowest_ms()) + " ms)");
+  save_image(output / "plugin-answered.png", capture(app));
+}
+
 int NativeAcceptance::run(std::string_view scenario,
                           const std::filesystem::path &output) {
   std::filesystem::create_directories(output);
@@ -1246,6 +1323,17 @@ int NativeAcceptance::run(std::string_view scenario,
     std::printf("native acceptance: PASS %.*s\n",
                 static_cast<int>(scenario.size()), scenario.data());
     return 0;
+  }
+  if (scenario == "plugin-hang") {
+    // The fault plugin, in the user's global plugin list of a home of its own.
+    const auto home = output / "plugin-home";
+    std::filesystem::create_directories(home);
+    ::setenv("HOME", home.c_str(), 1);
+    ::setenv("XDG_CONFIG_HOME", (home / ".config").c_str(), 1);
+    const auto config = liquify::global_plugin_config_path();
+    require(!config.empty(), "#149: global plugin list path resolved");
+    std::filesystem::create_directories(config.parent_path());
+    std::ofstream(config) << "config.liquify.plugins=" << LIQUIFY_FAULT_PLUGIN << "\n";
   }
   const auto repo =
       output /
@@ -1286,6 +1374,8 @@ int NativeAcceptance::run(std::string_view scenario,
     cut(app, output);
   } else if (scenario == "set-lake-push") {
     set_lake_push(app, output);
+  } else if (scenario == "plugin-hang") {
+    plugin_hang(app, output);
   } else {
     throw std::runtime_error("unknown native acceptance scenario");
   }

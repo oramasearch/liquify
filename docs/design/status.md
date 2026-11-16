@@ -152,8 +152,9 @@ when the user has trusted their SHA-256 digest with `liquify plugin trust`, from
 store outside every repository; otherwise they are listed as not trusted and never loaded. Every
 dynamic plugin runs in its own sandboxed `liquify-plugin-host` process and the IDE never maps its
 library; a crash or hang fails only the call that met it, and a plugin is disabled after three
-restarts. Limits: reads are not denied, Windows has no network sandbox, and panels and commands
-still wait on the UI thread for up to their deadline.
+restarts. Panel refreshes, commands and events are sent from one worker per plugin, so the window
+never waits for a plugin: a panel draws its last answer or its loading state until the next answer
+arrives (liquify#149). Limits: reads are not denied, and Windows has no network sandbox.
 
 ## Build, test and push
 

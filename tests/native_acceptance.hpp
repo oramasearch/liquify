@@ -65,6 +65,7 @@ private:
   static void capture_themes(App &app, const std::filesystem::path &output,
                              std::string_view name);
   static void clone_failures(App &app, const std::filesystem::path &output);
+  static void plugin_hang(App &app, const std::filesystem::path &output);
 };
 
 } // namespace liquify

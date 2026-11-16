@@ -333,6 +333,9 @@ private:
   std::unique_ptr<Assistant> assistant_;
   std::unique_ptr<CommandRegistry> commands_;
   std::shared_ptr<PluginHost> plugin_host_;
+  // Every panel refresh, command and event goes through it, off the UI thread (liquify#149).
+  std::unique_ptr<PluginDispatcher> plugin_dispatcher_;
+  std::uint64_t plugin_generation_{};
   std::optional<MultiplayerSnapshot> multiplayer_;
   std::future<liquid::result<MultiplayerSnapshot>> multiplayer_refresh_;
   liquid::session_id multiplayer_session_;

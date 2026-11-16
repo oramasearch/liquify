@@ -139,10 +139,47 @@ confined too:
 **Limits.** Reads are not denied: a plugin can read the user's files, but it has no channel to send
 them anywhere except its results to the IDE. Windows does not deny network access; that needs an
 AppContainer and is not built. A Linux kernel without Landlock confines the host with seccomp
-alone. Panels refresh and commands run on the UI thread, so a hanging plugin stalls the UI for up
-to its deadline per attempt, at most four times, before it is disabled. The progress and
+alone. The progress and
 cancellation callbacks stay empty, as before. A plugin needing more than data-only CBOR (files,
 network) has no path; that would be a separate decision.
+
+## Requests off the UI thread
+
+**What.** The window never waits for a plugin
+([liquify#149](https://github.com/oramasearch/liquify/issues/149)). `PluginDispatcher`
+(`include/liquify/plugin.hpp`, `src/plugin_dispatcher.cpp`) sends every panel refresh, command and
+presence, lease and attribution event from a worker thread. The UI thread only queues requests and
+reads the answers recorded so far.
+
+**How.** Each loaded plugin has one worker, which runs that plugin's requests one at a time in the
+order they were sent. A plugin that hangs delays only its own requests; another plugin's panels keep
+refreshing. The deadlines (10 seconds for commands, 2 seconds for panels and events) and the
+restart budget are the host's, unchanged: the worker waits for them instead of the frame. A
+plugin compiled into liquify (`PluginHost::add`) goes through the same workers, so its panel,
+command and event operations run on its worker thread, never on the UI thread, one at a time.
+
+| What the window shows | When |
+|---|---|
+| *loading...* | the panel has been asked and has not answered yet |
+| its last answer (view model or error) | while the next refresh is being asked |
+| `plugin command running: NAME` in the status bar | from the moment the command is sent |
+| `plugin command completed: NAME`, or the command's error | when the command answers |
+
+A panel refresh is not queued while the previous one is still waiting, so a hanging panel never
+builds a backlog: the window asks again 500 ms after the answer. Each answer asks the window for a
+frame. Destroying the dispatcher (reopening a repository, quitting) never waits either: a request
+still running finishes on its worker, its answer is dropped, and the worker exits. Graph queries
+are unchanged; they already run on the graph's workers. The headless `--command` path still waits
+for its command, because it has no window.
+
+**Verify.** `tests/test_plugin.cpp` (`PluginDispatcher.*`) holds a static plugin's panel and command
+behind a gate and requires every call on the caller's thread to return in under 250 ms, the loading
+state, the last answer kept during a refresh, the command outcome, and a destructor that does not
+wait; with the fault plugin it requires the same of a hanging panel and command in their host, each
+ending at its deadline. The native scenario `plugin-hang` loads the fault plugin into the real
+window, runs `fault.sleep` from the palette, and requires the loading state, both deadline errors
+on screen and no four-frame pulse slower than one second
+([native acceptance](../ui/native-acceptance.md)).
 
 ## Versioning
 

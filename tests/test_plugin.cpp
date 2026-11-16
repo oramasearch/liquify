@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -14,6 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "liquid/repository.hpp"
@@ -730,4 +732,263 @@ TEST(PluginTrust, TheTrustCommandNamesThePluginAndRequiresConfirmation) {
   EXPECT_NE(file_text(output).find("trusted"), std::string::npos);
   EXPECT_EQ(file_text(output).find("not trusted"), std::string::npos)
       << file_text(output);
+}
+
+// liquify#149: the dispatcher sends panels, commands and events from a worker, so the UI
+// thread's calls return at once whatever the plugin does.
+namespace {
+
+using namespace std::chrono_literals;
+
+// A static plugin whose panel and command block until the test opens the gate.
+std::atomic_bool gate_open{};
+std::atomic_int gate_calls{};
+
+void wait_for_gate() {
+  ++gate_calls;
+  while (!gate_open.load()) {
+    std::this_thread::sleep_for(1ms);
+  }
+}
+
+auto gated_panel(void *context, liquid_frontend_bytes_v1 input,
+                 const liquid_frontend_callbacks_v1 *callbacks,
+                 liquid_frontend_owned_bytes_v1 *output,
+                 liquid_frontend_error_v1 *error) -> int {
+  wait_for_gate();
+  return healthy_panel(context, input, callbacks, output, error);
+}
+
+auto gated_command(void *, liquid_frontend_bytes_v1,
+                   const liquid_frontend_callbacks_v1 *,
+                   liquid_frontend_owned_bytes_v1 *output,
+                   liquid_frontend_error_v1 *) -> int {
+  wait_for_gate();
+  static constexpr std::uint8_t done[] = {0xf5};
+  return copy_result(done, output);
+}
+
+constexpr std::uint8_t gated_schema[] = {0xa0};
+const liquify_plugin_command_v1 gated_commands[] = {
+    {"gated.run", "", {gated_schema, sizeof(gated_schema)}, gated_command}};
+const liquify_plugin_panel_v1 gated_panels[] = {{"gated.view", gated_panel}};
+const liquify_plugin_v1 gated_descriptor = {LIQUIFY_PLUGIN_ABI_VERSION,
+                                            sizeof(liquify_plugin_v1),
+                                            "gated",
+                                            nullptr,
+                                            0,
+                                            gated_commands,
+                                            1,
+                                            gated_panels,
+                                            1,
+                                            nullptr,
+                                            nullptr};
+
+auto gated_host() -> std::shared_ptr<liquify::PluginHost> {
+  gate_open = false;
+  gate_calls = 0;
+  auto host = std::make_shared<liquify::PluginHost>();
+  auto added = host->add(&gated_descriptor);
+  EXPECT_TRUE(added) << added.error().message;
+  return host;
+}
+
+// Waits on the test thread (never the UI's) for a condition the workers make true.
+template <class Condition>
+auto eventually(Condition condition, std::chrono::milliseconds limit) -> bool {
+  const auto until = std::chrono::steady_clock::now() + limit;
+  while (std::chrono::steady_clock::now() < until) {
+    if (condition()) {
+      return true;
+    }
+    std::this_thread::sleep_for(5ms);
+  }
+  return condition();
+}
+
+// How long one call on the caller's thread took.
+template <class Call> auto elapsed(Call call) -> std::chrono::milliseconds {
+  const auto start = std::chrono::steady_clock::now();
+  call();
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - start);
+}
+
+// Far below the 2 s panel deadline: a call that waited on the plugin could not meet it.
+constexpr auto no_wait = 250ms;
+
+} // namespace
+
+TEST(PluginDispatcher, PanelsAreLoadingUntilTheyAnswerAndTheRefreshNeverWaits) {
+  auto host = gated_host();
+  auto dispatcher = liquify::PluginDispatcher(host);
+  auto panels = dispatcher.panels();
+  ASSERT_EQ(panels.size(), 1);
+  EXPECT_EQ(panels[0].plugin, "gated");
+  EXPECT_EQ(panels[0].name, "gated.view");
+  EXPECT_TRUE(panels[0].loading);
+
+  EXPECT_LT(elapsed([&] { dispatcher.refresh_panels(liquify::plugin_null_cbor()); }),
+            no_wait);
+  ASSERT_TRUE(eventually([] { return gate_calls.load() == 1; }, 5s));
+  EXPECT_LT(elapsed([&] { panels = dispatcher.panels(); }), no_wait);
+  EXPECT_TRUE(panels[0].loading);
+
+  // A refresh while one is still being asked is not queued behind it.
+  dispatcher.refresh_panels(liquify::plugin_null_cbor());
+  EXPECT_EQ(dispatcher.pending(), 1);
+
+  const auto before = dispatcher.generation();
+  gate_open = true;
+  ASSERT_TRUE(eventually([&] { return dispatcher.generation() != before; }, 5s));
+  panels = dispatcher.panels();
+  ASSERT_EQ(panels.size(), 1);
+  EXPECT_FALSE(panels[0].loading);
+  EXPECT_TRUE(panels[0].error.empty()) << panels[0].error;
+  auto model = liquify::decode_plugin_text_panel(panels[0].view_model_cbor);
+  ASSERT_TRUE(model) << model.error().message;
+  EXPECT_EQ(model->title, "Healthy");
+  EXPECT_EQ(gate_calls.load(), 1);
+}
+
+TEST(PluginDispatcher, APanelKeepsItsLastAnswerWhileTheNextRefreshIsAsked) {
+  auto host = gated_host();
+  gate_open = true;
+  auto dispatcher = liquify::PluginDispatcher(host);
+  dispatcher.refresh_panels(liquify::plugin_null_cbor());
+  ASSERT_TRUE(eventually([&] { return !dispatcher.panels()[0].loading; }, 5s));
+
+  gate_open = false;
+  gate_calls = 0;
+  dispatcher.refresh_panels(liquify::plugin_null_cbor());
+  ASSERT_TRUE(eventually([] { return gate_calls.load() == 1; }, 5s));
+  const auto panels = dispatcher.panels();
+  EXPECT_FALSE(panels[0].loading);
+  auto model = liquify::decode_plugin_text_panel(panels[0].view_model_cbor);
+  ASSERT_TRUE(model) << model.error().message;
+  EXPECT_EQ(model->title, "Healthy");
+  gate_open = true;
+  ASSERT_TRUE(eventually([&] { return dispatcher.pending() == 0; }, 5s));
+}
+
+TEST(PluginDispatcher, ACommandRunsOnAWorkerAndReportsItsOutcome) {
+  auto host = gated_host();
+  auto answers = std::make_shared<std::atomic_int>(0);
+  auto dispatcher = liquify::PluginDispatcher(host, [answers] { ++*answers; });
+  auto invoked = liquid::result<void>{};
+  EXPECT_LT(elapsed([&] {
+              invoked = dispatcher.invoke_command("gated.run", liquify::plugin_empty_map_cbor());
+            }),
+            no_wait);
+  ASSERT_TRUE(invoked) << invoked.error().message;
+  ASSERT_TRUE(eventually([] { return gate_calls.load() == 1; }, 5s));
+  EXPECT_EQ(dispatcher.running_commands(), (std::vector<std::string>{"gated.run"}));
+  EXPECT_TRUE(dispatcher.take_command_outcomes().empty());
+
+  gate_open = true;
+  ASSERT_TRUE(eventually([&] { return dispatcher.running_commands().empty(); }, 5s));
+  const auto outcomes = dispatcher.take_command_outcomes();
+  ASSERT_EQ(outcomes.size(), 1);
+  EXPECT_EQ(outcomes[0].name, "gated.run");
+  EXPECT_TRUE(outcomes[0].error.empty()) << outcomes[0].error;
+  EXPECT_EQ(outcomes[0].result_cbor, std::vector<std::byte>{std::byte{0xf5}});
+  EXPECT_EQ(answers->load(), 1);
+  EXPECT_TRUE(dispatcher.take_command_outcomes().empty());
+}
+
+TEST(PluginDispatcher, AnUnregisteredCommandIsNotFound) {
+  auto host = gated_host();
+  auto dispatcher = liquify::PluginDispatcher(host);
+  auto invoked = dispatcher.invoke_command("missing.command", liquify::plugin_empty_map_cbor());
+  ASSERT_FALSE(invoked);
+  EXPECT_EQ(invoked.error().code, liquid::errc::not_found);
+  EXPECT_EQ(invoked.error().context, "missing.command");
+  EXPECT_TRUE(dispatcher.running_commands().empty());
+}
+
+TEST(PluginDispatcher, DestroyingItNeverWaitsForAPluginStillRunning) {
+  auto host = gated_host();
+  auto answers = std::make_shared<std::atomic_int>(0);
+  {
+    auto dispatcher = std::make_unique<liquify::PluginDispatcher>(host, [answers] { ++*answers; });
+    ASSERT_TRUE(dispatcher->invoke_command("gated.run", liquify::plugin_empty_map_cbor()));
+    ASSERT_TRUE(eventually([] { return gate_calls.load() == 1; }, 5s));
+    EXPECT_LT(elapsed([&] { dispatcher.reset(); }), no_wait);
+  }
+  gate_open = true;
+  // The worker finishes the call, drops the answer and exits; the host outlives it.
+  ASSERT_TRUE(eventually([&] { return host.use_count() == 1; }, 5s));
+  EXPECT_EQ(answers->load(), 0);
+}
+
+TEST(PluginDispatcher, EventsAreDeliveredOnTheWorker) {
+  auto state = EventState{};
+  const auto descriptor = liquify_plugin_v1{LIQUIFY_PLUGIN_ABI_VERSION,
+                                            sizeof(liquify_plugin_v1),
+                                            "events",
+                                            nullptr,
+                                            0,
+                                            nullptr,
+                                            0,
+                                            nullptr,
+                                            0,
+                                            &state,
+                                            nullptr,
+                                            &event_callbacks};
+  auto host = std::make_shared<liquify::PluginHost>();
+  ASSERT_TRUE(host->add(&descriptor));
+  auto dispatcher = liquify::PluginDispatcher(host);
+  auto presence = liquid::presence{};
+  presence.actor.taap_id = "person";
+  presence.path = "main.cpp";
+  presence.activity = liquid::presence_activity::editing;
+  dispatcher.publish_presence(presence);
+  auto lease = liquid::semantic_lease{};
+  lease.by.taap_id = "person";
+  lease.claim.path = "main.cpp";
+  lease.claim.kind = liquid::lease_kind::file;
+  dispatcher.publish_lease(lease);
+  auto attribution = liquid::line_attribution{};
+  attribution.line = 1;
+  attribution.by.taap_id = "agent";
+  attribution.agent = true;
+  dispatcher.publish_attribution("main.cpp", liquid::change_id{},
+                                 std::span{&attribution, std::size_t{1}});
+  ASSERT_TRUE(eventually([&] { return dispatcher.pending() == 0; }, 5s));
+  EXPECT_EQ(state.presence_count, 1);
+  EXPECT_EQ(state.lease_count, 1);
+  EXPECT_EQ(state.attribution_count, 1);
+}
+
+// The fault plugin's hang case, in its own host process: the deadline and restart budget are
+// the host's, unchanged; only the waiting moved off the caller's thread.
+TEST(PluginDispatcher, AHangingDynamicPanelAndCommandNeverBlockTheCaller) {
+  auto host = load_fault_plugin();
+  auto dispatcher = liquify::PluginDispatcher(host);
+  ASSERT_EQ(dispatcher.panels().size(), 2);
+  EXPECT_LT(elapsed([&] { dispatcher.refresh_panels(liquify::plugin_null_cbor()); }),
+            no_wait);
+  auto invoked = liquid::result<void>{};
+  EXPECT_LT(elapsed([&] {
+              invoked = dispatcher.invoke_command("fault.sleep", liquify::plugin_empty_map_cbor());
+            }),
+            no_wait);
+  ASSERT_TRUE(invoked) << invoked.error().message;
+  EXPECT_LT(elapsed([&] { (void)dispatcher.panels(); }), no_wait);
+  EXPECT_TRUE(dispatcher.panels()[0].loading);
+
+  // The hanging panel misses its 2 s deadline and the healthy one answers after it.
+  ASSERT_TRUE(eventually([&] { return !dispatcher.panels()[1].loading; }, 8s));
+  const auto panels = dispatcher.panels();
+  EXPECT_NE(panels[0].error.find("did not answer in time"), std::string::npos)
+      << panels[0].error;
+  ASSERT_TRUE(panels[1].error.empty()) << panels[1].error;
+
+  // The hanging command misses its 10 s deadline, queued behind the panels.
+  ASSERT_TRUE(eventually([&] { return dispatcher.running_commands().empty(); }, 20s));
+  const auto outcomes = dispatcher.take_command_outcomes();
+  ASSERT_EQ(outcomes.size(), 1);
+  EXPECT_EQ(outcomes[0].name, "fault.sleep");
+  EXPECT_NE(outcomes[0].error.find("did not answer in time"), std::string::npos)
+      << outcomes[0].error;
 }

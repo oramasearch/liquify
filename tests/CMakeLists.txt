@@ -89,11 +89,15 @@ set_tests_properties(liquify-independent-cli-compat PROPERTIES RUN_SERIAL TRUE)
 if(LIQUIFY_NATIVE_WINDOW_TESTS)
   add_executable(liquify-native-acceptance native_acceptance.cpp)
   target_link_libraries(liquify-native-acceptance PRIVATE liquify-app liquid_forge_double)
+  # plugin-hang loads the fault plugin through the user's global plugin list (liquify#149).
+  add_dependencies(liquify-native-acceptance liquify-fault-plugin liquify-plugin-host)
+  target_compile_definitions(liquify-native-acceptance PRIVATE
+    LIQUIFY_FAULT_PLUGIN="$<TARGET_FILE:liquify-fault-plugin>")
   foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette rebind commands modal-input tabs build
       front-door-clone-failures cut
       front-door-clone-push set-lake-push opened-clone-push
       request-review front-door-actions set-up-build
-      table-headers look)
+      table-headers look plugin-hang)
     add_test(NAME liquify-native-acceptance-${scenario}
       COMMAND liquify-native-acceptance ${scenario}
         ${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario})
