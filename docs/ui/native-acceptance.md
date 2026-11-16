@@ -19,8 +19,8 @@ controls, editor bounds and source ink. The driver does not add fixed sample rec
 |---|---|
 | `launch-1` | Native drawable density, launch coverage, repository open, uploaded fonts, editor ink, resize, modal routing | Skipped when no attached display has density 1; see [density-1 acceptance owed](#density-1-acceptance-owed) |
 | `launch-2` | Native drawable density, launch coverage, repository open, uploaded fonts, editor ink, resize, modal routing | Passes on the attached Retina displays |
-| `edit` | Click repository row, focus and type into Quick Open, choose result, click editor, send UTF-8 text, save with Primary+S, compare persisted blob bytes through an independent handle | `WILL_FAIL`, liquify #39 |
-| `quick-open` | Primary+P, path text, Down, Enter; require the requested file and closed popup | `WILL_FAIL`, liquify #33 |
+| `edit` | Click repository row, focus and type into Quick Open, choose result, click editor, send UTF-8 text, save with Primary+S, compare persisted blob bytes through an independent handle | Passes when the navigation index loads: the focused editor restarts SDL text input after an ImGui field stops it (liquify #39). Intermittent on the current liquid pin, see [below](#quick-open-and-edit-on-the-current-liquid-pin) |
+| `quick-open` | Primary+P, path text, Down, Enter; require the requested file and closed popup | Passes when the navigation index loads: the query field takes focus on open, Up/Down move the selected result, Enter opens it (liquify #33). Intermittent on the current liquid pin, see [below](#quick-open-and-edit-on-the-current-liquid-pin) |
 | `palette` | Primary+Shift+P, query; require the first result selected, Down and Up to move the selection, and Enter to run it (the command's state change) | Expected to pass: the palette dispatches its selected row since liquify #34; checked by hand in the real window, the suite not yet run (tests run at release) |
 | `rebind` | Primary+A selects the buffer; rebind Select All to F6 through the Keymap field's handler; require F6 to select the buffer and the old Primary+A not to; require the palette's first row for "Select All" labelled F6 and Enter on it to select the buffer; on macOS require the native Edit menu item to show F6, the palette item to show Cmd+Shift+P, and choosing the item to select the buffer; rebind to Primary+L and require the conflict reported and the chord to run neither command; restore Primary+A | Passes on the attached Retina display (liquify #34) |
 | `commands` | Open a file and run every built-in command through the one dispatcher (Quit, Close File and Reveal excepted, as they open native dialogs or the file manager); require each to have a handler and to act or put its reason in the status bar | Not yet run (tests run at release) |
@@ -47,10 +47,25 @@ attached displays and measures its actual drawable density. Density 1 skips with
 display reason when unavailable. It does not disable high-density rendering or change renderer
 scale to manufacture coverage.
 
-The `WILL_FAIL` entries stay green only while their linked issue remains open. A fix makes its
+The `WILL_FAIL` entries (none at present) stay green only while their linked issue remains open. A fix makes its
 test pass and CTest then reports the stale annotation. The display prerequisite is a skip, not a
 `WILL_FAIL`, because it does not describe a product defect. No product behavior is changed to
 satisfy an assertion.
+
+## Quick Open and edit on the current liquid pin
+
+The `quick-open` and `edit` scenarios lost their `WILL_FAIL` with the liquify #33 and #39 fixes.
+They were checked by reading the code and by real-window runs of those two scenarios only, not by
+the suite (tests run at release). Without the editor's text-input restart, `edit` stops with
+`input_active=0` after Quick Open closes; with it, the typed bytes persist through Save.
+
+On the current liquid pin (`27d56ba`) both scenarios still fail intermittently, for a reason
+outside liquify: libliquid's shared `MANIFEST.backend-tmp` temporary races between the handles
+liquify opens on one repository, the navigation index reports `in rename: No such file or
+directory`, and Quick Open has no paths to offer. liquid#526 fixed that on liquid's `dev`
+(liquid#532); liquify #97 tracks taking it. Built against liquid `dev` (`79e4325`), both scenarios
+passed every direct run. Under CTest on a heavily loaded host a pointer click in the shared
+open-file step sometimes does not land, with either liquid.
 
 ## Evidence required for UI changes
 

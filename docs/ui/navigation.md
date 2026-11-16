@@ -28,6 +28,14 @@ Quick Open ranks file paths with a case-insensitive subsequence matcher. Contigu
 component starts, exact matches, prefixes, and filename matches receive higher scores; shorter
 paths and then lexical order break ties. Directories are excluded from results.
 
+Quick Open and Symbol Search work without a pointer (liquify#33). The query field takes keyboard
+focus when the dialog opens, so typing filters at once. The first result is selected; Up and Down
+move the selection while the field keeps the keyboard, Enter opens the selected result and closes
+the dialog, and Escape closes it. Result rows and Close are not keyboard-navigation targets, so the
+arrows never move focus out of the field. While either dialog is open it owns Enter and the arrows:
+they never reach the repository row or the source behind it. Opening a result shows its source,
+not a panel that shares the editor area, also when the result is the file already open.
+
 Symbol Search ranks definitions from libliquid symbol records. It never reparses source in the UI.
 The same records support Go to Definition and Find References. Call Hierarchy uses a record's
 container symbol when the graph supplies one, so callers and callees are shown only when that

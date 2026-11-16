@@ -106,10 +106,6 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
       LABELS "native;display;acceptance" RUN_SERIAL TRUE TIMEOUT 120
       ENVIRONMENT "LIQUID_HOME=${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario}/home")
   endforeach()
-  # #39 remains open: retained-editor text input stops after an ImGui field.
-  set_tests_properties(liquify-native-acceptance-edit PROPERTIES WILL_FAIL TRUE)
-  # #33 remains open: Quick Open has no keyboard result dispatch.
-  set_tests_properties(liquify-native-acceptance-quick-open PROPERTIES WILL_FAIL TRUE)
   # #97 / liquid#526 remain open: a store liquify just cloned usually loses an index run when
   # liquify's handles write to it, so the first save fails before the push; now and then it
   # does not. Neither WILL_FAIL nor a pass is stable, so the scenario is run by hand until

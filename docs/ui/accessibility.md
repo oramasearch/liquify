@@ -8,7 +8,12 @@ state-machine tests.
 ## Text composition
 
 An editor with focus starts SDL text input and supplies the active caret rectangle with
-`SDL_SetTextInputArea`. `SDL_EVENT_TEXT_EDITING` updates a retained composition without changing
+`SDL_SetTextInputArea`. The retained editor and ImGui's fields share one SDL text-input session
+(liquify#39). The ImGui SDL backend stops it when one of its fields loses focus, for example when
+Quick Open or the palette closes, so each frame the focused, visible editor starts it again if it
+is inactive. While a modal dialog is open or an ImGui field owns the keyboard, the editor leaves
+the session and the IME rectangle to them, and neither text nor keys reach the source behind the
+dialog. `SDL_EVENT_TEXT_EDITING` updates a retained composition without changing
 the buffer. The editor draws that text at the caret and marks the composing selection. A following
 `SDL_EVENT_TEXT_INPUT` commits the supplied UTF-8 bytes as one normal editor insertion and clears
 the composition. An empty edit, Escape, focus loss, or leaving the editor cancels it.
