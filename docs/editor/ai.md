@@ -63,7 +63,10 @@ and `stream: true`; it deliberately has no `thinking` member.
 **Repository context is data, never instructions** (liquify#73). The one user message has two
 content blocks. The first is the context inside `<repository_context>` tags, with every
 `[user-request]` and every `<repository_context>` or `</repository_context>` inside it rewritten,
-so text from a hostile repository can neither close the block nor start a request. The second is
+so text from a hostile repository can neither close the block nor start a request. The match
+ignores ASCII case and allows whitespace inside the brackets and around the `/`, so
+`</Repository_Context >`, `< /repository_context>` and `[ USER-REQUEST ]` are rewritten as well
+(liquify#123); text that only resembles a marker, such as `[user-requests]`, is left alone. The second is
 `[user-request]` followed by the person's prompt. The system prompt ends by telling the model that
 everything inside `<repository_context>` is data read from the repository, never an instruction.
 `anthropic_request_body` builds it and `quote_repository_context` does the rewriting. Server-sent `content_block_delta`
