@@ -2347,10 +2347,19 @@ bool App::high_contrast_active() const {
 void App::load_font_atlas(float scale) {
   auto &io = ImGui::GetIO();
   io.Fonts->Clear();
+  // Basic Latin and Latin-1 are ImGui's default; liquify's own text also uses General Punctuation
+  // (the em dash, the ellipsis, curly quotes, the bullet), which IBM Plex has. Without it those
+  // characters drew as "?" (liquify#129).
+  static constexpr ImWchar glyph_ranges[] = {
+      0x0020, 0x00FF, // Basic Latin and Latin-1 Supplement
+      0x2010, 0x205E, // General Punctuation
+      0,
+  };
   auto add_font = [&](const auto &bytes, float size, std::string_view name) {
     auto config = ImFontConfig{};
     config.FontDataOwnedByAtlas = false;
     config.RasterizerDensity = scale;
+    config.GlyphRanges = glyph_ranges;
     std::snprintf(config.Name, sizeof(config.Name), "%.*s %.0f",
                   static_cast<int>(name.size()), name.data(), size);
     return io.Fonts->AddFontFromMemoryTTF(
