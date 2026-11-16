@@ -8,10 +8,13 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <set>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -23,9 +26,11 @@
 
 #include "encoding/cbor.hpp"
 #include "liquid/graph.hpp"
+#include "liquid/hash.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
 #include "liquify/ai_config.hpp"
+#include "liquify/settings.hpp"
 
 namespace liquify {
 namespace {
@@ -1119,44 +1124,321 @@ auto load_global_plugins(
   return configured;
 }
 
-auto load_configured_plugins(
-    const std::filesystem::path &repository_path,
-    std::optional<std::filesystem::path> global_config_path)
-    -> liquid::result<ConfiguredPlugins> {
-  const auto config_path = global_config_path.value_or(global_ai_config_path());
-  auto paths = configured_file_paths(config_path);
-  if (!paths) {
-    return std::unexpected(paths.error());
-  }
+namespace {
 
+auto read_file_bytes(const std::filesystem::path &path)
+    -> liquid::result<std::vector<std::byte>> {
+  auto input = std::ifstream(path, std::ios::binary);
+  if (!input) {
+    return std::unexpected(plugin_error(liquid::errc::not_found,
+                                        "could not read plugin",
+                                        path.string()));
+  }
+  const auto characters =
+      std::vector<char>(std::istreambuf_iterator<char>(input), {});
+  if (input.bad()) {
+    return std::unexpected(
+        plugin_error(liquid::errc::io, "could not read plugin", path.string()));
+  }
+  const auto view = std::as_bytes(std::span(characters));
+  return std::vector<std::byte>(view.begin(), view.end());
+}
+
+auto sha256_digest(std::span<const std::byte> value)
+    -> liquid::result<std::string> {
+  auto digest = liquid::hash(liquid::algorithm::sha256, value);
+  if (!digest) {
+    return std::unexpected(digest.error());
+  }
+  return liquid::to_string(*digest);
+}
+
+auto error_text(const liquid::error &error) -> std::string {
+  auto message = error.message;
+  if (!error.context.empty()) {
+    message += ": " + error.context;
+  }
+  return message;
+}
+
+auto repository_plugin_paths(const std::filesystem::path &repository_path)
+    -> liquid::result<std::vector<std::filesystem::path>> {
+  auto output = std::vector<std::filesystem::path>{};
   auto repository =
       liquid::runtime::block_on(liquid::repository::open(repository_path));
   if (!repository) {
     return std::unexpected(repository.error());
   }
-  auto repository_value =
-      liquid::runtime::block_on(repository->metadata(plugins_key));
-  if (!repository_value) {
-    return std::unexpected(repository_value.error());
+  auto value = liquid::runtime::block_on(repository->metadata(plugins_key));
+  if (!value) {
+    return std::unexpected(value.error());
   }
-  if (*repository_value) {
-    const auto &bytes = **repository_value;
-    const auto value = std::string_view(
-        reinterpret_cast<const char *>(bytes.data()), bytes.size());
-    append_plugin_paths(*paths, value, repository_path);
+  if (*value) {
+    const auto &bytes = **value;
+    append_plugin_paths(
+        output,
+        std::string_view(reinterpret_cast<const char *>(bytes.data()),
+                         bytes.size()),
+        repository_path);
   }
-  deduplicate_paths(*paths);
+  deduplicate_paths(output);
+  return output;
+}
+
+// Writes the bytes that were hashed to a per-user, content-addressed file and
+// returns its path. Loading that copy, never the repository's file, means the
+// repository cannot swap the library between the digest check and the load.
+auto stage_trusted_plugin(std::span<const std::byte> bytes,
+                          std::string_view digest,
+                          const std::filesystem::path &source,
+                          const std::filesystem::path &trust_store_path)
+    -> liquid::result<std::filesystem::path> {
+  const auto directory = trust_store_path.parent_path() / "plugin-cache";
+  auto code = std::error_code{};
+  std::filesystem::create_directories(directory, code);
+  if (code) {
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not create plugin cache",
+                                        directory.string()));
+  }
+#if !defined(_WIN32)
+  std::filesystem::permissions(directory, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace, code);
+#endif
+  const auto hex = digest.substr(digest.find(':') + 1);
+  const auto staged =
+      directory / (std::string(hex) + source.extension().string());
+  const auto temporary = std::filesystem::path(staged.string() + ".partial");
+  {
+    auto output =
+        std::ofstream(temporary, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char *>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+    if (!output) {
+      return std::unexpected(plugin_error(liquid::errc::io,
+                                          "could not stage trusted plugin",
+                                          temporary.string()));
+    }
+  }
+  std::filesystem::rename(temporary, staged, code);
+  if (code) {
+    std::filesystem::remove(temporary, code);
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not stage trusted plugin",
+                                        staged.string()));
+  }
+  return staged;
+}
+
+} // namespace
+
+auto plugin_trust_store_path() -> std::filesystem::path {
+  return user_settings_path().parent_path() / "trusted-plugins";
+}
+
+auto plugin_digest(const std::filesystem::path &shared_object)
+    -> liquid::result<std::string> {
+  auto bytes = read_file_bytes(shared_object);
+  if (!bytes) {
+    return std::unexpected(bytes.error());
+  }
+  return sha256_digest(*bytes);
+}
+
+auto trusted_plugin_digests(const std::filesystem::path &trust_store_path)
+    -> liquid::result<std::vector<std::string>> {
+  auto output = std::vector<std::string>{};
+  if (trust_store_path.empty() || !std::filesystem::exists(trust_store_path)) {
+    return output;
+  }
+  auto input = std::ifstream(trust_store_path);
+  if (!input) {
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not open plugin trust store",
+                                        trust_store_path.string()));
+  }
+  auto line = std::string{};
+  auto line_number = std::size_t{};
+  while (std::getline(input, line)) {
+    ++line_number;
+    const auto view = trim(line);
+    if (view.empty() || view.starts_with('#')) {
+      continue;
+    }
+    const auto token = view.substr(0, view.find_first_of(" \t"));
+    auto parsed = liquid::parse_digest(token);
+    if (!token.starts_with("sha256:") || !parsed ||
+        parsed->alg != liquid::algorithm::sha256) {
+      return std::unexpected(plugin_error(
+          liquid::errc::invalid_argument, "expected a sha256 plugin digest",
+          trust_store_path.string() + ":" + std::to_string(line_number)));
+    }
+    output.push_back(liquid::to_string(*parsed));
+  }
+  return output;
+}
+
+auto trust_plugin_digest(std::string_view digest,
+                         const std::filesystem::path &origin,
+                         const std::filesystem::path &trust_store_path)
+    -> liquid::result<void> {
+  auto parsed = liquid::parse_digest(digest);
+  if (!digest.starts_with("sha256:") || !parsed ||
+      parsed->alg != liquid::algorithm::sha256) {
+    return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                        "expected a sha256 plugin digest",
+                                        std::string(digest)));
+  }
+  auto trusted = trusted_plugin_digests(trust_store_path);
+  if (!trusted) {
+    return std::unexpected(trusted.error());
+  }
+  if (std::ranges::find(*trusted, digest) != trusted->end()) {
+    return {};
+  }
+  auto code = std::error_code{};
+  std::filesystem::create_directories(trust_store_path.parent_path(), code);
+  if (code) {
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not create trust store directory",
+                                        trust_store_path.string()));
+  }
+  auto absolute = std::filesystem::absolute(origin, code);
+  if (code) {
+    absolute = origin;
+  }
+  auto output = std::ofstream(trust_store_path, std::ios::app);
+  output << digest << '\t' << absolute.lexically_normal().generic_string()
+         << '\n';
+  if (!output) {
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not write plugin trust store",
+                                        trust_store_path.string()));
+  }
+  return {};
+}
+
+auto trust_plugin(const std::filesystem::path &shared_object,
+                  const std::filesystem::path &trust_store_path)
+    -> liquid::result<std::string> {
+  auto digest = plugin_digest(shared_object);
+  if (!digest) {
+    return std::unexpected(digest.error());
+  }
+  auto recorded = trust_plugin_digest(*digest, shared_object, trust_store_path);
+  if (!recorded) {
+    return std::unexpected(recorded.error());
+  }
+  return digest;
+}
+
+auto inspect_configured_plugins(
+    const std::filesystem::path &repository_path,
+    std::optional<std::filesystem::path> global_config_path,
+    std::optional<std::filesystem::path> trust_store_path)
+    -> liquid::result<std::vector<PluginStatus>> {
+  auto global = configured_file_paths(
+      global_config_path.value_or(global_ai_config_path()));
+  if (!global) {
+    return std::unexpected(global.error());
+  }
+  deduplicate_paths(*global);
+  auto repository = repository_plugin_paths(repository_path);
+  if (!repository) {
+    return std::unexpected(repository.error());
+  }
+  auto trusted =
+      trusted_plugin_digests(trust_store_path.value_or(plugin_trust_store_path()));
+  if (!trusted) {
+    return std::unexpected(trusted.error());
+  }
+  auto output = std::vector<PluginStatus>{};
+  for (const auto &path : *global) {
+    output.push_back({path, PluginSource::global, {}, true, {}});
+  }
+  for (const auto &path : *repository) {
+    if (std::ranges::find(*global, path) != global->end()) {
+      continue;
+    }
+    auto status = PluginStatus{path, PluginSource::repository, {}, false, {}};
+    auto digest = plugin_digest(path);
+    if (!digest) {
+      status.error = error_text(digest.error());
+    } else {
+      status.digest = std::move(*digest);
+      status.trusted =
+          std::ranges::find(*trusted, status.digest) != trusted->end();
+    }
+    output.push_back(std::move(status));
+  }
+  return output;
+}
+
+auto load_configured_plugins(
+    const std::filesystem::path &repository_path,
+    std::optional<std::filesystem::path> global_config_path,
+    std::optional<std::filesystem::path> trust_store_path)
+    -> liquid::result<ConfiguredPlugins> {
+  const auto store = trust_store_path.value_or(plugin_trust_store_path());
+  auto global = configured_file_paths(
+      global_config_path.value_or(global_ai_config_path()));
+  if (!global) {
+    return std::unexpected(global.error());
+  }
+  deduplicate_paths(*global);
+  auto repository = repository_plugin_paths(repository_path);
+  if (!repository) {
+    return std::unexpected(repository.error());
+  }
 
   auto configured =
-      ConfiguredPlugins{std::make_shared<PluginHost>(), std::move(*paths), {}};
-  for (const auto &path : configured.paths) {
+      ConfiguredPlugins{std::make_shared<PluginHost>(), *global, {}, {}};
+  for (const auto &path : *global) {
     auto loaded = configured.host->load(path);
     if (!loaded) {
-      auto message = loaded.error().message;
-      if (!loaded.error().context.empty()) {
-        message += ": " + loaded.error().context;
+      configured.failures.push_back({path, error_text(loaded.error())});
+    }
+  }
+
+  // Repository metadata is attacker-controlled: it names a file, and the
+  // file loads only if its exact bytes were trusted by the user beforehand.
+  auto trusted = std::optional<std::vector<std::string>>{};
+  for (const auto &path : *repository) {
+    if (std::ranges::find(*global, path) != global->end()) {
+      continue;
+    }
+    configured.paths.push_back(path);
+    if (!trusted) {
+      auto digests = trusted_plugin_digests(store);
+      if (!digests) {
+        configured.failures.push_back({store, error_text(digests.error())});
+        trusted.emplace();
+      } else {
+        trusted = std::move(*digests);
       }
-      configured.failures.push_back({path, std::move(message)});
+    }
+    auto bytes = read_file_bytes(path);
+    if (!bytes) {
+      configured.failures.push_back({path, error_text(bytes.error())});
+      continue;
+    }
+    auto digest = sha256_digest(*bytes);
+    if (!digest) {
+      configured.failures.push_back({path, error_text(digest.error())});
+      continue;
+    }
+    if (std::ranges::find(*trusted, *digest) == trusted->end()) {
+      configured.untrusted.push_back({path, repository_path, *digest});
+      continue;
+    }
+    auto staged = stage_trusted_plugin(*bytes, *digest, path, store);
+    if (!staged) {
+      configured.failures.push_back({path, error_text(staged.error())});
+      continue;
+    }
+    auto loaded = configured.host->load(*staged);
+    if (!loaded) {
+      configured.failures.push_back({path, error_text(loaded.error())});
     }
   }
   return configured;

@@ -313,6 +313,7 @@ private:
   std::string pending_review_id_;
   std::string review_comment_body_;
   std::vector<PluginLoadFailure> plugin_failures_;
+  std::vector<UntrustedPlugin> plugin_untrusted_;
   std::vector<PluginPanelSnapshot> plugin_panels_;
   std::vector<std::string> command_diagnostics_;
   std::vector<std::string> native_menu_commands_;

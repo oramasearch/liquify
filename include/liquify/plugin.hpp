@@ -45,10 +45,31 @@ struct PluginLoadFailure {
   std::string error;
 };
 
+// A plugin a repository names that the user has not trusted. It is listed
+// and never loaded.
+struct UntrustedPlugin {
+  std::filesystem::path path;
+  std::filesystem::path repository;
+  std::string digest;
+};
+
 struct ConfiguredPlugins {
   std::shared_ptr<PluginHost> host;
   std::vector<std::filesystem::path> paths;
   std::vector<PluginLoadFailure> failures;
+  std::vector<UntrustedPlugin> untrusted;
+};
+
+enum class PluginSource { global, repository };
+
+// What opening a repository would do with each configured plugin, without
+// loading any of them.
+struct PluginStatus {
+  std::filesystem::path path;
+  PluginSource source = PluginSource::global;
+  std::string digest;
+  bool trusted = false;
+  std::string error;
 };
 
 class PluginHost {
@@ -99,9 +120,37 @@ private:
 [[nodiscard]] auto load_global_plugins(
     std::optional<std::filesystem::path> global_config_path = std::nullopt)
     -> liquid::result<ConfiguredPlugins>;
+// Plugins named by repository metadata load only when their SHA-256 digest is
+// in the user's trust store, which lives outside every repository. Plugins in
+// the user's global configuration load as configured.
 [[nodiscard]] auto load_configured_plugins(
     const std::filesystem::path &repository_path,
-    std::optional<std::filesystem::path> global_config_path = std::nullopt)
+    std::optional<std::filesystem::path> global_config_path = std::nullopt,
+    std::optional<std::filesystem::path> trust_store_path = std::nullopt)
     -> liquid::result<ConfiguredPlugins>;
+[[nodiscard]] auto inspect_configured_plugins(
+    const std::filesystem::path &repository_path,
+    std::optional<std::filesystem::path> global_config_path = std::nullopt,
+    std::optional<std::filesystem::path> trust_store_path = std::nullopt)
+    -> liquid::result<std::vector<PluginStatus>>;
+
+// The per-user trust store: one `sha256:<hex>` digest per line, optionally
+// followed by the path it was trusted from. Beside the user settings file.
+[[nodiscard]] auto plugin_trust_store_path() -> std::filesystem::path;
+[[nodiscard]] auto plugin_digest(const std::filesystem::path &shared_object)
+    -> liquid::result<std::string>;
+[[nodiscard]] auto trusted_plugin_digests(
+    const std::filesystem::path &trust_store_path)
+    -> liquid::result<std::vector<std::string>>;
+// Records the digest of the file at `shared_object` in the trust store and
+// returns it. This is the only way a repository-named plugin becomes loadable.
+[[nodiscard]] auto trust_plugin(const std::filesystem::path &shared_object,
+                                const std::filesystem::path &trust_store_path)
+    -> liquid::result<std::string>;
+// Records a digest the user has already seen and confirmed, with the path it
+// came from as a comment.
+[[nodiscard]] auto trust_plugin_digest(
+    std::string_view digest, const std::filesystem::path &origin,
+    const std::filesystem::path &trust_store_path) -> liquid::result<void>;
 
 } // namespace liquify

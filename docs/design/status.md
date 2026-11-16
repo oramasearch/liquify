@@ -124,7 +124,10 @@ Native plugins use liquid's versioned frontend C boundary to register graph quer
 and canonical-CBOR panels through checked static or configured dynamic loading. Plugin commands
 appear in the palette and data-only panels render below analysis results. The sample plugin
 proves all three registrations; load and panel failures remain local to their source
-([`../plugins/README.md`](../plugins/README.md)).
+([`../plugins/README.md`](../plugins/README.md)). Plugins named by repository metadata load only
+when the user has trusted their SHA-256 digest with `liquify plugin trust`, from a per-user trust
+store outside every repository; otherwise they are listed as not trusted and never loaded
+([liquify#71](https://github.com/oramasearch/liquify/issues/71)). Plugins still run in-process.
 
 ## Build, test and deploy
 

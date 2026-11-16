@@ -3,6 +3,7 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <memory>
 #include <print>
@@ -42,6 +43,12 @@ void usage() {
       "                              render a fixed headless UI state");
   std::println(
       "  liquify --command NAME      run a registered headless command");
+  std::println("  liquify plugin trust FILE [--yes] [--trust-store FILE]");
+  std::println("                              trust one native plugin by its "
+               "SHA-256 digest");
+  std::println("  liquify plugin list REPOSITORY [--trust-store FILE]");
+  std::println("                              show which plugins a repository "
+               "names and whether they load");
   std::println("  liquify docs commands|keymap [--out FILE|--check FILE]");
   std::println(
       "                              generate or verify command documentation");
@@ -213,6 +220,92 @@ auto command_docs(int argc, char **argv, std::string_view topic) -> int {
   std::println(stderr, "liquify: docs {} accepts --out or --check", topic);
   return 2;
 }
+auto plugin_command(int argc, char **argv) -> int {
+  if (argc < 4) {
+    std::println(stderr, "liquify: plugin trust FILE | plugin list REPOSITORY");
+    return 2;
+  }
+  const auto action = std::string_view(argv[2]);
+  const auto target = std::filesystem::path(argv[3]);
+  auto store = liquify::plugin_trust_store_path();
+  auto confirmed = false;
+  for (int i = 4; i < argc; ++i) {
+    const auto option = std::string_view(argv[i]);
+    if (option == "--trust-store" && i + 1 < argc) {
+      store = argv[++i];
+    } else if (option == "--yes" && action == "trust") {
+      confirmed = true;
+    } else {
+      std::println(stderr, "liquify: unknown plugin option: {}", option);
+      return 2;
+    }
+  }
+  if (action == "list") {
+    auto statuses = liquify::inspect_configured_plugins(target, std::nullopt,
+                                                        store);
+    if (!statuses) {
+      std::println(stderr, "liquify: {}: {}", statuses.error().message,
+                   statuses.error().context);
+      return 1;
+    }
+    std::println("source\tstatus\tdigest\tpath");
+    for (const auto &status : *statuses) {
+      const auto *source =
+          status.source == liquify::PluginSource::global ? "global"
+                                                         : "repository";
+      const auto state = !status.error.empty() ? status.error
+                         : status.trusted       ? std::string("trusted")
+                                                : std::string("not trusted");
+      std::println("{}\t{}\t{}\t{}", source, state,
+                   status.digest.empty() ? "-" : status.digest,
+                   status.path.generic_string());
+    }
+    return 0;
+  }
+  if (action != "trust") {
+    std::println(stderr, "liquify: unknown plugin action: {}", action);
+    return 2;
+  }
+  auto code = std::error_code{};
+  auto origin = std::filesystem::absolute(target, code).lexically_normal();
+  if (code) {
+    origin = target;
+  }
+  auto digest = liquify::plugin_digest(origin);
+  if (!digest) {
+    std::println(stderr, "liquify: {}: {}", digest.error().message,
+                 digest.error().context);
+    return 1;
+  }
+  // The prompt is printed from the file the user named on the command line;
+  // nothing a repository contains can answer it.
+  std::println("plugin:  {}", origin.filename().generic_string());
+  std::println("origin:  {}", origin.parent_path().generic_string());
+  std::println("digest:  {}", *digest);
+  std::println("This is native code. Once trusted, any repository that names a "
+               "file with exactly these bytes loads it into liquify, with "
+               "your files, network and signing identity.");
+  if (!confirmed) {
+    std::print("Trust this plugin? Type \"yes\" to confirm: ");
+    std::fflush(stdout);
+    auto answer = std::string{};
+    if (!std::getline(std::cin, answer) ||
+        (answer != "yes" && answer != "yes\r")) {
+      std::println("");
+      std::println(stderr, "liquify: plugin not trusted");
+      return 1;
+    }
+  }
+  // Record the digest that was shown, not a fresh read of the file.
+  auto trusted = liquify::trust_plugin_digest(*digest, origin, store);
+  if (!trusted) {
+    std::println(stderr, "liquify: {}: {}", trusted.error().message,
+                 trusted.error().context);
+    return 1;
+  }
+  std::println("trusted {} in {}", *digest, store.generic_string());
+  return 0;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -230,6 +323,9 @@ int main(int argc, char **argv) {
       return 2;
     }
     return run_named_command(argv[2]);
+  }
+  if (argc > 1 && std::string_view(argv[1]) == "plugin") {
+    return plugin_command(argc, argv);
   }
   if (argc > 1 && std::string_view(argv[1]) == "docs") {
     if (argc < 3 || (std::string_view(argv[2]) != "commands" &&
