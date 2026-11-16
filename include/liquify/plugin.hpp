@@ -137,6 +137,10 @@ private:
 // The per-user trust store: one `sha256:<hex>` digest per line, optionally
 // followed by the path it was trusted from. Beside the user settings file.
 [[nodiscard]] auto plugin_trust_store_path() -> std::filesystem::path;
+// The user's global plugin list (liquify#72): its own file, `plugins` beside the user settings
+// file, in `config.liquify.plugins=PATH[,PATH...]` lines. It is not the settings file, whose
+// `liquify settings { ... }` syntax the plugin reader cannot parse, and vice versa.
+[[nodiscard]] auto global_plugin_config_path() -> std::filesystem::path;
 [[nodiscard]] auto plugin_digest(const std::filesystem::path &shared_object)
     -> liquid::result<std::string>;
 [[nodiscard]] auto trusted_plugin_digests(

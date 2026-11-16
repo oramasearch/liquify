@@ -18,6 +18,7 @@
 #include "liquid/runtime.hpp"
 #include "liquify/interactive_analysis.hpp"
 #include "liquify/plugin.hpp"
+#include "liquify/settings.hpp"
 #include "sample_plugin.hpp"
 
 namespace {
@@ -175,6 +176,20 @@ void exercise_sample(const std::shared_ptr<liquify::PluginHost> &host,
 }
 
 } // namespace
+
+// liquify#72: the global plugin list and the settings file are two files in two formats, so
+// saving settings never breaks plugin loading and a plugin line never breaks the settings parse.
+TEST(PluginConfiguration, GlobalPluginsHaveTheirOwnFileApartFromSettings) {
+  const auto plugins = liquify::global_plugin_config_path();
+  const auto settings = liquify::user_settings_path();
+  if (settings.empty()) {
+    GTEST_SKIP() << "no user settings directory in this environment";
+  }
+  EXPECT_NE(plugins, settings);
+  EXPECT_EQ(plugins.parent_path(), settings.parent_path());
+  EXPECT_EQ(plugins.filename(), "plugins");
+  EXPECT_NE(plugins, liquify::plugin_trust_store_path());
+}
 
 TEST(PluginHost, RegistersTheSampleStatically) {
   auto location = TemporaryDirectory("liquify-plugin-static");
