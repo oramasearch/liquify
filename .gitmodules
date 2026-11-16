@@ -9,7 +9,7 @@
 	url = https://github.com/tree-sitter/tree-sitter-cpp.git
 [submodule "modules/corosio"]
 	path = modules/corosio
-	url = git@github.com:oramasearch/corosio.git
+	url = https://github.com/oramasearch/corosio.git
 [submodule "modules/http"]
 	path = modules/http
-	url = git@github.com:oramasearch/http.git
+	url = https://github.com/oramasearch/http.git

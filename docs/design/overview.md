@@ -1,8 +1,8 @@
 # What liquify is
 
 liquify is the IDE for liquid: a native, cross-platform editor, one binary, built on libliquid's
-graph. liquid is the tool. lake is where it collects. liquify is where you work. It is private for
-now and open source eventually, like liquid.
+graph. liquid is the tool. lake is where it collects. liquify is where you work. It is open source
+under the MIT licence, like liquid.
 
 ## Why a native editor
 

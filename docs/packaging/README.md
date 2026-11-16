@@ -4,9 +4,8 @@
 > is commented out (no hosted CI in oramasearch repositories). Builds, installers and their checks run
 > locally; tests run when a release is cut. What follows describes the workflows as they were.
 
-Liquify packages the existing release executable directly until liquid issues
-[#76](https://github.com/oramasearch/liquid/issues/76) and
-[#77](https://github.com/oramasearch/liquid/issues/77) provide platform projection and signing.
+Liquify packages the existing release executable directly until liquid provides platform
+projection and platform signing.
 The scripts under [`packaging/`](../../packaging/) are shared by pull-request CI and the tag release
 workflow, so a published installer has already followed the same build and verification path.
 Each artifact carries the adjacent `frontends/liquid-frontend-tree-sitter` module used by the
@@ -116,8 +115,8 @@ $package = Get-AppxPackage OramaSearch.Liquify
 
 ## Projection follow-up
 
-Part B remains deferred while liquid #76 and #77 are open. Once both land, a dedicated follow-up
-issue will move to the liquid revision that carries them, build liquify under `liquid wrap`, replace the platform scripts
+Part B remains deferred until liquid provides platform projection and platform signing. Once
+both land, a follow-up will move to the liquid revision that carries them, build liquify under `liquid wrap`, replace the platform scripts
 with `liquid project macos-pkg|msix|appimage` and `liquid sign macos|windows`, and retain this tag
 release workflow. Those projected artifacts will carry liquid provenance. Auto-update, app-store
-submission, Snap, and another installer writer remain outside this issue.
+submission, Snap, and another installer writer remain out of scope.
