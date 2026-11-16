@@ -97,9 +97,15 @@ private:
   void draw_line_attribution(std::size_t line);
   void draw_status_bar();
   void draw_welcome();
-  enum class ButtonKind : std::uint8_t { primary, secondary, quiet, destructive };
-  auto kit_button(const char *label, ButtonKind kind, float width = 0.0F,
-                  float height = 0.0F) -> bool;
+  // The one button of the window, lake's kit: primary (filled action), secondary (action text on
+  // an interactive hairline, filled on hover), quiet (no border, for toolbars), destructive
+  // (filled danger) and toggle (a mode that is on). Regular buttons are lake's 32-pixel control;
+  // compact ones (24) sit inside table rows and inline lines. Padding comes from the font, so the
+  // label is always centred, and the width follows the label unless one is given.
+  enum class ButtonKind : std::uint8_t { primary, secondary, quiet, destructive, toggle };
+  enum class ButtonSize : std::uint8_t { regular, compact };
+  auto kit_button(const char *label, ButtonKind kind,
+                  ButtonSize size = ButtonSize::regular, float width = 0.0F) -> bool;
   auto checkbox(const char *label, bool *value) -> bool;
   void field_label(const char *label);
   auto text_field(const char *label, std::string *value, const char *hint = nullptr) -> bool;

@@ -360,7 +360,17 @@ void identifier_detail(const char *label, const std::string &value) {
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
   const auto button = compact_identifier(value) + "##copy";
-  if (ImGui::SmallButton(button.c_str())) {
+  // The same compact quiet button as App::kit_button: no frame until hovered, the label centred
+  // in lake's 24-pixel inline control.
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+  ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                      ImVec2(design::space2,
+                             std::max(0.0F, (design::space6 - ImGui::GetFontSize()) * 0.5F)));
+  const auto copied = ImGui::Button(button.c_str());
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(2);
+  if (copied) {
     SDL_SetClipboardText(value.c_str());
   }
   if (ImGui::IsItemHovered()) {
@@ -1771,7 +1781,7 @@ void App::draw_request_review_dialog() {
   }
   frame_layout_.controls["request-review/submit"] = item_rectangle();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
@@ -4290,12 +4300,12 @@ void App::draw_review_panel() {
     return;
   }
   const auto snapshot = review_->snapshot();
-  if (ImGui::SmallButton("Request review")) {
+  if (kit_button("Request review", ButtonKind::secondary, ButtonSize::compact)) {
     open_request_review();
   }
   frame_layout_.controls["review/request"] = item_rectangle();
   ImGui::SameLine();
-  if (ImGui::SmallButton("Refresh reviews")) {
+  if (kit_button("Refresh reviews", ButtonKind::secondary, ButtonSize::compact)) {
     if (snapshot.review.selected) {
       review_->request_refresh();
     } else {
@@ -4343,15 +4353,15 @@ void App::draw_review_panel() {
   ImGui::TextWrapped(
       "Review %s: %s", snapshot.review.selected->id.c_str(),
       std::string(review_state_name(snapshot.review.selected->state)).c_str());
-  if (ImGui::SmallButton("New comment")) {
+  if (kit_button("New comment", ButtonKind::secondary, ButtonSize::compact)) {
     begin_review_comment();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Approve")) {
+  if (kit_button("Approve", ButtonKind::secondary, ButtonSize::compact)) {
     review_->request_approve();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Request changes")) {
+  if (kit_button("Request changes", ButtonKind::secondary, ButtonSize::compact)) {
     review_->request_changes();
   }
 
@@ -4383,7 +4393,7 @@ void App::draw_review_comment_popup() {
   ImGui::InputTextMultiline("##review-comment-body", &review_comment_body_,
                             ImVec2(520.0F, 140.0F));
   ImGui::BeginDisabled(review_comment_body_.empty());
-  if (ImGui::Button("Post comment")) {
+  if (kit_button("Post comment", ButtonKind::primary)) {
     submit_review_comment();
     if (review_comment_body_.empty()) {
       ImGui::CloseCurrentPopup();
@@ -4391,7 +4401,7 @@ void App::draw_review_comment_popup() {
   }
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel")) {
+  if (kit_button("Cancel", ButtonKind::secondary)) {
     review_comment_body_.clear();
     ImGui::CloseCurrentPopup();
   }
@@ -4550,7 +4560,7 @@ void App::draw_navigation_popups() {
         file_type_hint(path.kind);
       }
     }
-    if (ImGui::Button("Close")) {
+    if (kit_button("Close", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     frame_layout_.controls["quick-open/close"] = item_rectangle();
@@ -4586,7 +4596,7 @@ void App::draw_navigation_popups() {
         }
       }
     }
-    if (ImGui::Button("Close")) {
+    if (kit_button("Close", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -4612,7 +4622,7 @@ void App::draw_navigation_popups() {
         ImGui::CloseCurrentPopup();
       }
     }
-    if (ImGui::Button("Close")) {
+    if (kit_button("Close", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -4631,14 +4641,14 @@ void App::draw_repository_action_popup() {
     text_field("Destination", &repository_action_target_);
     ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
                          repository_->mutation_running());
-    if (ImGui::Button("Apply")) {
+    if (kit_button("Apply", ButtonKind::primary)) {
       repository_->request_move(repository_action_source_,
                                 repository_action_target_);
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
+    if (kit_button("Cancel", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -4654,13 +4664,13 @@ void App::draw_repository_action_popup() {
     text_field("Path", &repository_action_target_);
     ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
                          repository_->mutation_running());
-    if (ImGui::Button("Create")) {
+    if (kit_button("Create", ButtonKind::primary)) {
       repository_->request_new_file(repository_action_target_);
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
+    if (kit_button("Cancel", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -4723,22 +4733,22 @@ void App::draw_assistant() {
   const auto snapshot = assistant_->snapshot();
   ImGui::Text("Assistant: %s", snapshot.status.c_str());
   ImGui::SameLine();
-  if (ImGui::SmallButton("What Will Be Sent")) {
+  if (kit_button("What Will Be Sent", ButtonKind::secondary, ButtonSize::compact)) {
     request_assistant_context(std::nullopt);
   }
   ImGui::InputTextWithHint("##assistant-prompt",
                            "Ask about the selection or current definition",
                            &assistant_prompt_);
   ImGui::BeginDisabled(!snapshot.enabled || snapshot.running);
-  if (ImGui::Button("Ask")) {
+  if (kit_button("Ask", ButtonKind::primary)) {
     request_assistant_context(AssistantAction::ask);
   }
   ImGui::SameLine();
-  if (ImGui::Button("Explain diagnostic")) {
+  if (kit_button("Explain diagnostic", ButtonKind::secondary)) {
     request_assistant_context(AssistantAction::explain_diagnostic);
   }
   ImGui::SameLine();
-  if (ImGui::Button("Propose edit")) {
+  if (kit_button("Propose edit", ButtonKind::secondary)) {
     request_assistant_context(AssistantAction::propose_edit);
   }
   ImGui::EndDisabled();
@@ -4761,11 +4771,11 @@ void App::draw_assistant() {
     ImGui::Text("Proposed replacement for bytes %u..%u",
                 snapshot.proposal->start_byte, snapshot.proposal->old_end_byte);
     ImGui::TextWrapped("%s", snapshot.proposal->text.c_str());
-    if (ImGui::Button("Accept edit")) {
+    if (kit_button("Accept edit", ButtonKind::primary)) {
       accept_assistant_edit();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reject edit")) {
+    if (kit_button("Reject edit", ButtonKind::secondary)) {
       assistant_->reject();
     }
   }
@@ -4781,7 +4791,7 @@ void App::draw_assistant() {
     ImGui::InputTextMultiline("##context-preview", &context_preview_,
                               ImVec2(720.0F, 420.0F),
                               ImGuiInputTextFlags_ReadOnly);
-    if (ImGui::Button("Close")) {
+    if (kit_button("Close", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -4974,11 +4984,21 @@ void App::draw_settings() {
          group == SettingsGroup::keymap);
     const auto flags = collapsed_for_proof ? ImGuiTreeNodeFlags_None
                                            : ImGuiTreeNodeFlags_DefaultOpen;
+    // Section headers sit on the neutral layer role, as lake's panel headers do; the selected
+    // blue is kept for selection.
+    const auto header_palette =
+        effective_palette(applied_dark_theme_, applied_high_contrast_);
+    ImGui::PushStyleColor(ImGuiCol_Header, imgui_color(header_palette.layer));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, imgui_color(header_palette.layer_hover));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, imgui_color(header_palette.layer_hover));
     const auto open =
         ImGui::CollapsingHeader(settings_group_name(group).data(), flags);
+    ImGui::PopStyleColor(3);
     if (open) {
-      ImGui::SameLine(ImGui::GetContentRegionAvail().x - 52.0F);
-      if (ImGui::SmallButton("Reset")) {
+      const auto reset_width =
+          ImGui::CalcTextSize("Reset").x + design::space2 * 2.0F;
+      ImGui::SameLine(ImGui::GetContentRegionAvail().x - reset_width);
+      if (kit_button("Reset", ButtonKind::quiet, ButtonSize::compact)) {
         reset_settings(group);
       }
     }
@@ -5080,7 +5100,7 @@ void App::draw_settings() {
                                &provider_token_input_,
                                ImGuiInputTextFlags_Password);
       ImGui::SameLine();
-      if (ImGui::Button("Store token") && !provider_token_input_.empty()) {
+      if (kit_button("Store token", ButtonKind::primary) && !provider_token_input_.empty()) {
         const auto stored = store_anthropic_api_key(provider_token_input_);
         std::ranges::fill(provider_token_input_, '\0');
         provider_token_input_.clear();
@@ -5105,7 +5125,7 @@ void App::draw_settings() {
       ImGui::PushID(static_cast<int>(index));
       ImGui::Text("%s", account.name.c_str());
       ImGui::SameLine();
-      if (ImGui::SmallButton("Remove")) {
+      if (kit_button("Remove", ButtonKind::secondary, ButtonSize::compact)) {
         remove = index;
       }
       if (screenshot_mode()) {
@@ -5125,7 +5145,7 @@ void App::draw_settings() {
                                  &lake_token_input_,
                                  ImGuiInputTextFlags_Password);
         ImGui::SameLine();
-        if (ImGui::Button("Store token") && !lake_token_input_.empty()) {
+        if (kit_button("Store token", ButtonKind::primary) && !lake_token_input_.empty()) {
           const auto stored =
               store_lake_account_token(account.name, lake_token_input_);
           std::ranges::fill(lake_token_input_, '\0');
@@ -5150,7 +5170,7 @@ void App::draw_settings() {
       ImGui::InputTextWithHint("##lake-url", "https://lake.example",
                                &lake_account_url_);
       ImGui::SameLine();
-      if (ImGui::Button("Add") && !lake_account_name_.empty() &&
+      if (kit_button("Add", ButtonKind::primary) && !lake_account_name_.empty() &&
           !lake_account_url_.empty()) {
         settings_.lake_accounts.push_back(
             {lake_account_name_, lake_account_url_});
@@ -5172,7 +5192,7 @@ void App::draw_settings() {
   end_group();
 
   ImGui::EndChild();
-  if (ImGui::Button("Close")) {
+  if (kit_button("Close", ButtonKind::secondary)) {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
@@ -5197,9 +5217,9 @@ void App::draw_structural_editing() {
       ImGui::BulletText("replace function_definition bytes 3812..4059");
       ImGui::TextDisabled("1 file selected · fingerprint verified");
       ImGui::Separator();
-      ImGui::Button("Accept selected file");
+      kit_button("Accept selected file", ButtonKind::primary);
       ImGui::SameLine();
-      ImGui::Button("Dismiss");
+      kit_button("Dismiss", ButtonKind::secondary);
     }
     ImGui::End();
     return;
@@ -5210,7 +5230,7 @@ void App::draw_structural_editing() {
   }
   if (begin_dialog("Rename Symbol", ImGuiWindowFlags_AlwaysAutoResize)) {
     text_field("New name", &structural_name_);
-    if (ImGui::Button("Preview") && editor_graph_ && editor_) {
+    if (kit_button("Preview", ButtonKind::primary) && editor_graph_ && editor_) {
       const auto byte = editor_->byte_offset(editor_->cursor());
       if (byte <= std::numeric_limits<std::uint32_t>::max()) {
         editor_graph_->request_rename(
@@ -5221,7 +5241,7 @@ void App::draw_structural_editing() {
       }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
+    if (kit_button("Cancel", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -5233,7 +5253,7 @@ void App::draw_structural_editing() {
   }
   if (begin_dialog("Extract Function", ImGuiWindowFlags_AlwaysAutoResize)) {
     text_field("Function name", &structural_name_);
-    if (ImGui::Button("Preview") && editor_graph_ && editor_) {
+    if (kit_button("Preview", ButtonKind::primary) && editor_graph_ && editor_) {
       if (const auto selection = editor_->selection()) {
         const auto range = SourceRange{
             static_cast<std::uint32_t>(editor_->byte_offset(selection->begin)),
@@ -5250,7 +5270,7 @@ void App::draw_structural_editing() {
       }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
+    if (kit_button("Cancel", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -5326,16 +5346,16 @@ void App::draw_structural_panel() {
     }
   }
   if (!structural_preview_.empty()) {
-    if (ImGui::Button("Accept selected files")) {
+    if (kit_button("Accept selected files", ButtonKind::primary)) {
       apply_structural_preview(false);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Accept all")) {
+    if (kit_button("Accept all", ButtonKind::secondary)) {
       apply_structural_preview(true);
     }
   }
   ImGui::SameLine();
-  if (ImGui::Button("Dismiss")) {
+  if (kit_button("Dismiss", ButtonKind::secondary)) {
     structural_preview_open_ = false;
     structural_preview_.clear();
   }
@@ -5667,7 +5687,7 @@ void App::draw_plugin_panels() {
 
 void App::draw_editor_modes() {
   const auto mode = editing_mode_name(editor_->mode());
-  if (ImGui::Button(mode.data())) {
+  if (kit_button(mode.data(), ButtonKind::quiet)) {
     ImGui::OpenPopup("editor-mode");
   }
   if (ImGui::BeginPopup("editor-mode")) {
@@ -5683,7 +5703,7 @@ void App::draw_editor_modes() {
   }
   ImGui::SameLine();
   ImGui::BeginDisabled(!analysis_buffer_open_);
-  if (ImGui::Button("Structural")) {
+  if (kit_button("Structural", ButtonKind::quiet)) {
     ImGui::OpenPopup("structural-actions");
   }
   if (ImGui::BeginPopup("structural-actions")) {
@@ -5707,7 +5727,8 @@ void App::draw_editor_modes() {
   ImGui::EndDisabled();
   if (assistant_) {
     ImGui::SameLine();
-    if (ImGui::Button(assistant_->snapshot().enabled ? "AI: on" : "AI: off")) {
+    if (kit_button(assistant_->snapshot().enabled ? "AI on" : "AI off",
+                   assistant_->snapshot().enabled ? ButtonKind::toggle : ButtonKind::quiet)) {
       toggle_assistant();
     }
   }
@@ -5724,10 +5745,10 @@ void App::draw_editor_toolbar() {
     ImGui::SameLine(0.0F, design::space3);
     const auto at = ImGui::GetCursorScreenPos();
     ImGui::GetWindowDrawList()->AddLine(
-        ImVec2(at.x, at.y + design::space1),
-        ImVec2(at.x, at.y + ImGui::GetFrameHeight() - design::space1),
+        ImVec2(at.x, at.y + design::space2),
+        ImVec2(at.x, at.y + design::control_sm - design::space2),
         packed_color(palette.border_subtle), 1.0F);
-    ImGui::Dummy(ImVec2(1.0F, ImGui::GetFrameHeight()));
+    ImGui::Dummy(ImVec2(1.0F, design::control_sm));
     ImGui::SameLine(0.0F, design::space3);
   };
   const auto tooltip = [](const char *text) {
@@ -5941,7 +5962,7 @@ void App::draw_editor() {
     const auto &breadcrumb = path_breadcrumbs[index];
     const auto label =
         breadcrumb.label + "##breadcrumb-" + std::to_string(index);
-    if (ImGui::SmallButton(label.c_str()) && !breadcrumb.symbol &&
+    if (kit_button(label.c_str(), ButtonKind::quiet, ButtonSize::compact) && !breadcrumb.symbol &&
         breadcrumb.path == std::filesystem::path(path)) {
       editor_focused_ = true;
     }
@@ -5960,7 +5981,7 @@ void App::draw_editor() {
     ImGui::TextDisabled("read-only text diff");
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("...##file-actions")) {
+  if (kit_button("...##file-actions", ButtonKind::quiet, ButtonSize::compact)) {
     ImGui::OpenPopup("file-actions");
   }
   if (ImGui::IsItemHovered()) {
@@ -6014,7 +6035,7 @@ void App::draw_editor() {
     ImGui::SameLine();
     ImGui::TextDisabled("%zu matches", buffer_matches_.size());
     ImGui::SameLine();
-    if (ImGui::Button("Next") && !buffer_matches_.empty()) {
+    if (kit_button("Next", ButtonKind::secondary) && !buffer_matches_.empty()) {
       const auto &match =
           buffer_matches_[find_match_index_++ % buffer_matches_.size()];
       editor_->set_cursor(match.range.begin);
@@ -6022,7 +6043,7 @@ void App::draw_editor() {
       ensure_cursor_visible();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Replace all") && !review_diff_open_) {
+    if (kit_button("Replace all", ButtonKind::secondary) && !review_diff_open_) {
       const auto change =
           editor_->replace_all(find_query_, replace_query_, find_options_);
       if (change) {
@@ -6032,7 +6053,7 @@ void App::draw_editor() {
       }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Close")) {
+    if (kit_button("Close", ButtonKind::secondary)) {
       find_open_ = false;
     }
   }
@@ -6267,15 +6288,15 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
     ImGui::EndChild();
     return;
   }
-  if (ImGui::SmallButton("Build repository")) {
+  if (kit_button("Build repository", ButtonKind::secondary, ButtonSize::compact)) {
     request_build();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Run tests")) {
+  if (kit_button("Run tests", ButtonKind::secondary, ButtonSize::compact)) {
     request_tests();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Push")) {
+  if (kit_button("Push", ButtonKind::secondary, ButtonSize::compact)) {
     request_push();
   }
   if (snapshot.build_error) {
@@ -6297,7 +6318,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
     ImGui::Text("%s: %s", opaque ? "Build action" : action.identity.c_str(),
                 build_action_state_name(action.state).data());
     ImGui::SameLine();
-    if (ImGui::SmallButton("Details")) {
+    if (kit_button("Details", ButtonKind::secondary, ButtonSize::compact)) {
       ImGui::OpenPopup("action-details");
     }
     if (ImGui::BeginPopup("action-details")) {
@@ -6326,7 +6347,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
     ImGui::Text("Tests (%zu)", snapshot.tests.size());
     for (const auto &test : snapshot.tests) {
       ImGui::PushID(test.name.c_str());
-      if (ImGui::SmallButton("Run")) {
+      if (kit_button("Run", ButtonKind::secondary, ButtonSize::compact)) {
         request_tests(test.name);
       }
       ImGui::SameLine();
@@ -6389,13 +6410,27 @@ void App::draw_activity_bar() {
                            shell_state_.sidebar_visible) &&
                           (placement != PanelPlacement::bottom ||
                            shell_state_.bottom_panel_visible);
+    // lake's navigation: no frame, a light fill on hover, and the current item on the selected
+    // fill with an action-coloured bar on its left edge.
+    const auto palette =
+        effective_palette(applied_dark_theme_, applied_high_contrast_);
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          imgui_color(selected ? palette.selected
+                                               : design::Rgba{0.0F, 0.0F, 0.0F, 0.0F}));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                          imgui_color(selected ? palette.selected : palette.layer_hover));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+    const auto activated = ImGui::Button(
+        ("##activity-" + std::string(panel_id_name(id))).c_str(),
+        ImVec2(activity_bar_width - design::space2, design::control_md));
+    ImGui::PopStyleColor(3);
     if (selected) {
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_Header));
+      const auto min = ImGui::GetItemRectMin();
+      const auto max = ImGui::GetItemRectMax();
+      ImGui::GetWindowDrawList()->AddRectFilled(min, ImVec2(min.x + 2.0F, max.y),
+                                                packed_color(palette.action));
     }
-    if (ImGui::Button(
-            ("##activity-" + std::string(panel_id_name(id))).c_str(),
-            ImVec2(activity_bar_width - design::space2, design::control_md))) {
+    if (activated) {
       if (selected && placement == PanelPlacement::sidebar) {
         shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
       } else if (selected && placement == PanelPlacement::bottom) {
@@ -6412,9 +6447,6 @@ void App::draw_activity_bar() {
     }
     item_icon(panel_icon(id),
               (activity_bar_width - design::space2 - 16.0F) * 0.5F);
-    if (selected) {
-      ImGui::PopStyleColor();
-    }
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("%s", descriptor.title.data());
     }
@@ -6467,7 +6499,7 @@ void App::draw_panel_header(PanelId id) {
                           "/title");
   item_icon(panel_icon(id));
   ImGui::SameLine();
-  if (ImGui::SmallButton("...")) {
+  if (kit_button("...", ButtonKind::quiet, ButtonSize::compact)) {
     ImGui::OpenPopup("panel-placement");
   }
   if (ImGui::BeginPopup("panel-placement")) {
@@ -6600,9 +6632,9 @@ void App::draw_panel(PanelId id) {
       ImGui::Selectable("src/app.cpp:584  Active");
       ImGui::Selectable("docs/ui/app-shell.md:12  Moved");
       ImGui::Spacing();
-      ImGui::Button("Approve");
+      kit_button("Approve", ButtonKind::primary);
       ImGui::SameLine();
-      ImGui::Button("Request changes");
+      kit_button("Request changes", ButtonKind::secondary);
     } else {
       draw_review_panel();
     }
@@ -6624,11 +6656,11 @@ void App::draw_panel(PanelId id) {
       ImGui::InputTextWithHint("##demo-assistant",
                                "Ask about the current definition",
                                &assistant_prompt_);
-      ImGui::Button("Ask");
+      kit_button("Ask", ButtonKind::primary);
       ImGui::SameLine();
-      ImGui::Button("Explain diagnostic");
+      kit_button("Explain diagnostic", ButtonKind::secondary);
       ImGui::SameLine();
-      ImGui::Button("Propose edit");
+      kit_button("Propose edit", ButtonKind::secondary);
     } else if (assistant_) {
       draw_assistant();
     } else {
@@ -6804,13 +6836,30 @@ void App::draw_bottom_panel() {
       continue;
     }
     const auto label = icon_label(panel_label(id), 0.0F);
-    const auto width = ImGui::CalcTextSize(label.c_str()).x + 16.0F;
+    const auto width = ImGui::CalcTextSize(label.c_str()).x + design::space4;
     if (!first && ImGui::GetContentRegionAvail().x > width) {
-      ImGui::SameLine();
+      ImGui::SameLine(0.0F, design::space1);
     }
     first = false;
-    if (ImGui::Selectable(label.c_str(), active == id, 0,
-                          ImVec2(width, 24.0F))) {
+    // lake's tabs: the label centred on the row with its icon, the selected one marked by an
+    // action-coloured underline instead of a filled box.
+    const auto palette =
+        effective_palette(applied_dark_theme_, applied_high_contrast_);
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0F, 0.5F));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(active == id ? palette.text_primary
+                                                                  : palette.text_secondary));
+    const auto clicked = ImGui::Selectable(label.c_str(), active == id, 0,
+                                           ImVec2(width, design::control_sm));
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar();
+    if (active == id) {
+      const auto min = ImGui::GetItemRectMin();
+      const auto max = ImGui::GetItemRectMax();
+      ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(min.x, max.y - 2.0F), max,
+                                                packed_color(palette.action));
+    }
+    if (clicked) {
       panels_.focus(id);
       panels_.clear_focus_request();
       persist_shell_state();
@@ -6856,7 +6905,7 @@ void App::draw_floating_panels() {
     const auto title =
         panel_label(id) + "###floating-" + std::string(panel_id_name(id));
     if (ImGui::Begin(title.c_str(), &open, ImGuiWindowFlags_NoSavedSettings)) {
-      if (ImGui::SmallButton("...##floating-placement")) {
+      if (kit_button("...##floating-placement", ButtonKind::quiet, ButtonSize::compact)) {
         ImGui::OpenPopup("floating-placement");
       }
       if (ImGui::BeginPopup("floating-placement")) {
@@ -7006,7 +7055,7 @@ void App::draw_build_setup_dialog() {
   frame_layout_.controls["build-setup/submit"] = item_rectangle();
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
@@ -7068,7 +7117,7 @@ void App::draw_set_lake_dialog() {
   frame_layout_.controls["set-lake/submit"] = item_rectangle();
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
@@ -7076,34 +7125,77 @@ void App::draw_set_lake_dialog() {
 
 // The controls kit (liquify#101), mirroring lake's: button kinds, a checkbox that shows its
 // state, labels above full-width fields, and sliders with one handle shape.
-auto App::kit_button(const char *label, ButtonKind kind, float width,
-                     float height) -> bool {
-  const auto size = ImVec2(width, height);
+auto App::kit_button(const char *label, ButtonKind kind, ButtonSize size,
+                     float width) -> bool {
   const auto palette =
       effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto compact = size == ButtonSize::compact;
+  const auto height = compact ? design::space6 : design::control_sm;
+  const auto padding =
+      ImVec2(compact ? design::space2 : design::space3,
+             std::max(0.0F, (height - ImGui::GetFontSize()) * 0.5F));
+  // ImGui colours a button's text once, before it knows the button is hovered. lake turns a
+  // secondary button's text white on its filled hover, so the hover is worked out first from the
+  // rectangle the button will occupy.
+  const auto label_size = ImGui::CalcTextSize(label, nullptr, true);
+  const auto extent =
+      ImVec2(width > 0.0F ? width : label_size.x + padding.x * 2.0F, height);
+  const auto origin = ImGui::GetCursorScreenPos();
+  const auto hovered =
+      (ImGui::GetCurrentContext()->CurrentItemFlags & ImGuiItemFlags_Disabled) == 0 &&
+      ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
+                             ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+      ImGui::IsMouseHoveringRect(origin, ImVec2(origin.x + extent.x, origin.y + extent.y));
+
+  const auto clear = design::Rgba{0.0F, 0.0F, 0.0F, 0.0F};
+  const auto white = design::Rgba{1.0F, 1.0F, 1.0F, 1.0F};
   auto pushed = 0;
   const auto push = [&pushed](ImGuiCol slot, design::Rgba color) {
     ImGui::PushStyleColor(slot, imgui_color(color));
     ++pushed;
   };
-  if (kind == ButtonKind::primary) {
+  switch (kind) {
+  case ButtonKind::primary:
     push(ImGuiCol_Button, palette.action);
     push(ImGuiCol_ButtonHovered, palette.action_hover);
     push(ImGuiCol_ButtonActive, palette.action_pressed);
-    push(ImGuiCol_Text, design::Rgba{1.0F, 1.0F, 1.0F, 1.0F});
     push(ImGuiCol_Border, palette.action);
-  } else if (kind == ButtonKind::destructive) {
-    push(ImGuiCol_Button, palette.surface);
-    push(ImGuiCol_ButtonHovered, palette.danger_soft);
-    push(ImGuiCol_Text, palette.danger);
+    push(ImGuiCol_Text, white);
+    break;
+  case ButtonKind::secondary:
+    push(ImGuiCol_Button, clear);
+    push(ImGuiCol_ButtonHovered, palette.action_hover);
+    push(ImGuiCol_ButtonActive, palette.action_pressed);
+    push(ImGuiCol_Border, hovered ? palette.action_hover : palette.border_interactive);
+    push(ImGuiCol_Text, hovered ? white : palette.action);
+    break;
+  case ButtonKind::quiet:
+    push(ImGuiCol_Button, clear);
+    push(ImGuiCol_ButtonHovered, palette.layer_hover);
+    push(ImGuiCol_ButtonActive, palette.selected);
+    push(ImGuiCol_Border, clear);
+    push(ImGuiCol_Text, hovered ? palette.text_primary : palette.text_secondary);
+    break;
+  case ButtonKind::destructive:
+    push(ImGuiCol_Button, palette.danger);
+    push(ImGuiCol_ButtonHovered, palette.danger);
+    push(ImGuiCol_ButtonActive, palette.danger);
     push(ImGuiCol_Border, palette.danger);
-  } else if (kind == ButtonKind::quiet) {
-    push(ImGuiCol_Button, design::Rgba{0.0F, 0.0F, 0.0F, 0.0F});
-    push(ImGuiCol_Border, design::Rgba{0.0F, 0.0F, 0.0F, 0.0F});
-  } else {
-    push(ImGuiCol_Border, palette.border_strong);
+    push(ImGuiCol_Text, white);
+    break;
+  case ButtonKind::toggle:
+    push(ImGuiCol_Button, palette.action_soft);
+    push(ImGuiCol_ButtonHovered, palette.action_soft);
+    push(ImGuiCol_ButtonActive, palette.selected);
+    push(ImGuiCol_Border, palette.border_interactive);
+    push(ImGuiCol_Text, palette.action);
+    break;
   }
-  const auto pressed = ImGui::Button(label, size);
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, padding);
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, design::control_radius);
+  ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5F, 0.5F));
+  const auto pressed = ImGui::Button(label, extent);
+  ImGui::PopStyleVar(3);
   ImGui::PopStyleColor(pushed);
   return pressed;
 }
@@ -7206,7 +7298,7 @@ void App::draw_user_error(const UserError &failure, std::string_view id,
            ? static_cast<bool>(retry)
            : error_action_available(failure.action));
   if (has_action) {
-    if (ImGui::Button(failure.action_label.c_str())) {
+    if (kit_button(failure.action_label.c_str(), ButtonKind::secondary)) {
       if (failure.action == ErrorAction::retry) {
         retry();
       } else {
@@ -7220,7 +7312,7 @@ void App::draw_user_error(const UserError &failure, std::string_view id,
       ImGui::SameLine();
     }
     auto &open = error_details_open_[std::string(id)];
-    if (ImGui::SmallButton(open ? "Hide details" : "Details")) {
+    if (kit_button(open ? "Hide details" : "Details", ButtonKind::secondary, ButtonSize::compact)) {
       open = !open;
     }
     frame_layout_.controls[std::string(id) + "/details"] = item_rectangle();
@@ -7379,7 +7471,7 @@ void App::draw_cut_composer() {
   frame_layout_.controls["cut/submit"] = item_rectangle();
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     editor_focused_ = cut_restore_editor_focus_;
     ImGui::CloseCurrentPopup();
   }
@@ -7429,7 +7521,7 @@ void App::draw_clone_dialog() {
   frame_layout_.controls["clone/submit"] = item_rectangle();
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     ImGui::CloseCurrentPopup();
   }
   frame_layout_.controls["clone/cancel"] = item_rectangle();
@@ -7487,7 +7579,7 @@ void App::draw_new_repository_dialog() {
                            "/Users/you/projects/name", &new_repository_path_);
   frame_layout_.controls["new-repository/folder"] = item_rectangle();
   ImGui::SameLine();
-  if (ImGui::Button("Choose…")) {
+  if (kit_button("Choose…", ButtonKind::secondary)) {
     SDL_ShowOpenFolderDialog(
         [](void *userdata, const char *const *files, int) {
           auto *app = static_cast<App *>(userdata);
@@ -7506,7 +7598,7 @@ void App::draw_new_repository_dialog() {
   frame_layout_.controls["new-repository/submit"] = item_rectangle();
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
@@ -7549,11 +7641,11 @@ void App::draw_welcome() {
       begin_open_repository(first_run_.pending_path());
     }
     ImGui::SameLine();
-    if (ImGui::Button("Choose another folder")) {
+    if (kit_button("Choose another folder", ButtonKind::secondary)) {
       show_folder_dialog();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Back")) {
+    if (kit_button("Back", ButtonKind::secondary)) {
       first_run_.return_to_welcome();
     }
     ImGui::Separator();
@@ -7566,7 +7658,7 @@ void App::draw_welcome() {
     }
     frame_layout_.controls["clone-failure/retry"] = item_rectangle();
     ImGui::SameLine();
-    if (ImGui::Button("Back")) {
+    if (kit_button("Back", ButtonKind::secondary)) {
       first_run_.return_to_welcome();
     }
     frame_layout_.controls["clone-failure/back"] = item_rectangle();
@@ -7581,24 +7673,24 @@ void App::draw_welcome() {
   }
 
   ImGui::BeginDisabled(repository_operation_.has_value());
-  if (kit_button("Open folder", ButtonKind::primary, 150.0F, 38.0F)) {
+  if (kit_button("Open folder", ButtonKind::primary)) {
     show_folder_dialog();
   }
   frame_layout_.controls["front-door/open"] = item_rectangle();
   ImGui::SameLine();
-  if (ImGui::Button("New repository", ImVec2(150.0F, 38.0F))) {
+  if (kit_button("New repository", ButtonKind::secondary)) {
     new_repository_dialog_open_ = true;
   }
   frame_layout_.controls["front-door/new"] = item_rectangle();
   ImGui::SameLine();
-  if (ImGui::Button("Clone from lake", ImVec2(150.0F, 38.0F))) {
+  if (kit_button("Clone from lake", ButtonKind::secondary)) {
     clone_dialog_open_ = true;
     clone_remote_.clear();
     clone_path_.clear();
   }
   frame_layout_.controls["front-door/clone"] = item_rectangle();
   ImGui::SameLine();
-  if (ImGui::Button("New window", ImVec2(150.0F, 38.0F))) {
+  if (kit_button("New window", ButtonKind::secondary)) {
     open_new_window();
   }
   frame_layout_.controls["front-door/new-window"] = item_rectangle();
@@ -7608,7 +7700,7 @@ void App::draw_welcome() {
   // This is the computer's own signing identity (TAAP), not a lake account: it signs every
   // drip and change. Signing in to a lake comes with choosing one (liquify#96).
   if (first_run_.session()) {
-    if (ImGui::SmallButton("Your identity")) {
+    if (kit_button("Your identity", ButtonKind::secondary, ButtonSize::compact)) {
       ImGui::OpenPopup("identity-details");
     }
     frame_layout_.controls["front-door/identity"] = item_rectangle();
@@ -7623,14 +7715,14 @@ void App::draw_welcome() {
     ImGui::SameLine();
     ImGui::TextDisabled("Signs your drips and changes");
     ImGui::SameLine();
-    if (ImGui::SmallButton("Forget")) {
+    if (kit_button("Forget", ButtonKind::secondary, ButtonSize::compact)) {
       first_run_.sign_out();
       persist_first_run();
     }
   } else {
     ImGui::BeginDisabled(identity_operation_.has_value());
-    if (ImGui::Button(identity_operation_ ? "Reading your identity..."
-                                          : "Your identity")) {
+    if (kit_button(identity_operation_ ? "Reading your identity..."
+                                          : "Your identity", ButtonKind::secondary)) {
       begin_sign_in();
     }
     frame_layout_.controls["front-door/identity"] = item_rectangle();
@@ -7674,7 +7766,7 @@ void App::draw_welcome() {
       ImGui::TextDisabled("%s", recent.path.string().c_str());
       ImGui::TableSetColumnIndex(1);
       if (recent.last_change.starts_with("blake3:")) {
-        if (ImGui::SmallButton("Change details")) {
+        if (kit_button("Change details", ButtonKind::secondary, ButtonSize::compact)) {
           ImGui::OpenPopup("recent-change");
         }
         if (ImGui::BeginPopup("recent-change")) {
@@ -7688,7 +7780,7 @@ void App::draw_welcome() {
       ImGui::TableSetColumnIndex(2);
       ImGui::TextUnformatted(recent.branch.c_str());
       ImGui::TableSetColumnIndex(3);
-      if (ImGui::SmallButton("New window")) {
+      if (kit_button("New window", ButtonKind::secondary, ButtonSize::compact)) {
         open_new_window(recent.path);
       }
       ImGui::PopID();
@@ -7714,7 +7806,7 @@ void App::draw_status_bar() {
   ImGui::TableNextRow();
   ImGui::TableSetColumnIndex(0);
   const auto name = repository_ ? repository_->name() : std::string{"liquify"};
-  if (ImGui::SmallButton(name.c_str()) && repository_) {
+  if (kit_button(name.c_str(), ButtonKind::quiet, ButtonSize::compact) && repository_) {
     first_run_.return_to_welcome();
   }
   if (repository_ && !repository_->branch().empty()) {
@@ -7739,7 +7831,7 @@ void App::draw_status_bar() {
     const auto palette =
         effective_palette(applied_dark_theme_, applied_high_contrast_);
     ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.danger));
-    if (ImGui::SmallButton(label.c_str())) {
+    if (kit_button(label.c_str(), ButtonKind::quiet, ButtonSize::compact)) {
       panels_.focus(failure->panel);
       if (panels_.layout(failure->panel).placement == PanelPlacement::sidebar) {
         shell_state_.sidebar_visible = true;
@@ -7781,7 +7873,7 @@ void App::draw_status_bar() {
         });
     if (others > 0) {
       const auto label = std::to_string(others) + " collaborating";
-      if (ImGui::SmallButton(label.c_str())) {
+      if (kit_button(label.c_str(), ButtonKind::quiet, ButtonSize::compact)) {
         panels_.focus(PanelId::multiplayer);
         shell_state_.sidebar_visible = true;
         persist_shell_state();
@@ -7794,7 +7886,7 @@ void App::draw_status_bar() {
     ImGui::TextDisabled("Ln %zu:%zu", cursor.line + 1, cursor.byte + 1);
     ImGui::SameLine();
   }
-  if (ImGui::SmallButton("Details")) {
+  if (kit_button("Details", ButtonKind::quiet, ButtonSize::compact)) {
     ImGui::OpenPopup("status-details");
   }
   if (ImGui::BeginPopup("status-details")) {
