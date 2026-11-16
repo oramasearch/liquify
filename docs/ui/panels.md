@@ -33,6 +33,14 @@ panel-scoped names (`build.push`, `structural.expand`, ...) are aliases of those
 the `Show …` sidebar commands and `Reset Panel Layout`; each opens or resets its panel where it is
 docked.
 
+Bottom-panel tabs are sized from their label at the current UI font, and their height grows
+with an enlarged font. Each tab's hit rectangle is the drawn tab: the selectables do not pad into
+their neighbours' spacing, so the rectangles are disjoint and the keyboard focus outline, the
+pointer target and the underline cover the same area (liquify#35). The native acceptance scenario
+`shell-sizes` checks this at UI sizes 14, 24 and 32 in light and dark: disjoint tab rectangles at
+least as tall as the font, a click selecting every tab in both directions, and Tab moving keyboard
+focus along the row with Space selecting the focused tab, without typing into the editor.
+
 ## Docking and repository-local state
 
 The `…` menu in every panel moves it to the sidebar, bottom area, or editor tabs, or floats it in a

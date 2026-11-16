@@ -6519,7 +6519,13 @@ void App::draw_repository_details(const EditorGraphSnapshot &snapshot) {
     const auto state = StatusBarInput{
         .repository_open = true,
         .daemon_running = snapshot.daemon_running,
-        .daemon_available = editor_graph_ != nullptr,
+        .daemon_available = snapshot.daemon_state == DaemonState::running ||
+                            snapshot.daemon_state == DaemonState::stopped,
+        .daemon_starting = snapshot.daemon_state == DaemonState::starting,
+        .daemon_problem = snapshot.daemon_state == DaemonState::start_failed ||
+                                  snapshot.daemon_state == DaemonState::disconnected
+                              ? std::string(daemon_state_name(snapshot.daemon_state))
+                              : std::string{},
         .sync_running = sync_was_running_,
         .hydration_running = hydration_was_running_,
         .build_running = snapshot.build_running,
@@ -7590,8 +7596,14 @@ void App::draw_bottom_panel() {
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
     ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(active == id ? palette.text_primary
                                                                   : palette.text_secondary));
-    const auto clicked = ImGui::Selectable(label.c_str(), active == id, 0,
-                                           ImVec2(width, design::control_sm));
+    // The hit rectangle is the drawn tab: no half-spacing pad into the neighbours, and a height
+    // that follows the UI font, so pointer, keyboard focus and paint agree at every size
+    // (liquify#35).
+    const auto height = std::max(design::control_sm, ImGui::GetFontSize() + design::space4);
+    const auto clicked = ImGui::Selectable(label.c_str(), active == id,
+                                           ImGuiSelectableFlags_NoPadWithHalfSpacing,
+                                           ImVec2(width, height));
+    const auto focused = ImGui::IsItemFocused();
     ImGui::PopStyleColor(2);
     ImGui::PopStyleVar();
     if (active == id) {
@@ -7604,9 +7616,13 @@ void App::draw_bottom_panel() {
       panels_.focus(id);
       panels_.clear_focus_request();
       persist_shell_state();
+      // A clicked tab holds keyboard focus. ImGui hides its focus cursor after a click, so the
+      // editor would otherwise keep the keys and indent on the next Tab (liquify#35).
+      editor_focused_ = false;
     }
     frame_layout_.panels[id].tab = item_rectangle();
     frame_layout_.panels[id].selected = active == id;
+    frame_layout_.panels[id].tab_focused = focused;
     item_icon(panel_icon(id));
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("%s · Right-click for panel placement",
@@ -7688,6 +7704,15 @@ auto App::status_failure(const EditorGraphSnapshot &graph) const
                                                repository_path())
                              .summary,
                          PanelId::build};
+  }
+  // The build service's own state, which a later successful query does not clear (liquify#36).
+  // The wording matches the Build panel's for a build that found no service.
+  if (graph.daemon_state == DaemonState::start_failed) {
+    return StatusFailure{"The build service is not running for this repository",
+                         PanelId::diagnostics};
+  }
+  if (graph.daemon_state == DaemonState::disconnected) {
+    return StatusFailure{"The build service stopped answering", PanelId::diagnostics};
   }
   if (!graph.query_error.empty()) {
     return StatusFailure{
@@ -7871,7 +7896,9 @@ auto App::kit_button(const char *label, ButtonKind kind, ButtonSize size,
   const auto palette =
       effective_palette(applied_dark_theme_, applied_high_contrast_);
   const auto compact = size == ButtonSize::compact;
-  const auto height = compact ? design::space6 : design::control_sm;
+  // The kit's heights, grown with an enlarged UI font so the label is never clipped (liquify#36).
+  const auto height = std::max(compact ? design::space6 : design::control_sm,
+                               ImGui::GetFontSize() + design::space2);
   const auto padding =
       ImVec2(compact ? design::space2 : design::space3,
              std::max(0.0F, (height - ImGui::GetFontSize()) * 0.5F));
@@ -7916,6 +7943,13 @@ auto App::kit_button(const char *label, ButtonKind kind, ButtonSize size,
     push(ImGuiCol_ButtonActive, palette.selected);
     push(ImGuiCol_Border, clear);
     push(ImGuiCol_Text, hovered ? palette.text_primary : palette.text_secondary);
+    break;
+  case ButtonKind::quiet_danger:
+    push(ImGuiCol_Button, clear);
+    push(ImGuiCol_ButtonHovered, palette.layer_hover);
+    push(ImGuiCol_ButtonActive, palette.selected);
+    push(ImGuiCol_Border, clear);
+    push(ImGuiCol_Text, palette.danger);
     break;
   case ButtonKind::destructive:
     push(ImGuiCol_Button, palette.danger);
@@ -9146,103 +9180,173 @@ void App::draw_welcome() {
 void App::draw_status_bar() {
   const auto graph =
       editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
-  if (!ImGui::BeginTable("status", 3, ImGuiTableFlags_SizingStretchProp)) {
-    return;
-  }
-  ImGui::TableSetupColumn("Repository", ImGuiTableColumnFlags_WidthStretch,
-                          1.0F);
-  ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 1.4F);
-  ImGui::TableSetupColumn("Position and details",
-                          ImGuiTableColumnFlags_WidthFixed, 190.0F);
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  ImGui::AlignTextToFramePadding();
-  const auto name = repository_ ? repository_->name() : std::string{"liquify"};
-  if (kit_button(name.c_str(), ButtonKind::quiet, ButtonSize::compact) && repository_) {
-    first_run_.return_to_welcome();
-  }
-  if (repository_ && !repository_->branch().empty()) {
-    ImGui::SameLine();
-    ImGui::TextUnformatted(std::string(repository_->branch()).c_str());
-  }
-  ImGui::TableSetColumnIndex(1);
-  ImGui::AlignTextToFramePadding();
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  // One measured row (liquify#36). When the width runs out, segments give way in priority order:
+  // Details and a failure stay, then the repository, the cursor position and the branch; plain
+  // status text and collaborators elide first.
+  const auto spacing = ImGui::GetStyle().ItemSpacing.x;
+  const auto button_width = [](const std::string &label) {
+    return ImGui::CalcTextSize(label.c_str(), nullptr, true).x + design::space2 * 2.0F;
+  };
+  const auto text_width = [](const std::string &text) {
+    return ImGui::CalcTextSize(text.c_str()).x;
+  };
+  const auto failure = (editor_ && !editor_->error().empty()) || graph.build_running ||
+                               sync_was_running_ || hydration_was_running_
+                           ? std::optional<StatusFailure>{}
+                           : status_failure(graph);
   auto state = std::string{};
+  auto essential_state = false;
   if (editor_ && !editor_->error().empty()) {
     state = editor_->error();
+    essential_state = true;
   } else if (graph.build_running) {
     state = "Building…";
   } else if (sync_was_running_) {
     state = "Syncing…";
   } else if (hydration_was_running_) {
     state = "Loading files…";
-  } else if (const auto failure = status_failure(graph)) {
-    const auto label =
-        failure->summary + " · Open " +
-        std::string(panels_.descriptor(failure->panel).title) +
-        "##status-failure";
-    const auto palette =
-        effective_palette(applied_dark_theme_, applied_high_contrast_);
-    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.danger));
-    if (kit_button(label.c_str(), ButtonKind::quiet, ButtonSize::compact)) {
-      panels_.focus(failure->panel);
-      if (panels_.layout(failure->panel).placement == PanelPlacement::sidebar) {
-        shell_state_.sidebar_visible = true;
-      } else {
-        shell_state_.bottom_panel_visible = true;
-      }
-      persist_shell_state();
-    }
-    ImGui::PopStyleColor();
-    frame_layout_.controls["status/failure"] = item_rectangle();
-  } else if (!editor_status_.empty()) {
+  } else if (!failure && !editor_status_.empty()) {
     state = editor_status_;
-  } else if (repository_ && repository_->offline() &&
+  } else if (!failure && repository_ && repository_->offline() &&
              repository_->pending_uploads() > 0) {
     state = "Offline · saved changes waiting to sync";
   }
   if (!state.empty()) {
-    state = without_absolute_paths(state, repository_path());
-    auto visible = compact_identifiers(state);
-    const auto width = ImGui::GetContentRegionAvail().x;
-    while (visible.size() > 4 &&
-           ImGui::CalcTextSize(visible.c_str()).x > width) {
-      // Remove a complete UTF-8 code point before appending the ellipsis.
-      auto last = visible.size() - 1;
-      while (last > 0 &&
-             (static_cast<unsigned char>(visible[last]) & 0xc0) == 0x80) {
-        --last;
-      }
-      visible.resize(last);
-    }
-    ImGui::TextUnformatted(visible.c_str());
-    if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("%s", state.c_str());
-    }
-  } else if (multiplayer_) {
+    state = compact_identifiers(without_absolute_paths(state, repository_path()));
+  }
+  auto collaborators = std::string{};
+  if (state.empty() && !failure && multiplayer_) {
     const auto others = std::ranges::count_if(
         multiplayer_->presence, [this](const auto &value) {
           return value.session != multiplayer_session_;
         });
     if (others > 0) {
-      const auto label = std::to_string(others) + " collaborating";
-      if (kit_button(label.c_str(), ButtonKind::quiet, ButtonSize::compact)) {
-        panels_.focus(PanelId::multiplayer);
-        shell_state_.sidebar_visible = true;
-        persist_shell_state();
-      }
+      collaborators = std::to_string(others) + " collaborating";
     }
   }
-  ImGui::TableSetColumnIndex(2);
-  ImGui::AlignTextToFramePadding();
+  const auto failure_text =
+      failure ? failure->summary + " · Open " +
+                    std::string(panels_.descriptor(failure->panel).title)
+              : std::string{};
+  const auto name = repository_ ? repository_->name() : std::string{"liquify"};
+  const auto branch = repository_ ? std::string(repository_->branch()) : std::string{};
+  auto position = std::string{};
   if (editor_) {
     const auto cursor = editor_->cursor();
-    ImGui::TextDisabled("Ln %zu:%zu", cursor.line + 1, cursor.byte + 1);
+    position = std::format("Ln {}:{}", cursor.line + 1, cursor.byte + 1);
+  }
+
+  const auto start_x = ImGui::GetCursorPosX();
+  const auto available = ImGui::GetContentRegionAvail().x;
+  const auto details_width = button_width("Details");
+  const auto minimum = button_width("W...");
+  auto remaining = available - details_width;
+  const auto take = [&](float wanted) {
+    const auto width = std::min(wanted, remaining - spacing);
+    if (width < std::min(wanted, minimum)) {
+      return 0.0F;
+    }
+    remaining -= width + spacing;
+    return width;
+  };
+  const auto middle_wanted = failure ? button_width(failure_text)
+                             : !state.empty() ? text_width(state)
+                             : !collaborators.empty() ? button_width(collaborators)
+                                                      : 0.0F;
+  const auto middle_essential = failure.has_value() || essential_state;
+  auto middle_width = middle_essential && middle_wanted > 0.0F ? take(middle_wanted) : 0.0F;
+  const auto name_width = take(button_width(name));
+  if (!middle_essential && middle_wanted > 0.0F) {
+    middle_width = take(middle_wanted);
+  }
+  const auto position_width =
+      !position.empty() && remaining >= text_width(position) + spacing ? take(text_width(position))
+                                                                       : 0.0F;
+  const auto branch_width =
+      !branch.empty() && remaining >= text_width(branch) + spacing ? take(text_width(branch))
+                                                                   : 0.0F;
+
+  ImGui::AlignTextToFramePadding();
+  auto drawn = false;
+  const auto next = [&drawn] {
+    if (drawn) {
+      ImGui::SameLine();
+    }
+    drawn = true;
+  };
+  const auto elided_button = [&](const std::string &text, float width, const char *id,
+                                 ButtonKind kind = ButtonKind::quiet) {
+    const auto visible = fit_text(text, width - design::space2 * 2.0F);
+    const auto clicked =
+        kit_button((visible + "##" + id).c_str(), kind, ButtonSize::compact);
+    if (visible != text && ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("%s", text.c_str());
+    }
+    frame_layout_.controls[std::string("status/") + id] = item_rectangle();
+    frame_layout_.labels[std::string("status/") + id] = visible;
+    return clicked;
+  };
+  if (name_width > 0.0F) {
+    next();
+    if (elided_button(name, name_width, "repository") && repository_) {
+      first_run_.return_to_welcome();
+    }
+  }
+  if (branch_width > 0.0F) {
+    next();
+    ImGui::TextUnformatted(branch.c_str());
+  }
+  if (middle_width > 0.0F) {
+    // The state starts where the old middle column did when there is room for it.
+    const auto column = start_x + std::max(0.0F, available - 190.0F) / 2.4F;
+    next();
+    if (ImGui::GetCursorPosX() < column &&
+        column + middle_width <= start_x + available - details_width - position_width) {
+      ImGui::SetCursorPosX(column);
+    }
+    if (failure) {
+      if (elided_button(failure_text, middle_width, "failure", ButtonKind::quiet_danger)) {
+        panels_.focus(failure->panel);
+        if (panels_.layout(failure->panel).placement == PanelPlacement::sidebar) {
+          shell_state_.sidebar_visible = true;
+        } else {
+          shell_state_.bottom_panel_visible = true;
+        }
+        persist_shell_state();
+      }
+    } else if (!state.empty()) {
+      const auto visible = fit_text(state, middle_width);
+      ImGui::TextUnformatted(visible.c_str());
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", state.c_str());
+      }
+      frame_layout_.controls["status/state"] = item_rectangle();
+      frame_layout_.labels["status/state"] = visible;
+    } else if (elided_button(collaborators, middle_width, "collaborators")) {
+      panels_.focus(PanelId::multiplayer);
+      shell_state_.sidebar_visible = true;
+      persist_shell_state();
+    }
+  }
+  // Position and Details sit at the right edge.
+  const auto right = start_x + available - details_width -
+                     (position_width > 0.0F ? position_width + spacing : 0.0F);
+  if (drawn) {
+    ImGui::SameLine(right);
+  } else {
+    ImGui::SetCursorPosX(right);
+  }
+  if (position_width > 0.0F) {
+    ImGui::TextDisabled("%s", position.c_str());
+    frame_layout_.controls["status/position"] = item_rectangle();
     ImGui::SameLine();
   }
   if (kit_button("Details", ButtonKind::quiet, ButtonSize::compact)) {
     ImGui::OpenPopup("status-details");
   }
+  frame_layout_.controls["status/details"] = item_rectangle();
   if (ImGui::BeginPopup("status-details")) {
     if (ImGui::MenuItem("Repository diagnostics")) {
       repository_details_open_ = true;
@@ -9277,7 +9381,6 @@ void App::draw_status_bar() {
     }
     ImGui::EndPopup();
   }
-  ImGui::EndTable();
 }
 
 // The shell (liquify#102): regions share their edges, separated by hairlines, with no inset
@@ -9343,8 +9446,10 @@ auto App::edge_splitter(const char *id, float x, float y, float width,
 
 void App::draw_contents() {
   // One row of lake's 32-pixel control height: the compact (24-pixel) buttons and the text sit
-  // centred in it, with the window padding taking up the rest (liquify#130).
-  const auto status_bar_height = design::control_sm;
+  // centred in it, with the window padding taking up the rest (liquify#130). An enlarged UI font
+  // grows the compact buttons, and the row with them (liquify#36).
+  const auto status_row = std::max(design::space6, ImGui::GetFontSize() + design::space2);
+  const auto status_bar_height = status_row + (design::control_sm - design::space6);
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0F, 0.0F));
   const auto origin = ImGui::GetCursorScreenPos();
   const auto available = ImGui::GetContentRegionAvail();
@@ -9365,12 +9470,12 @@ void App::draw_contents() {
     ImGui::PopStyleVar();
     ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + center_height));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
-                        ImVec2(design::space3, (design::control_sm - design::space6) * 0.5F));
+                        ImVec2(design::space3, (status_bar_height - status_row) * 0.5F));
     // Text in the row is aligned to the compact buttons' frame, so labels and buttons share one
     // baseline.
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                         ImVec2(design::space2,
-                               std::max(0.0F, (design::space6 - ImGui::GetFontSize()) * 0.5F)));
+                               std::max(0.0F, (status_row - ImGui::GetFontSize()) * 0.5F)));
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(design::space2, 0.0F));
     shell_region_begin("status-bar", available.x, status_bar_height, false);
     draw_status_bar();
@@ -10136,6 +10241,13 @@ void NativeAcceptance::resize(App &app) {
   pulse(app);
   test::require_property(app.frame_layout().window.width < before.width,
                          "native resize did not change layout");
+}
+
+void NativeAcceptance::resize_to(App &app, int width, int height) {
+  test::require_property(SDL_SetWindowSize(app.window_, width, height),
+                         "native resize failed");
+  SDL_SyncWindow(app.window_);
+  pulse(app);
 }
 
 void NativeAcceptance::fonts(App &app) {

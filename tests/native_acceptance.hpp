@@ -25,6 +25,7 @@ public:
   static ScreenshotImage capture(App &app);
   static bool popup(std::string_view name);
   static void resize(App &app);
+  static void resize_to(App &app, int width, int height);
   static void fonts(App &app);
   static void source_tab(App &app);
   // macOS: the key equivalent the native menu item for `command` shows ("Cmd+Shift+P", "F6");
@@ -43,6 +44,10 @@ private:
   static void commands(App &app);
   static void modal_input(App &app);
   static void tabs(App &app);
+  static void shell_sizes(App &app, const std::filesystem::path &output);
+  static void tab_row(App &app, float font, std::string_view name);
+  static void status_row(App &app, float font, std::string_view name);
+  static void daemon_failure(App &app, const std::filesystem::path &output);
   static void build(App &app, const std::filesystem::path &output);
   static void cut(App &app, const std::filesystem::path &output);
   static void edit_save_cut(App &app, std::string_view marker,

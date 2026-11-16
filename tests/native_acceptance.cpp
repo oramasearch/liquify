@@ -13,9 +13,12 @@
 #include "liquify/command.hpp"
 #include "liquify/editor_graph.hpp"
 #include "liquify/lake_remote.hpp"
+#include "liquify/user_error.hpp"
 #include "ui_property_assert.hpp"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/file.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -29,10 +32,12 @@
 #include <array>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -134,6 +139,26 @@ private:
   std::atomic_bool stopping_{};
   std::atomic_int requests_{};
   std::thread thread_;
+};
+
+// Holds a repository's daemon lock with nothing listening, so liquid's daemon start answers
+// "already running" and attaching finds no service: a controlled startup failure (liquify#36).
+class HeldDaemonLock {
+public:
+  explicit HeldDaemonLock(const std::filesystem::path &repository) {
+    const auto directory =
+        std::filesystem::weakly_canonical(repository) / ".liquid" / "daemon";
+    std::filesystem::create_directories(directory);
+    descriptor_ = ::open((directory / "lock").c_str(), O_CREAT | O_RDWR, 0600);
+    require(descriptor_ >= 0 && ::flock(descriptor_, LOCK_EX | LOCK_NB) == 0,
+            "daemon lock held with no daemon listening");
+  }
+  ~HeldDaemonLock() { ::close(descriptor_); }
+  HeldDaemonLock(const HeldDaemonLock &) = delete;
+  auto operator=(const HeldDaemonLock &) -> HeldDaemonLock & = delete;
+
+private:
+  int descriptor_{-1};
 };
 
 void save_image(const std::filesystem::path &path,
@@ -435,6 +460,237 @@ void NativeAcceptance::tabs(App &app) {
   require(count > 1, "multiple visible panel tabs received SDL pointer events");
   require(failed.empty(),
           "#35: every visible tab selects its panel; failed=" + failed);
+}
+
+} // namespace liquify
+
+namespace {
+
+auto overlaps(liquify::InputRectangle a, liquify::InputRectangle b) -> bool {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height &&
+         b.y < a.y + a.height;
+}
+
+auto inside(liquify::InputRectangle inner, liquify::InputRectangle outer) -> bool {
+  constexpr auto slack = 0.5F;
+  return inner.x >= outer.x - slack && inner.y >= outer.y - slack &&
+         inner.x + inner.width <= outer.x + outer.width + slack &&
+         inner.y + inner.height <= outer.y + outer.height + slack;
+}
+
+} // namespace
+
+namespace liquify {
+
+// liquify#35: at each UI size and theme the bottom tabs have disjoint rectangles that hold their
+// text, a click selects each one, and keyboard focus selects the tab it is on.
+void NativeAcceptance::tab_row(App &app, float font, std::string_view name) {
+  const auto label = std::string(name);
+  auto tabs = std::vector<std::pair<PanelId, InputRectangle>>{};
+  for (const auto &[id, geometry] : app.frame_layout().panels) {
+    // The bottom row only; editor-tab panels have their own row.
+    if (geometry.tab.width > 0 && geometry.tab.height > 0 &&
+        app.panels_.layout(id).placement == PanelPlacement::bottom) {
+      tabs.emplace_back(id, geometry.tab);
+    }
+  }
+  require(tabs.size() > 1, label + ": several bottom tabs are laid out");
+  for (std::size_t first = 0; first < tabs.size(); ++first) {
+    test::require_bounds(tabs[first].second, app.frame_layout().window,
+                         std::string(panel_id_name(tabs[first].first)));
+    test::require_property(tabs[first].second.height >= font,
+                           label + ": a tab is shorter than its font");
+    for (auto second = first + 1; second < tabs.size(); ++second) {
+      test::require_property(!overlaps(tabs[first].second, tabs[second].second),
+                             label + ": " + std::string(panel_id_name(tabs[first].first)) +
+                                 " overlaps " + std::string(panel_id_name(tabs[second].first)));
+    }
+  }
+  require(true, label + ": tab rectangles are disjoint and as tall as the font");
+  // Mouse, in both directions.
+  auto order = tabs;
+  std::ranges::reverse(order);
+  order.insert(order.end(), tabs.begin(), tabs.end());
+  for (const auto &[id, ignored] : order) {
+    const auto target = app.frame_layout().panels.at(id).tab;
+    click(app, target);
+    if (app.panels_.active(PanelPlacement::bottom) != id) {
+      // A loaded host now and then drops a synthetic press (the existing `tabs` scenario shows
+      // the same); one repeat is logged, and a real defect fails both.
+      std::printf("%s: click on %s repeated\n", label.c_str(), panel_id_name(id).data());
+      click(app, app.frame_layout().panels.at(id).tab);
+    }
+    const auto &current = app.frame_layout().panels.at(id);
+    const auto active = app.panels_.active(PanelPlacement::bottom);
+    test::require_property(
+        current.selected && current.content.height > 0 && active == id,
+        std::format("{}: clicking {} at {:.0f},{:.0f} {:.0f}x{:.0f} selected {} (tab now at "
+                    "{:.0f},{:.0f} {:.0f}x{:.0f})",
+                    label, panel_id_name(id), target.x, target.y, target.width, target.height,
+                    active ? panel_id_name(*active) : "nothing", current.tab.x, current.tab.y,
+                    current.tab.width, current.tab.height));
+  }
+  require(true, label + ": a click selects every tab, in both directions");
+  // Keyboard: Tab moves focus along the row, Space selects the focused tab.
+  auto selected = std::vector<PanelId>{};
+  for (int press = 0; press < 40 && selected.size() < tabs.size(); ++press) {
+    key(app, "Tab");
+    auto focused = std::optional<PanelId>{};
+    for (const auto &[id, geometry] : app.frame_layout().panels) {
+      if (geometry.tab_focused && app.panels_.layout(id).placement == PanelPlacement::bottom &&
+          std::ranges::find(selected, id) == selected.end()) {
+        focused = id;
+      }
+    }
+    // The frame layout is rebuilt by the next key, so the id is copied out first.
+    if (focused) {
+      const auto id = *focused;
+      key(app, "Space");
+      if (app.panels_.active(PanelPlacement::bottom) != id &&
+          app.frame_layout().panels.at(id).tab_focused) {
+        std::printf("%s: Space on %s repeated\n", label.c_str(), panel_id_name(id).data());
+        key(app, "Space");
+      }
+      const auto &current = app.frame_layout().panels.at(id);
+      test::require_property(current.selected &&
+                                 app.panels_.active(PanelPlacement::bottom) == id,
+                             label + ": Space on focused " + std::string(panel_id_name(id)) +
+                                 " did not select it");
+      selected.push_back(id);
+    }
+  }
+  std::printf("%s: keyboard selected %zu of %zu tabs\n", label.c_str(), selected.size(),
+              tabs.size());
+  require(selected.size() == tabs.size(),
+          label + ": keyboard focus reaches and selects every tab");
+}
+
+// liquify#36: the status row holds its controls at each UI size and theme.
+void NativeAcceptance::status_row(App &app, float font, std::string_view name) {
+  const auto label = std::string(name);
+  const auto &controls = app.frame_layout().controls;
+  require(controls.contains("region/status-bar") && controls.contains("status/details"),
+          label + ": the status row and its Details button are laid out");
+  const auto region = controls.at("region/status-bar");
+  test::require_bounds(region, app.frame_layout().window, "status row");
+  auto drawn = std::vector<std::pair<std::string, InputRectangle>>{};
+  for (const auto &[key_name, rectangle] : controls) {
+    if (key_name.starts_with("status/")) {
+      drawn.emplace_back(key_name, rectangle);
+    }
+  }
+  for (std::size_t first = 0; first < drawn.size(); ++first) {
+    test::require_property(inside(drawn[first].second, region),
+                           label + ": " + drawn[first].first + " leaves the status row");
+    test::require_property(drawn[first].second.height >= font,
+                           label + ": " + drawn[first].first + " is shorter than its font");
+    for (auto second = first + 1; second < drawn.size(); ++second) {
+      test::require_property(!overlaps(drawn[first].second, drawn[second].second),
+                             label + ": " + drawn[first].first + " overlaps " +
+                                 drawn[second].first);
+    }
+  }
+  std::printf("%s: status row %.0fx%.0f with %zu controls\n", label.c_str(), region.width,
+              region.height, drawn.size());
+  require(true, label + ": status controls sit inside the row, as tall as the font, apart");
+}
+
+void NativeAcceptance::shell_sizes(App &app, const std::filesystem::path &output) {
+  open_file(app);
+  key(app, "j", true);
+  if (!app.shell_state_.bottom_panel_visible) {
+    key(app, "j", true);
+  }
+  require(app.shell_state_.bottom_panel_visible, "Primary+J exposed bottom tabs");
+  const auto source_before = std::string(app.editor_->text());
+  // 14 is the default; 24 and 32 are sizes the type scale loads exactly.
+  for (const auto size : {14U, 24U, 32U}) {
+    app.settings_.fonts.ui_size = size;
+    app.apply_settings_live(true);
+    pulse(app);
+    for (const auto theme : {ThemePreference::light, ThemePreference::dark}) {
+      app.options_.forced_theme = theme;
+      pulse(app);
+      const auto name = std::format("ui {} {}", size,
+                                    theme == ThemePreference::dark ? "dark" : "light");
+      tab_row(app, static_cast<float>(size), name);
+      status_row(app, static_cast<float>(size), name);
+      save_image(output / std::format("ui-{}-{}.png", size,
+                                      theme == ThemePreference::dark ? "dark" : "light"),
+                 capture(app));
+    }
+  }
+  app.options_.forced_theme.reset();
+  std::printf("editor: before=%zu bytes after=%zu bytes\n", source_before.size(),
+              app.editor_->text().size());
+  require(app.editor_->text() == source_before,
+          "keyboard traversal of the tabs never typed into the editor");
+}
+
+// liquify#36: a repository whose build service cannot start says so in the status row, in the
+// words the Build panel uses, and keeps the failure and Details readable at a narrow width.
+void NativeAcceptance::daemon_failure(App &app, const std::filesystem::path &output) {
+  open_file(app);
+  require(app.editor_graph_ != nullptr, "real repository has editor graph");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+  auto snapshot = app.editor_graph_->snapshot();
+  std::printf("daemon: state=%s error='%s' status='%s'\n",
+              std::string(daemon_state_name(snapshot.daemon_state)).c_str(),
+              snapshot.daemon_error.c_str(), editor_graph_status(snapshot).c_str());
+  require(!snapshot.daemon_running && snapshot.daemon_state == DaemonState::start_failed &&
+              !snapshot.daemon_error.empty(),
+          "the graph snapshot records that the daemon failed to start");
+  require(editor_graph_status(snapshot).find("daemon failed to start") != std::string::npos,
+          "repository details name the daemon failure");
+  const auto expected = std::string("The build service is not running for this repository");
+  const auto &labels = app.frame_layout().labels;
+  std::printf("status: failure='%s'\n",
+              labels.contains("status/failure") ? labels.at("status/failure").c_str() : "");
+  require(labels.contains("status/failure") &&
+              labels.at("status/failure").starts_with(expected),
+          "the status row names the daemon failure, not 'Daemon on'");
+
+  key(app, "F7");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+  snapshot = app.editor_graph_->snapshot();
+  const auto build_failure = describe_build_failure(
+      snapshot.build_error.value_or(liquid::error{}), app.repository_->path());
+  std::printf("build: summary='%s' status='%s'\n", build_failure.summary.c_str(),
+              app.frame_layout().labels.contains("status/failure")
+                  ? app.frame_layout().labels.at("status/failure").c_str()
+                  : "");
+  require(snapshot.build_error.has_value() && build_failure.summary == expected,
+          "the build reports the service that is not running");
+  require(app.frame_layout().labels.at("status/failure") ==
+              expected + " · Open " + std::string(app.panels_.descriptor(PanelId::build).title),
+          "the status row agrees with the build error and names the Build panel");
+  capture_themes(app, output, "daemon-failure");
+
+  for (const auto size : {14U, 24U}) {
+    app.settings_.fonts.ui_size = size;
+    app.apply_settings_live(true);
+    resize_to(app, 520, 600);
+    const auto name = std::format("narrow ui {}", size);
+    status_row(app, static_cast<float>(size), name);
+    const auto &narrow = app.frame_layout().labels;
+    std::printf("%s: failure='%s' repository=%d position=%d\n", name.c_str(),
+                narrow.contains("status/failure") ? narrow.at("status/failure").c_str() : "",
+                narrow.contains("status/repository"),
+                app.frame_layout().controls.contains("status/position"));
+    require(narrow.contains("status/failure") &&
+                narrow.at("status/failure").starts_with("The build service"),
+            name + ": the failure stays readable at a narrow width");
+    capture_themes(app, output, std::format("daemon-failure-narrow-{}", size));
+    app.panels_.focus(PanelId::diagnostics);
+    pulse(app);
+    click(app, app.frame_layout().controls.at("status/failure"));
+    require(app.panels_.active(PanelPlacement::bottom) == PanelId::build,
+            name + ": the narrow failure still opens the Build panel");
+    require(app.frame_layout().controls.contains("status/details"),
+            name + ": Details stays reachable at a narrow width");
+  }
 }
 
 void NativeAcceptance::build(App &app, const std::filesystem::path &output) {
@@ -1341,6 +1597,8 @@ int NativeAcceptance::run(std::string_view scenario,
        std::to_string(
            std::chrono::steady_clock::now().time_since_epoch().count()));
   create_repository(repo);
+  const auto held = scenario == "daemon-failure" ? std::make_unique<HeldDaemonLock>(repo)
+                                                 : std::unique_ptr<HeldDaemonLock>{};
   App app({.repository_path = repo});
   const auto launch_status = launch(app, scenario == "launch-1" ? 1 : 2);
   if (launch_status != 0) {
@@ -1364,6 +1622,10 @@ int NativeAcceptance::run(std::string_view scenario,
     commands(app);
   } else if (scenario == "tabs") {
     tabs(app);
+  } else if (scenario == "shell-sizes") {
+    shell_sizes(app, output);
+  } else if (scenario == "daemon-failure") {
+    daemon_failure(app, output);
   } else if (scenario == "build") {
     build(app, output);
   } else if (scenario == "look") {

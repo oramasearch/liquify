@@ -58,8 +58,12 @@ and records known product defects separately from unavailable display modes
 ([`../ui/native-acceptance.md`](../ui/native-acceptance.md)). One registry supplies panel
 metadata, commands, placement, focus, state and notifications; each surface moves among dock
 areas, floats and re-docks. Divider
-sizes and complete panel layouts persist per repository and can be reset. The status bar reports
-actionable build, sync, hydration and failure state; a failure is shown once, by one error
+sizes and complete panel layouts persist per repository and can be reset. Bottom-panel tabs have
+disjoint hit rectangles sized from the UI font, so pointer and keyboard focus agree at every size
+(liquify#35). The status bar reports
+actionable build, sync, hydration and failure state, its daemon state from the graph's snapshot of
+the build service (a startup failure and a lost connection included), and its row height and
+segment priorities from the UI font and the width (liquify#36); a failure is shown once, by one error
 component (sentence, next step, action, Details, no absolute paths), in the panel the status bar
 names ([`../ui/errors.md`](../ui/errors.md)). Collaboration, identity, change, timing and
 validation records remain available through explicit gutter, panel, and details controls. macOS installs native

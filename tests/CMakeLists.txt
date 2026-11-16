@@ -93,7 +93,8 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
   add_dependencies(liquify-native-acceptance liquify-fault-plugin liquify-plugin-host)
   target_compile_definitions(liquify-native-acceptance PRIVATE
     LIQUIFY_FAULT_PLUGIN="$<TARGET_FILE:liquify-fault-plugin>")
-  foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette rebind commands modal-input tabs build
+  foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette rebind commands modal-input tabs
+      shell-sizes daemon-failure build
       front-door-clone-failures cut
       front-door-clone-push set-lake-push opened-clone-push
       request-review front-door-actions set-up-build

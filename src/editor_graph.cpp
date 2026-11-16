@@ -505,7 +505,9 @@ struct EditorGraph::Impl {
     auto lock = std::lock_guard(mutex);
     current.daemon_running = false;
     current.daemon_hosted = false;
-    current.query_error = "daemon: " + error_message(error);
+    current.daemon_state = DaemonState::start_failed;
+    current.daemon_error = error_message(error);
+    current.query_error = "daemon: " + current.daemon_error;
   }
 
   void stop_hosted_daemon() {
@@ -574,12 +576,18 @@ struct EditorGraph::Impl {
     auto status = liquid::runtime::block_on(daemon->status());
     auto lock = std::lock_guard(mutex);
     if (!status) {
+      // The service answered when it was started or attached; it has stopped answering.
       current.daemon_running = false;
-      current.query_error = "daemon: " + error_message(status.error());
+      current.daemon_state = DaemonState::disconnected;
+      current.daemon_error = error_message(status.error());
+      current.query_error = "daemon: " + current.daemon_error;
+      current.daemon.reset();
       return;
     }
     current.daemon_running = status->running;
     current.daemon_hosted = daemon_hosted;
+    current.daemon_state = status->running ? DaemonState::running : DaemonState::stopped;
+    current.daemon_error.clear();
     current.daemon = std::move(*status);
   }
 
@@ -1718,6 +1726,22 @@ auto EditorGraph::snapshot() const -> EditorGraphSnapshot {
 
 void EditorGraph::wait_until_idle() { impl_->wait_until_idle(); }
 
+auto daemon_state_name(DaemonState state) -> std::string_view {
+  switch (state) {
+  case DaemonState::starting:
+    return "starting";
+  case DaemonState::running:
+    return "running";
+  case DaemonState::stopped:
+    return "stopped";
+  case DaemonState::start_failed:
+    return "failed to start";
+  case DaemonState::disconnected:
+    return "connection lost";
+  }
+  return "unknown";
+}
+
 auto editor_graph_status(const EditorGraphSnapshot &snapshot) -> std::string {
   if (!snapshot.ready) {
     return snapshot.error.empty() ? "analysis graph starting"
@@ -1738,7 +1762,11 @@ auto editor_graph_status(const EditorGraphSnapshot &snapshot) -> std::string {
     output += " | last build " + snapshot.build_result;
   }
   if (!snapshot.daemon) {
-    return output + " | daemon unavailable";
+    if (snapshot.daemon_error.empty()) {
+      return output + " | daemon unavailable";
+    }
+    return output + " | daemon " + std::string(daemon_state_name(snapshot.daemon_state)) +
+           ": " + snapshot.daemon_error;
   }
   const auto backlog = std::accumulate(
       snapshot.daemon->targets.begin(), snapshot.daemon->targets.end(),

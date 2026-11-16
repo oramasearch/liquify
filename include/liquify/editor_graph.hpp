@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "liquid/build.hpp"
@@ -94,10 +95,27 @@ struct EditorSearchSnapshot {
     std::string error;
 };
 
+// The repository's build service as the graph last saw it (liquify#36): from starting or
+// attaching to it, then from each status call. The status bar reads this, never whether an
+// EditorGraph exists.
+enum class DaemonState : std::uint8_t {
+  starting,     // the start or attach has not answered yet
+  running,      // the last status call answered and the service is running
+  stopped,      // the last status call answered and the service is not running
+  start_failed, // neither starting nor attaching to the service worked
+  disconnected, // the service answered once, then a status call failed
+};
+
+[[nodiscard]] auto daemon_state_name(DaemonState state) -> std::string_view;
+
 struct EditorGraphSnapshot {
   bool ready{};
   bool daemon_running{};
   bool daemon_hosted{};
+  DaemonState daemon_state{DaemonState::starting};
+  // The start, attach or status failure behind start_failed and disconnected; empty otherwise.
+  // Unlike query_error, a later successful query never clears it.
+  std::string daemon_error;
   std::string error;
   std::string query_error;
   std::optional<liquid::error> query_failure;

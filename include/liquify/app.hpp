@@ -124,7 +124,8 @@ private:
   // (filled danger) and toggle (a mode that is on). Regular buttons are lake's 32-pixel control;
   // compact ones (24) sit inside table rows and inline lines. Padding comes from the font, so the
   // label is always centred, and the width follows the label unless one is given.
-  enum class ButtonKind : std::uint8_t { primary, secondary, quiet, destructive, toggle };
+  // quiet_danger: a quiet button whose label is a failure (the status row's, liquify#36).
+  enum class ButtonKind : std::uint8_t { primary, secondary, quiet, quiet_danger, destructive, toggle };
   enum class ButtonSize : std::uint8_t { regular, compact };
   auto kit_button(const char *label, ButtonKind kind,
                   ButtonSize size = ButtonSize::regular, float width = 0.0F) -> bool;
