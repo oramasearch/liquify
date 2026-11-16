@@ -54,8 +54,10 @@ Node.js participates only in configure-time test availability and the explicit g
 Tables (the command palette's results, the front door's Recent repositories) use lake's compact
 table header: the `surface` role behind it, labels in the `text_secondary` (muted ink) role, and a
 `border_subtle` hairline under the row (`table_headers` in `src/app.cpp`; `TableHeaderBg`,
-`TableBorderStrong`, `TableBorderLight` in `App::apply_theme`). Rows alternate between transparent
-and the `layer` role. ImGui's default header, a near-black bar with dark labels, is never shown
+`TableBorderStrong`, `TableBorderLight` in `App::apply_theme`). The palette's rows alternate
+between transparent and the `layer` role. The front door's Recent repositories is lake's compact
+list instead: one-line rows separated by hairlines, 16-pixel cell padding, `layer_hover` on the
+hovered row and the row's secondary action shown only while it is hovered. ImGui's default header, a near-black bar with dark labels, is never shown
 (liquify#109).
 
 `Screenshot.TableHeadersReadAtAAContrastInBothThemes` renders the palette and the front door in
@@ -65,11 +67,12 @@ tables in the real window.
 
 ## Type scale
 
-liquify sets text in four roles from the design tokens lake uses (`text24`, `text16`, the UI size,
+liquify sets text in five roles from the design tokens lake uses (`text24`, `text16`, the UI size,
 `text12`; IBM Plex Sans Regular and SemiBold):
 
 | Role | Face | Where |
 |---|---|---|
+| Eyebrow | Plex Sans Regular 12, upper case, tertiary ink | Above a page title: the front door's "THE IDE FOR LIQUID" |
 | Title | Plex Sans SemiBold 24 (`App::type_title`) | The front door's "Welcome to liquify", the empty editor's "liquify" |
 | Heading | Plex Sans SemiBold 16 (`App::type_heading`, `App::begin_dialog`) | Every dialog title, every panel header, the front door's "Recent Repositories" |
 | Body | Plex Sans Regular at the UI size | Everything else; supporting copy under a title uses the secondary ink |
@@ -101,8 +104,8 @@ Sizes, from lake's control tokens:
 
 | Size | Height | Horizontal padding | Where |
 |---|---|---|---|
-| `ButtonSize::regular` | `control_sm` (32) | `space3` (12) | Dialogs, the front door, the editor toolbar, panel actions |
-| `ButtonSize::compact` | `space6` (24) | `space2` (8) | Inside table rows and inline lines: Recent repositories, review and assistant actions, details, breadcrumbs, the status bar |
+| `ButtonSize::regular` | `control_sm` (32) | `space3` (12) | Dialogs, the front door's recovery actions, the editor toolbar, panel actions |
+| `ButtonSize::compact` | `space6` (24) | `space2` (8) | Inside table rows and inline lines: Recent repositories' Open in new window, the front door's Your identity and New window, review and assistant actions, details, breadcrumbs, the status bar |
 
 The vertical padding is worked out from the font (`(height - font size) / 2`), so a label stays
 centred at every UI size, and a button is as wide as its label plus its padding unless a width is
@@ -110,7 +113,7 @@ given. Kinds:
 
 | Control | Helper | Look |
 |---|---|---|
-| Primary button | `kit_button(label, ButtonKind::primary)` | Filled with `action`, white label. One per surface: Open folder on the front door, Save in the editor toolbar, the confirm button of each dialog (Clone, Create repository, Cut change, Set lake, Request review, Record and build, Post comment, Apply, Create, Store token, Add, Preview), Find in Search, Ask and Accept edit in the assistant |
+| Primary button | `kit_button(label, ButtonKind::primary)` | Filled with `action`, white label. One per surface: Save in the editor toolbar, the confirm button of each dialog (Clone, Create repository, Cut change, Set lake, Request review, Record and build, Post comment, Apply, Create, Store token, Add, Preview), Find in Search, Ask and Accept edit in the assistant |
 | Secondary button | `kit_button(label, ButtonKind::secondary)` | lake's default button: `action` label on a `border_interactive` hairline, no fill; on hover it fills with `action_hover` and the label turns white |
 | Quiet button | `ButtonKind::quiet` | No fill or border, `text_secondary` label; `layer_hover` on hover. The toolbar's view toggles and editing modes, breadcrumbs, the status bar, settings Reset, `...` menus |
 | Toggle | `ButtonKind::toggle` | A mode that is on: `action_soft` fill, `border_interactive` hairline, `action` label. AI on in the toolbar (AI off is quiet) |
@@ -134,6 +137,17 @@ binding by its command's title, not its id.
 `Screenshot.SearchFieldsFillTheirPanel` checks the Search panel's fields share one width and fill
 their panel; the native scenario `look` captures the toolbar, Search, Settings and the front door
 in the real window.
+
+## Action rows
+
+A screen whose job is to choose a way in (the front door) shows its choices as **action rows**
+rather than a row of equal buttons, as lake's entry pages do: one panel, each row the full width
+and 64 pixels tall, a 32-pixel icon tile, a label and a one-line description in the secondary ink,
+`layer_hover` on hover and a hairline between rows. The one-button rule still holds: the primary
+choice's tile is filled with `action` and its label is in `action`; the others' tiles use
+`action_soft`. Secondary actions sit under the panel as quiet compact buttons. Icons are the
+native strokes of `draw_shell_icon`; the front door added `new_folder`, `clone`, `window`, `key`
+and `branch`.
 
 ## Surfaces
 

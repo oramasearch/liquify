@@ -15,7 +15,9 @@ over one pinned libliquid.
 With no path, the shell is a repository front door: open a local folder, create a repository,
 clone through liquid's drive client, reopen one of eight persisted recent repositories, show Your
 identity (this computer's TAAP signing identity, not a lake sign-in), or create another
-process-backed window. Opening a different repository replaces its
+process-backed window. It is laid out as lake's pages: a column with the title and the ways in as
+large action rows, and Recent Repositories as a compact table, with a teaching empty state
+([first run](../ui/first-run.md#layout)). Opening a different repository replaces its
 services in the current process. Unreadable local repositories and unreachable lake remotes have
 separate retry states. A failed clone is classified from liquid's error code: only an unreachable
 lake is offline, and a lake that answered (TLS, token, access, not found, busy, unsupported) gets its

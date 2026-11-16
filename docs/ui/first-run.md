@@ -4,6 +4,42 @@ Liquify starts at a repository front door when no path is supplied. The front do
 local folder, create a new repository, clone a lake repository into a new local folder, reopen a
 recent repository, create another Liquify window, or show **Your identity**.
 
+## Layout
+
+The front door is laid out as lake's pages are (liquify#126; lake's `docs/ui/front-door.md` and
+`docs/ui/design-system.md`), on the `canvas` role with the block centred vertically while it fits:
+
+- **The column** (a third of the width, 340 to 420 pixels): liquify's mark (a white drop on an
+  `action` tile) and name, the eyebrow *THE IDE FOR LIQUID* (12, tertiary ink), the title
+  *Welcome to liquify* and one line of supporting copy. Under it the three ways in are large rows
+  in one panel (`surface`, a hairline border, `panel_radius`): **Open a folder**, **New
+  repository** and **Clone from lake**, each a 32-pixel icon tile, a label and a one-line
+  description; the whole row is the target, with `layer_hover` on hover and hairlines between
+  rows. Open a folder is the front door's one primary action, so its tile is filled with `action`
+  and its label is in `action`; the others use the soft tint. **Your identity** and **New window**
+  are quiet compact buttons under the panel, with a caption that says what the identity is.
+- **Recent Repositories** (the rest of the width): a heading, a line of copy and a panel holding a
+  compact table with one row per repository: Repository (folder icon and name), Branch, Last change
+  (identifiers shortened, the full value on hover) and Updated (Today, Yesterday, *n* days ago,
+  then the date). Hovering a row shows its folder as a tooltip and an **Open in new window** quiet
+  button at its end; clicking anywhere else on the row opens it in this window.
+- **The empty state**, when nothing has been opened, is one panel that says what is absent (*No
+  recent repositories*), what will appear there, how to start (open a folder or clone from lake),
+  and that `liquify <path>` opens a repository from a terminal.
+- Below 760 pixels of content width the column and Recent Repositories stack.
+- An open failure, a clone failure, or an opening or cloning repository is shown in the column,
+  above the ways in.
+
+The control ids the native driver uses are unchanged: `front-door/open`, `front-door/new`,
+`front-door/clone`, `front-door/new-window`, `front-door/identity`, `welcome/title`,
+`welcome/copy`, `welcome/recent-heading` and `recent-repositories/header`. New ones:
+`welcome/eyebrow`, `front-door/recent/<name>` for each row (and `.../new-window` while its button
+shows) and `front-door/recent-empty`.
+
+The **Clone from Lake** and **New Repository** dialogs follow lake's forms: supporting copy in the
+secondary ink, each label above its field, hints as captions under the field, and the buttons at
+the bottom right with the primary last.
+
 **New repository** opens a dialog with a Folder field (and Choose… for the native folder picker).
 Create repository calls libliquid's `repository::create` on a worker, then opens the repository in
 the same window. A folder that already holds a liquid repository is refused with "open it instead".
@@ -11,15 +47,15 @@ the same window. A folder that already holds a liquid repository is refused with
 **Your identity** is this computer's TAAP signing identity, the key that signs every drip and
 change; it is not a lake account, and the button no longer says "Sign in to lake". It reads (or
 creates) the identity through `identity_detail::local_signer`, and its popover shows the identifier
-and where the key is held. Forget removes it from the front door only. Signing in to a lake comes
+and where the key is held, with **Forget**, which removes it from the front door only. Signing in to a lake comes
 with choosing one (liquify#96).
 
 **Clone from Lake** asks for the lake repository address (pasted from the repository's page on
 lake) and a new folder, each with its label above the field, and says the folder must not exist
 yet or be empty. Opening another repository
 replaces the active repository services in the same process; no restart is required. The active
-repository name in the status bar returns to this front door, while each recent row can open in the
-current window or a new one.
+repository name in the status bar returns to this front door, while each recent row opens in the
+current window on a click, or in a new one from its hover action.
 
 The lifecycle is a plain C++ state machine. `welcome`, `opening`, `cloning`, `open`, `unreadable`,
 `offline`, and `failed` are explicit states so a missing or unreadable local repository is not

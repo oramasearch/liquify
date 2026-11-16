@@ -404,7 +404,13 @@ enum class ShellIcon {
   markdown,
   settings,
   build_file,
-  data
+  data,
+  // The front door's (liquify#126).
+  new_folder,
+  clone,
+  window,
+  key,
+  branch
 };
 
 auto panel_icon(PanelId id) -> ShellIcon {
@@ -511,6 +517,39 @@ void draw_shell_icon(ShellIcon icon, ImVec2 origin) {
     draw->AddRect(point(1, 2), point(15, 12), color, 2, 0, 1.5F);
     line(4, 12, 4, 16);
     line(4, 16, 8, 12);
+    break;
+  case ShellIcon::new_folder:
+    draw->AddRect(point(1, 5), point(15, 14), color, 1.5F, 0, 1.5F);
+    line(1, 5, 1, 2);
+    line(1, 2, 7, 2);
+    line(7, 2, 9, 5);
+    line(8, 7.5F, 8, 11.5F);
+    line(6, 9.5F, 10, 9.5F);
+    break;
+  case ShellIcon::clone:
+    line(8, 1, 8, 10);
+    line(4.5F, 6.5F, 8, 10);
+    line(11.5F, 6.5F, 8, 10);
+    line(2, 10, 2, 14);
+    line(2, 14, 14, 14);
+    line(14, 14, 14, 10);
+    break;
+  case ShellIcon::window:
+    draw->AddRect(point(1, 2), point(15, 14), color, 1.5F, 0, 1.5F);
+    line(1, 5.5F, 15, 5.5F);
+    break;
+  case ShellIcon::key:
+    draw->AddCircle(point(5, 8), 3.5F, color, 16, 1.5F);
+    line(8.5F, 8, 15, 8);
+    line(12, 8, 12, 11);
+    line(15, 8, 15, 11);
+    break;
+  case ShellIcon::branch:
+    draw->AddCircle(point(4, 3), 2.0F, color, 12, 1.5F);
+    draw->AddCircle(point(4, 13), 2.0F, color, 12, 1.5F);
+    draw->AddCircle(point(12, 5), 2.0F, color, 12, 1.5F);
+    line(4, 5, 4, 11);
+    line(12, 7, 5.5F, 11.5F);
     break;
   default:
     draw->AddRect(point(2, 1), point(14, 15), color, 1, 0, 1.5F);
@@ -7504,39 +7543,81 @@ void App::draw_cut_composer() {
   ImGui::EndPopup();
 }
 
+// The front door's dialogs (liquify#126) are laid out as lake's forms: supporting copy in the
+// secondary ink, each label above its full-width field, hints as captions under the field, and
+// the buttons at the bottom right with the one primary last.
+namespace {
+
+constexpr float front_door_dialog_width = 560.0F;
+
+void dialog_copy(const design::Palette &palette, const char *text) {
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + front_door_dialog_width);
+  ImGui::TextUnformatted(text);
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
+}
+
+void dialog_caption(const design::Palette &palette, const char *text) {
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + front_door_dialog_width);
+  ImGui::TextUnformatted(text);
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
+}
+
+// Puts the next buttons, whose widths are given, flush with the dialog's right edge.
+void dialog_buttons_right(std::initializer_list<const char *> labels) {
+  auto width = 0.0F;
+  for (const auto *label : labels) {
+    width += ImGui::CalcTextSize(label, nullptr, true).x + design::space3 * 2.0F;
+  }
+  width += design::space2 * static_cast<float>(labels.size() - 1);
+  ImGui::Dummy(ImVec2(0.0F, design::space2));
+  ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                       std::max(0.0F, front_door_dialog_width - width));
+}
+
+} // namespace
+
 void App::draw_clone_dialog() {
   if (clone_dialog_open_) {
     ImGui::OpenPopup("Clone from Lake");
     clone_dialog_open_ = false;
   }
+  const auto palette = effective_palette(applied_dark_theme_, applied_high_contrast_);
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
-  ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
-  if (!begin_dialog("Clone from Lake", ImGuiWindowFlags_AlwaysAutoResize)) {
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(design::space6, design::space6));
+  const auto open = begin_dialog("Clone from Lake", ImGuiWindowFlags_AlwaysAutoResize);
+  ImGui::PopStyleVar();
+  if (!open) {
     return;
   }
-  ImGui::PushTextWrapPos(580.0F);
-  ImGui::TextUnformatted(
-      "Copy a repository from lake into a new folder on this computer. Paste "
-      "its address from the repository's page on lake.");
-  ImGui::PopTextWrapPos();
-  ImGui::Spacing();
+  dialog_copy(palette,
+              "Copy a repository from lake into a new folder on this computer. Paste its "
+              "address from the repository's page on lake.");
+  ImGui::Dummy(ImVec2(0.0F, design::space2));
   ImGui::TextUnformatted("Lake repository address");
   if (ImGui::IsWindowAppearing()) {
     ImGui::SetKeyboardFocusHere();
   }
-  ImGui::SetNextItemWidth(580.0F);
-  ImGui::InputTextWithHint("##clone-remote",
-                           "https://lake.example/v1/repositories/…",
+  ImGui::SetNextItemWidth(front_door_dialog_width);
+  ImGui::InputTextWithHint("##clone-remote", "https://lake.example/v1/repositories/...",
                            &clone_remote_);
   frame_layout_.controls["clone/remote"] = item_rectangle();
+  ImGui::Dummy(ImVec2(0.0F, design::space1));
   ImGui::TextUnformatted("New folder");
-  ImGui::SetNextItemWidth(580.0F);
-  ImGui::InputTextWithHint("##clone-folder", "/Users/you/projects/name",
-                           &clone_path_);
+  ImGui::SetNextItemWidth(front_door_dialog_width);
+  ImGui::InputTextWithHint("##clone-folder", "/Users/you/projects/name", &clone_path_);
   frame_layout_.controls["clone/folder"] = item_rectangle();
-  ImGui::TextDisabled("The folder must not exist yet, or be empty.");
-  ImGui::Spacing();
+  dialog_caption(palette, "The folder must not exist yet, or be empty.");
+  dialog_buttons_right({"Cancel", "Clone"});
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  frame_layout_.controls["clone/cancel"] = item_rectangle();
+  ImGui::SameLine();
   const auto ready = !clone_remote_.empty() && !clone_path_.empty();
   ImGui::BeginDisabled(!ready);
   if (kit_button("Clone", ButtonKind::primary)) {
@@ -7545,11 +7626,6 @@ void App::draw_clone_dialog() {
   }
   frame_layout_.controls["clone/submit"] = item_rectangle();
   ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    ImGui::CloseCurrentPopup();
-  }
-  frame_layout_.controls["clone/cancel"] = item_rectangle();
   ImGui::EndPopup();
 }
 
@@ -7582,29 +7658,31 @@ void App::draw_new_repository_dialog() {
     ImGui::OpenPopup("New Repository");
     new_repository_dialog_open_ = false;
   }
+  const auto palette = effective_palette(applied_dark_theme_, applied_high_contrast_);
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
-  ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
-  if (!begin_dialog("New Repository", ImGuiWindowFlags_AlwaysAutoResize)) {
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(design::space6, design::space6));
+  const auto open = begin_dialog("New Repository", ImGuiWindowFlags_AlwaysAutoResize);
+  ImGui::PopStyleVar();
+  if (!open) {
     return;
   }
-  ImGui::PushTextWrapPos(580.0F);
-  ImGui::TextUnformatted(
-      "Start a liquid repository in a new or empty folder. Every save becomes "
-      "a drip; cut drips into changes and push them to lake when you are "
-      "ready.");
-  ImGui::PopTextWrapPos();
-  ImGui::Spacing();
+  dialog_copy(palette,
+              "Start a liquid repository in a new or empty folder. Every save becomes a drip; "
+              "cut drips into changes and push them to lake when you are ready.");
+  ImGui::Dummy(ImVec2(0.0F, design::space2));
   ImGui::TextUnformatted("Folder");
   if (ImGui::IsWindowAppearing()) {
     ImGui::SetKeyboardFocusHere();
   }
-  ImGui::SetNextItemWidth(460.0F);
-  ImGui::InputTextWithHint("##new-repository-folder",
-                           "/Users/you/projects/name", &new_repository_path_);
+  const auto choose_width =
+      ImGui::CalcTextSize("Choose...").x + design::space3 * 2.0F + design::space2;
+  ImGui::SetNextItemWidth(front_door_dialog_width - choose_width);
+  ImGui::InputTextWithHint("##new-repository-folder", "/Users/you/projects/name",
+                           &new_repository_path_);
   frame_layout_.controls["new-repository/folder"] = item_rectangle();
-  ImGui::SameLine();
-  if (kit_button("Choose…", ButtonKind::secondary)) {
+  ImGui::SameLine(0.0F, design::space2);
+  if (kit_button("Choose...", ButtonKind::secondary)) {
     SDL_ShowOpenFolderDialog(
         [](void *userdata, const char *const *files, int) {
           auto *app = static_cast<App *>(userdata);
@@ -7614,7 +7692,12 @@ void App::draw_new_repository_dialog() {
         },
         this, window_, nullptr, false);
   }
-  ImGui::Spacing();
+  dialog_caption(palette, "The folder must be new, or empty.");
+  dialog_buttons_right({"Cancel", "Create repository"});
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::SameLine();
   ImGui::BeginDisabled(new_repository_path_.empty());
   if (kit_button("Create repository", ButtonKind::primary)) {
     begin_create_repository(new_repository_path_);
@@ -7622,35 +7705,216 @@ void App::draw_new_repository_dialog() {
   }
   frame_layout_.controls["new-repository/submit"] = item_rectangle();
   ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    ImGui::CloseCurrentPopup();
-  }
   ImGui::EndPopup();
 }
 
-void App::draw_welcome() {
-  const auto available = ImGui::GetContentRegionAvail();
-  const auto card_width = std::min(available.x - design::space8 * 2.0F, 920.0F);
-  ImGui::SetCursorPosX(
-      std::max((available.x - card_width) * 0.5F, design::space4));
-  ImGui::SetCursorPosY(design::space8);
-  ImGui::BeginChild(
-      "first-run-card",
-      ImVec2(card_width, std::max(available.y - design::space8 * 2.0F, 1.0F)),
-      ImGuiChildFlags_Border, ImGuiWindowFlags_AlwaysUseWindowPadding);
-  type_title("Welcome to liquify", "welcome/title");
+namespace {
+
+// A recent repository's last-change date, as lake shows times: "Today", "Yesterday",
+// "3 days ago", then the date. Anything that is not a YYYY-MM-DD date is shown as it is.
+auto relative_day(std::string_view value) -> std::string {
+  auto year = 0;
+  auto month = 0U;
+  auto day = 0U;
+  if (value.size() != 10 ||
+      std::sscanf(std::string(value).c_str(), "%d-%u-%u", &year, &month, &day) != 3) {
+    return std::string(value);
+  }
+  const auto date = std::chrono::year_month_day{
+      std::chrono::year{year}, std::chrono::month{month}, std::chrono::day{day}};
+  if (!date.ok()) {
+    return std::string(value);
+  }
+  const auto today = std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now());
+  const auto days = (today - std::chrono::sys_days{date}).count();
+  if (days == 0) {
+    return "Today";
+  }
+  if (days == 1) {
+    return "Yesterday";
+  }
+  if (days > 1 && days < 7) {
+    return std::to_string(days) + " days ago";
+  }
+  static constexpr std::array<const char *, 12> months{
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  auto text = std::string(months[month - 1]) + " " + std::to_string(day);
+  if (std::chrono::year_month_day{today}.year() != date.year()) {
+    text += ", " + std::to_string(year);
+  }
+  return text;
+}
+
+// Shortens text to a width with a trailing ellipsis, removing whole UTF-8 code points.
+auto fit_text(std::string value, float width) -> std::string {
+  if (ImGui::CalcTextSize(value.c_str()).x <= width) {
+    return value;
+  }
+  constexpr std::string_view ellipsis = "...";
+  while (!value.empty() &&
+         ImGui::CalcTextSize((value + std::string(ellipsis)).c_str()).x > width) {
+    auto last = value.size() - 1;
+    while (last > 0 && (static_cast<unsigned char>(value[last]) & 0xc0) == 0x80) {
+      --last;
+    }
+    value.resize(last);
+  }
+  return value + std::string(ellipsis);
+}
+
+auto font_of_size(float size) -> ImFont * {
+  for (auto *font : ImGui::GetIO().Fonts->Fonts) {
+    if (font->FontSize == size) {
+      return font;
+    }
+  }
+  return ImGui::GetFont();
+}
+
+// An icon on a 32-pixel tile: filled with `action` for the front door's primary way in, the
+// soft action tint for the others.
+void icon_tile(const design::Palette &palette, ShellIcon icon, ImVec2 origin, bool primary) {
+  auto *draw = ImGui::GetWindowDrawList();
+  const auto size = design::control_sm;
+  draw->AddRectFilled(origin, ImVec2(origin.x + size, origin.y + size),
+                      packed_color(primary ? palette.action : palette.action_soft),
+                      design::panel_radius);
   ImGui::PushStyleColor(ImGuiCol_Text,
-                        imgui_color(effective_palette(applied_dark_theme_,
-                                                      applied_high_contrast_)
-                                        .text_secondary));
+                        imgui_color(primary ? design::Rgba{1.0F, 1.0F, 1.0F, 1.0F}
+                                            : palette.action));
+  draw_shell_icon(icon, ImVec2(origin.x + (size - icon_box) * 0.5F,
+                               origin.y + (size - icon_box) * 0.5F));
+  ImGui::PopStyleColor();
+}
+
+// liquify's mark: a white drop on an `action` tile, the way lake's mark sits in its top bar.
+void wordmark_tile(const design::Palette &palette, ImVec2 origin, float size) {
+  auto *draw = ImGui::GetWindowDrawList();
+  draw->AddRectFilled(origin, ImVec2(origin.x + size, origin.y + size),
+                      packed_color(palette.action), design::control_radius * 2.0F);
+  const auto white = IM_COL32_WHITE;
+  const auto cx = origin.x + size * 0.5F;
+  const auto radius = size * 0.22F;
+  const auto cy = origin.y + size * 0.6F;
+  draw->AddCircleFilled(ImVec2(cx, cy), radius, white, 24);
+  draw->AddTriangleFilled(ImVec2(cx, origin.y + size * 0.18F),
+                          ImVec2(cx - radius * 0.96F, cy - radius * 0.3F),
+                          ImVec2(cx + radius * 0.96F, cy - radius * 0.3F), white);
+}
+
+// A panel in lake's style: the surface role on the canvas, a hairline border and rounded corners.
+// Its contents are drawn first on a channel above the background, so the panel takes its height
+// from them in the same frame (a child window would size itself a frame late).
+struct FrontDoorPanel {
+  ImDrawListSplitter splitter;
+  ImVec2 origin;
+  float width{};
+  ImVec2 padding;
+};
+
+void begin_front_door_panel(FrontDoorPanel &panel, float width, ImVec2 padding) {
+  panel.origin = ImGui::GetCursorScreenPos();
+  panel.width = width;
+  panel.padding = padding;
+  panel.splitter.Split(ImGui::GetWindowDrawList(), 2);
+  panel.splitter.SetCurrentChannel(ImGui::GetWindowDrawList(), 1);
+  ImGui::SetCursorScreenPos(ImVec2(panel.origin.x + padding.x, panel.origin.y + padding.y));
+  ImGui::BeginGroup();
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width - padding.x * 2.0F);
+}
+
+void end_front_door_panel(FrontDoorPanel &panel, const design::Palette &palette,
+                          bool high_contrast) {
+  ImGui::PopTextWrapPos();
+  ImGui::EndGroup();
+  const auto bottom = ImGui::GetItemRectMax().y + panel.padding.y;
+  auto *draw = ImGui::GetWindowDrawList();
+  panel.splitter.SetCurrentChannel(draw, 0);
+  const auto max = ImVec2(panel.origin.x + panel.width, bottom);
+  draw->AddRectFilled(panel.origin, max, packed_color(palette.surface), design::panel_radius);
+  panel.splitter.Merge(draw);
+  // The border goes over the contents, so a table's header row cannot cover it.
+  draw->AddRect(panel.origin, max,
+                packed_color(high_contrast ? palette.border_strong : palette.border_subtle),
+                design::panel_radius);
+  ImGui::SetCursorScreenPos(panel.origin);
+  ImGui::Dummy(ImVec2(panel.width, bottom - panel.origin.y));
+}
+
+} // namespace
+
+// The front door (liquify#126), laid out as lake's pages are: on the canvas, a column with the
+// mark, an eyebrow, one title and its copy, then the ways in as large rows in a panel, with the
+// identity and a new window as quiet actions under it; beside it, Recent Repositories as a
+// compact table in a panel, or an empty state that says what will appear and how to start.
+void App::draw_welcome() {
+  const auto palette = effective_palette(applied_dark_theme_, applied_high_contrast_);
+  {
+    const auto min = ImGui::GetWindowPos();
+    const auto size = ImGui::GetWindowSize();
+    ImGui::GetWindowDrawList()->AddRectFilled(min, ImVec2(min.x + size.x, min.y + size.y),
+                                              packed_color(palette.canvas));
+  }
+  const auto available = ImGui::GetContentRegionAvail();
+  const auto margin = available.x >= 900.0F ? design::space8 * 1.5F : design::space6;
+  const auto content_width = std::min(available.x - margin * 2.0F, 1180.0F);
+  const auto left_x = std::max((available.x - content_width) * 0.5F, margin);
+  const auto stacked = content_width < 760.0F;
+  const auto gutter = design::space8 + design::space2;
+  const auto column_width =
+      stacked ? content_width : std::clamp(content_width * 0.36F, 340.0F, 420.0F);
+  const auto recent_width = stacked ? content_width : content_width - column_width - gutter;
+
+  // The block is centred vertically while it fits, from last frame's height.
+  auto *storage = ImGui::GetStateStorage();
+  const auto height_key = ImGui::GetID("front-door/content-height");
+  const auto last_height = storage->GetFloat(height_key, 0.0F);
+  const auto top = std::max(design::space8 + design::space2,
+                            last_height > 0.0F ? (available.y - last_height) * 0.4F : 0.0F);
+  ImGui::SetCursorPos(ImVec2(left_x, top));
+  const auto block_top = ImGui::GetCursorScreenPos().y;
+
+  const auto transparent = ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, transparent);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  // The columns are transparent child windows so wrapped text stops at their edge. They are as
+  // tall as the page below the block's top, or as their content was last frame.
+  const auto column_height =
+      std::max({available.y - top, last_height, 1.0F});
+  ImGui::BeginChild("front-door/column", ImVec2(column_width, column_height),
+                    ImGuiChildFlags_None,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(design::space2, design::space2));
+
+  // The mark and the product name, then lake's heading block: eyebrow, title, copy.
+  {
+    const auto origin = ImGui::GetCursorScreenPos();
+    const auto mark = design::space6;
+    wordmark_tile(palette, origin, mark);
+    ImGui::SetCursorScreenPos(ImVec2(origin.x + mark + design::space2, origin.y));
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[section_font_index_]);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (mark - ImGui::GetTextLineHeight()) * 0.5F);
+    ImGui::TextUnformatted("liquify");
+    ImGui::PopFont();
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + mark + design::space6));
+  }
+  ImGui::PushFont(font_of_size(design::text12));
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+  ImGui::TextUnformatted("THE IDE FOR LIQUID");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  frame_layout_.controls["welcome/eyebrow"] = item_rectangle();
+  type_title("Welcome to liquify", "welcome/title");
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::PushTextWrapPos(0.0F);
   ImGui::TextUnformatted(
       "Build software locally. Collaborate through lake when it is reachable.");
+  ImGui::PopTextWrapPos();
   frame_layout_.controls["welcome/copy"] = item_rectangle();
   ImGui::PopStyleColor();
-  ImGui::TextDisabled("Open or create a repository here, or clone one from "
-                      "lake.");
-  ImGui::Spacing();
+  ImGui::Dummy(ImVec2(0.0F, design::space2));
 
   const auto phase = first_run_.phase();
   if (phase == RepositoryLifecyclePhase::unreadable) {
@@ -7658,10 +7922,9 @@ void App::draw_welcome() {
         {.kind = FailureKind::local,
          .summary = "This folder could not be opened as a repository",
          .next_step = "Retry, or choose another folder.",
-         .details = without_absolute_paths(first_run_.error(),
-                                           first_run_.pending_path())},
+         .details = without_absolute_paths(first_run_.error(), first_run_.pending_path())},
         "open-failure");
-    ImGui::TextDisabled("%s", first_run_.pending_path().string().c_str());
+    ImGui::TextDisabled("%s", fit_text(first_run_.pending_path().string(), column_width).c_str());
     if (kit_button("Retry", ButtonKind::primary)) {
       begin_open_repository(first_run_.pending_path());
     }
@@ -7670,91 +7933,167 @@ void App::draw_welcome() {
       show_folder_dialog();
     }
     ImGui::SameLine();
-    if (kit_button("Back", ButtonKind::secondary)) {
+    if (kit_button("Back", ButtonKind::quiet)) {
       first_run_.return_to_welcome();
     }
-    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0F, design::space2));
   } else if (phase == RepositoryLifecyclePhase::offline ||
              phase == RepositoryLifecyclePhase::failed) {
     draw_user_error(first_run_.clone_failure(), "clone-failure");
     if (kit_button("Retry clone", ButtonKind::primary)) {
-      begin_clone_repository(first_run_.clone_remote(),
-                             first_run_.pending_path());
+      begin_clone_repository(first_run_.clone_remote(), first_run_.pending_path());
     }
     frame_layout_.controls["clone-failure/retry"] = item_rectangle();
     ImGui::SameLine();
-    if (kit_button("Back", ButtonKind::secondary)) {
+    if (kit_button("Back", ButtonKind::quiet)) {
       first_run_.return_to_welcome();
     }
     frame_layout_.controls["clone-failure/back"] = item_rectangle();
-    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0F, design::space2));
   } else if (phase == RepositoryLifecyclePhase::opening ||
              phase == RepositoryLifecyclePhase::cloning) {
     ImGui::TextUnformatted(phase == RepositoryLifecyclePhase::opening
                                ? "Opening repository..."
                                : "Cloning repository...");
-    ImGui::TextDisabled("%s", first_run_.pending_path().string().c_str());
-    ImGui::Separator();
+    ImGui::TextDisabled("%s", fit_text(first_run_.pending_path().string(), column_width).c_str());
+    ImGui::Dummy(ImVec2(0.0F, design::space2));
   }
 
-  ImGui::BeginDisabled(repository_operation_.has_value());
-  if (kit_button("Open folder", ButtonKind::primary)) {
-    show_folder_dialog();
+  // The ways in: one panel of large rows. Open a folder is the front door's primary action, so
+  // its tile is the filled one.
+  const auto busy = repository_operation_.has_value();
+  auto actions_panel = FrontDoorPanel{};
+  begin_front_door_panel(actions_panel, column_width, ImVec2(0.0F, 0.0F));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0F, 0.0F));
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, imgui_color(palette.layer_hover));
+  ImGui::PushStyleColor(ImGuiCol_HeaderActive, imgui_color(palette.selected));
+  struct Way {
+    const char *id;
+    const char *label;
+    const char *description;
+    ShellIcon icon;
+    bool primary;
+  };
+  const auto ways = std::array{
+      Way{"front-door/open", "Open a folder", "Work in a liquid repository on this computer.",
+          ShellIcon::folder, true},
+      Way{"front-door/new", "New repository", "Start one in a new or empty folder.",
+          ShellIcon::new_folder, false},
+      Way{"front-door/clone", "Clone from lake", "Copy a repository from lake to this computer.",
+          ShellIcon::clone, false},
+  };
+  const auto row_height = design::control_lg + design::space4;
+  ImGui::BeginDisabled(busy);
+  for (std::size_t index = 0; index < ways.size(); ++index) {
+    const auto &way = ways[index];
+    const auto origin = ImGui::GetCursorScreenPos();
+    const auto width = column_width;
+    ImGui::PushID(way.id);
+    const auto clicked =
+        ImGui::Selectable("##way", false, ImGuiSelectableFlags_None, ImVec2(width, row_height));
+    const auto hovered = ImGui::IsItemHovered();
+    frame_layout_.controls[way.id] = item_rectangle();
+    ImGui::PopID();
+    if (hovered) {
+      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    }
+    auto *draw = ImGui::GetWindowDrawList();
+    const auto tile_y = origin.y + (row_height - design::control_sm) * 0.5F;
+    icon_tile(palette, way.icon, ImVec2(origin.x + design::space4, tile_y), way.primary);
+    const auto text_x = origin.x + design::space4 + design::control_sm + design::space3;
+    const auto line = ImGui::GetTextLineHeight();
+    const auto text_y = origin.y + (row_height - line * 2.0F - design::space1) * 0.5F;
+    const auto label_color = busy ? palette.text_disabled
+                             : way.primary ? palette.action
+                                           : palette.text_primary;
+    draw->AddText(ImVec2(text_x, text_y), packed_color(label_color), way.label);
+    const auto description_width = origin.x + width - design::space4 - text_x;
+    draw->AddText(ImVec2(text_x, text_y + line + design::space1),
+                  packed_color(palette.text_secondary),
+                  fit_text(way.description, description_width).c_str());
+    if (index + 1 < ways.size()) {
+      draw->AddLine(ImVec2(origin.x, origin.y + row_height - 0.5F),
+                    ImVec2(origin.x + width, origin.y + row_height - 0.5F),
+                    packed_color(applied_high_contrast_ ? palette.border_strong
+                                                        : palette.border_subtle));
+    }
+    if (!clicked) {
+      continue;
+    }
+    if (index == 0) {
+      show_folder_dialog();
+    } else if (index == 1) {
+      new_repository_dialog_open_ = true;
+    } else {
+      clone_dialog_open_ = true;
+      clone_remote_.clear();
+      clone_path_.clear();
+    }
   }
-  frame_layout_.controls["front-door/open"] = item_rectangle();
-  ImGui::SameLine();
-  if (kit_button("New repository", ButtonKind::secondary)) {
-    new_repository_dialog_open_ = true;
-  }
-  frame_layout_.controls["front-door/new"] = item_rectangle();
-  ImGui::SameLine();
-  if (kit_button("Clone from lake", ButtonKind::secondary)) {
-    clone_dialog_open_ = true;
-    clone_remote_.clear();
-    clone_path_.clear();
-  }
-  frame_layout_.controls["front-door/clone"] = item_rectangle();
-  ImGui::SameLine();
-  if (kit_button("New window", ButtonKind::secondary)) {
-    open_new_window();
-  }
-  frame_layout_.controls["front-door/new-window"] = item_rectangle();
   ImGui::EndDisabled();
-  ImGui::Spacing();
+  ImGui::PopStyleColor(2);
+  ImGui::PopStyleVar();
+  end_front_door_panel(actions_panel, palette, applied_high_contrast_);
 
-  // This is the computer's own signing identity (TAAP), not a lake account: it signs every
-  // drip and change. Signing in to a lake comes with choosing one (liquify#96).
+  // Quiet secondary actions. Your identity is this computer's own signing identity (TAAP), not
+  // a lake account: it signs every drip and change. Signing in to a lake comes with choosing
+  // one (liquify#96).
+  ImGui::Dummy(ImVec2(0.0F, design::space1));
+  // Quiet buttons with a leading stroke icon: the label reserves the icon's room.
+  const auto quiet_label = [](const char *label) {
+    return icon_label(label, design::space2, design::space2);
+  };
+  const auto quiet_icon = [&](ShellIcon icon) {
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    item_icon(icon, design::space2);
+    ImGui::PopStyleColor();
+  };
   if (first_run_.session()) {
-    if (kit_button("Your identity", ButtonKind::secondary, ButtonSize::compact)) {
+    if (kit_button(quiet_label("Your identity##identity").c_str(), ButtonKind::quiet,
+                   ButtonSize::compact)) {
       ImGui::OpenPopup("identity-details");
     }
+    quiet_icon(ShellIcon::key);
     frame_layout_.controls["front-door/identity"] = item_rectangle();
     if (ImGui::BeginPopup("identity-details")) {
-      ImGui::TextUnformatted(
-          "This computer signs your drips and changes with this identity.");
+      ImGui::TextUnformatted("This computer signs your drips and changes with this identity.");
       identifier_detail("Identity", first_run_.session()->actor);
-      ImGui::TextDisabled("Key custody: %s",
-                          first_run_.session()->custody.c_str());
+      ImGui::TextDisabled("Key custody: %s", first_run_.session()->custody.c_str());
+      if (kit_button("Forget", ButtonKind::secondary, ButtonSize::compact)) {
+        first_run_.sign_out();
+        persist_first_run();
+        ImGui::CloseCurrentPopup();
+      }
       ImGui::EndPopup();
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("Signs your drips and changes");
-    ImGui::SameLine();
-    if (kit_button("Forget", ButtonKind::secondary, ButtonSize::compact)) {
-      first_run_.sign_out();
-      persist_first_run();
     }
   } else {
     ImGui::BeginDisabled(identity_operation_.has_value());
-    if (kit_button(identity_operation_ ? "Reading your identity..."
-                                          : "Your identity", ButtonKind::secondary)) {
+    if (kit_button(quiet_label(identity_operation_ ? "Reading your identity...##identity"
+                                                   : "Your identity##identity")
+                       .c_str(),
+                   ButtonKind::quiet, ButtonSize::compact)) {
       begin_sign_in();
     }
+    quiet_icon(ShellIcon::key);
     frame_layout_.controls["front-door/identity"] = item_rectangle();
     ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::TextDisabled("The key this computer signs your work with");
   }
+  ImGui::SameLine(0.0F, design::space1);
+  ImGui::BeginDisabled(busy);
+  if (kit_button(quiet_label("New window").c_str(), ButtonKind::quiet, ButtonSize::compact)) {
+    open_new_window();
+  }
+  quiet_icon(ShellIcon::window);
+  frame_layout_.controls["front-door/new-window"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+  ImGui::SetCursorPosX(ImGui::GetCursorPosX() + design::space2);
+  ImGui::PushTextWrapPos(0.0F);
+  ImGui::TextUnformatted(first_run_.session()
+                             ? "Your identity signs your drips and changes on this computer."
+                             : "Your identity is the key this computer signs your work with.");
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
   if (!identity_error_.empty()) {
     draw_user_error({.kind = FailureKind::local,
                      .summary = "Your identity could not be read",
@@ -7763,56 +8102,219 @@ void App::draw_welcome() {
                      .details = without_absolute_paths(identity_error_)},
                     "identity-failure");
   }
-
-  ImGui::Spacing();
-  type_heading("Recent Repositories", "welcome/recent-heading");
-  if (first_run_.recent().empty()) {
-    ImGui::TextDisabled("Repositories you open will appear here.");
-  } else if (ImGui::BeginTable("recent-repositories", 4,
-                               ImGuiTableFlags_RowBg |
-                                   ImGuiTableFlags_BordersInnerH |
-                                   ImGuiTableFlags_SizingStretchProp)) {
-    ImGui::TableSetupColumn("Repository", ImGuiTableColumnFlags_WidthStretch,
-                            1.4F);
-    ImGui::TableSetupColumn("Last change", ImGuiTableColumnFlags_WidthStretch,
-                            2.2F);
-    ImGui::TableSetupColumn("Branch", ImGuiTableColumnFlags_WidthStretch, 1.0F);
-    ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 86.0F);
-    table_headers(effective_palette(applied_dark_theme_, applied_high_contrast_),
-                  frame_layout_, "recent-repositories");
-    for (const auto &recent : first_run_.recent()) {
-      ImGui::PushID(recent.path.string().c_str());
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      if (ImGui::Selectable(recent.name.c_str(), false,
-                            ImGuiSelectableFlags_SpanAllColumns)) {
-        begin_open_repository(recent.path);
-      }
-      ImGui::TextDisabled("%s", recent.path.string().c_str());
-      ImGui::TableSetColumnIndex(1);
-      if (recent.last_change.starts_with("blake3:")) {
-        if (kit_button("Change details", ButtonKind::secondary, ButtonSize::compact)) {
-          ImGui::OpenPopup("recent-change");
-        }
-        if (ImGui::BeginPopup("recent-change")) {
-          identifier_detail("Change", recent.last_change);
-          ImGui::EndPopup();
-        }
-      } else {
-        detail_text(recent.last_change);
-      }
-      ImGui::TextDisabled("%s", recent.last_changed_at.c_str());
-      ImGui::TableSetColumnIndex(2);
-      ImGui::TextUnformatted(recent.branch.c_str());
-      ImGui::TableSetColumnIndex(3);
-      if (kit_button("New window", ButtonKind::secondary, ButtonSize::compact)) {
-        open_new_window(recent.path);
-      }
-      ImGui::PopID();
-    }
-    ImGui::EndTable();
-  }
+  auto block_bottom = ImGui::GetCursorScreenPos().y;
+  ImGui::PopStyleVar();
   ImGui::EndChild();
+
+  // Recent Repositories, beside the column (under it in a narrow window).
+  if (stacked) {
+    ImGui::SetCursorScreenPos(
+        ImVec2(ImGui::GetWindowPos().x + left_x, block_bottom + design::space4));
+  } else {
+    ImGui::SetCursorScreenPos(
+        ImVec2(ImGui::GetWindowPos().x + left_x + column_width + gutter, block_top));
+  }
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, transparent);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  ImGui::BeginChild("front-door/recent", ImVec2(recent_width, column_height), ImGuiChildFlags_None,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(design::space2, design::space2));
+  // Align the heading with the column's title block rather than its mark.
+  if (!stacked) {
+    ImGui::Dummy(ImVec2(0.0F, design::space6 + design::space6 - design::space2));
+  }
+  type_heading("Recent Repositories", "welcome/recent-heading");
+  const auto &recent = first_run_.recent();
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::TextUnformatted(recent.empty() ? "Nothing opened on this computer yet."
+                                        : "Newest first. Click one to open it here.");
+  ImGui::PopStyleColor();
+  ImGui::Dummy(ImVec2(0.0F, design::space1));
+
+  if (recent.empty()) {
+    auto empty_panel = FrontDoorPanel{};
+    begin_front_door_panel(empty_panel, recent_width, ImVec2(design::space6, design::space8));
+    const auto width = recent_width - design::space6 * 2.0F;
+    const auto centred = [&](const char *text, design::Rgba color) {
+      const auto size = ImGui::CalcTextSize(text, nullptr, false, width);
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0F, (width - size.x) * 0.5F));
+      ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(color));
+      ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + size.x + 1.0F);
+      ImGui::TextUnformatted(text);
+      ImGui::PopTextWrapPos();
+      ImGui::PopStyleColor();
+    };
+    {
+      const auto origin = ImGui::GetCursorScreenPos();
+      icon_tile(palette, ShellIcon::folder,
+                ImVec2(origin.x + (width - design::control_sm) * 0.5F, origin.y), false);
+      ImGui::Dummy(ImVec2(width, design::control_sm + design::space2));
+    }
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[section_font_index_]);
+    centred("No recent repositories", palette.text_primary);
+    ImGui::PopFont();
+    frame_layout_.controls["front-door/recent-empty"] = item_rectangle();
+    centred("Repositories you open, create or clone appear here, so you can come back to them "
+            "in one click.",
+            palette.text_secondary);
+    centred("Open a folder that holds a liquid repository, or clone one from lake, to start.",
+            palette.text_secondary);
+    ImGui::Dummy(ImVec2(0.0F, design::space2));
+    {
+      ImGui::PushFont(editor_font_index_ >= 0 ? ImGui::GetIO().Fonts->Fonts[editor_font_index_]
+                                              : ImGui::GetFont());
+      constexpr const char *command = "liquify ~/projects/name";
+      const auto size = ImGui::CalcTextSize(command);
+      const auto origin = ImGui::GetCursorScreenPos();
+      const auto x = origin.x + std::max(0.0F, (width - size.x) * 0.5F);
+      ImGui::GetWindowDrawList()->AddRectFilled(
+          ImVec2(x - design::space2, origin.y),
+          ImVec2(x + size.x + design::space2, origin.y + size.y + design::space2),
+          packed_color(palette.layer), design::control_radius);
+      ImGui::GetWindowDrawList()->AddText(ImVec2(x, origin.y + design::space1),
+                                          packed_color(palette.text_primary), command);
+      ImGui::Dummy(ImVec2(width, size.y + design::space2));
+      ImGui::PopFont();
+    }
+    centred("From a terminal, the same opens a repository directly.", palette.text_tertiary);
+    end_front_door_panel(empty_panel, palette, applied_high_contrast_);
+  } else {
+    auto list_panel = FrontDoorPanel{};
+    begin_front_door_panel(list_panel, recent_width, ImVec2(0.0F, 0.0F));
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(design::space4, design::space2));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, imgui_color(palette.layer_hover));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, imgui_color(palette.selected));
+    ImGui::PushStyleColor(ImGuiCol_TableBorderLight,
+                          imgui_color(applied_high_contrast_ ? palette.border_strong
+                                                             : palette.border_subtle));
+    const auto new_window_label = "Open in new window";
+    const auto action_width =
+        ImGui::CalcTextSize(new_window_label).x + design::space2 * 2.0F;
+    if (ImGui::BeginTable("recent-repositories", 5,
+                          ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp |
+                              ImGuiTableFlags_PadOuterX,
+                          ImVec2(recent_width, 0.0F))) {
+      ImGui::TableSetupColumn("Repository", ImGuiTableColumnFlags_WidthStretch, 1.3F);
+      ImGui::TableSetupColumn("Branch", ImGuiTableColumnFlags_WidthStretch, 0.9F);
+      ImGui::TableSetupColumn("Last change", ImGuiTableColumnFlags_WidthStretch, 1.6F);
+      ImGui::TableSetupColumn("Updated", ImGuiTableColumnFlags_WidthFixed,
+                              ImGui::CalcTextSize("Yesterday__").x);
+      ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, action_width);
+      table_headers(palette, frame_layout_, "recent-repositories");
+      const auto line = ImGui::GetTextLineHeight();
+      const auto row_content = line + design::space3 * 2.0F - design::space2 * 2.0F;
+      const auto centre_text = [&] {
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (row_content - line) * 0.5F);
+      };
+      auto *table = ImGui::GetCurrentTable();
+      ImGui::BeginDisabled(busy);
+      for (const auto &entry : recent) {
+        ImGui::PushID(entry.path.string().c_str());
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        const auto origin = ImGui::GetCursorScreenPos();
+        const auto clicked = ImGui::Selectable(
+            "##row", false,
+            ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
+            ImVec2(0.0F, row_content));
+        const auto row_min = ImGui::GetItemRectMin();
+        const auto row_max = ImGui::GetItemRectMax();
+        if (ImGui::IsItemHovered()) {
+          ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+          ImGui::SetTooltip("%s", entry.path.string().c_str());
+        }
+        frame_layout_.controls["front-door/recent/" + entry.name] = item_rectangle();
+        if (clicked) {
+          begin_open_repository(entry.path);
+        }
+        const auto row_hovered =
+            !busy && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+            ImGui::IsMouseHoveringRect(
+                ImVec2(table != nullptr ? table->OuterRect.Min.x : row_min.x,
+                       row_min.y - design::space2),
+                ImVec2(table != nullptr ? table->OuterRect.Max.x : row_max.x,
+                       row_max.y + design::space2),
+                false);
+        const auto column = ImGui::GetContentRegionAvail().x;
+        ImGui::SetCursorScreenPos(
+            ImVec2(origin.x, origin.y + (row_content - icon_box) * 0.5F));
+        ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+        draw_shell_icon(ShellIcon::folder, ImGui::GetCursorScreenPos());
+        ImGui::PopStyleColor();
+        ImGui::SetCursorScreenPos(ImVec2(origin.x + icon_box + design::space2,
+                                         origin.y + (row_content - line) * 0.5F));
+        ImGui::TextUnformatted(
+            fit_text(entry.name, column - icon_box - design::space2).c_str());
+
+        ImGui::TableSetColumnIndex(1);
+        centre_text();
+        {
+          const auto at = ImGui::GetCursorScreenPos();
+          ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+          draw_shell_icon(ShellIcon::branch, ImVec2(at.x, at.y + (line - icon_box) * 0.5F));
+          ImGui::PopStyleColor();
+          ImGui::SetCursorScreenPos(ImVec2(at.x + icon_box + design::space1, at.y));
+          ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+          ImGui::TextUnformatted(
+              fit_text(entry.branch,
+                       ImGui::GetContentRegionAvail().x)
+                  .c_str());
+          ImGui::PopStyleColor();
+        }
+
+        ImGui::TableSetColumnIndex(2);
+        centre_text();
+        // The UI atlas has no U+2026 glyph, so the shortened identifier ends in three dots.
+        auto change = compact_identifiers(entry.last_change);
+        constexpr std::string_view unsupported = "\u2026";
+        for (auto at = change.find(unsupported); at != std::string::npos;
+             at = change.find(unsupported)) {
+          change.replace(at, unsupported.size(), "...");
+        }
+        ImGui::TextUnformatted(fit_text(change, ImGui::GetContentRegionAvail().x).c_str());
+        if (ImGui::IsItemHovered() && change != entry.last_change) {
+          ImGui::SetTooltip("%s", entry.last_change.c_str());
+        }
+
+        ImGui::TableSetColumnIndex(3);
+        centre_text();
+        ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+        ImGui::TextUnformatted(relative_day(entry.last_changed_at).c_str());
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered() && !entry.last_changed_at.empty()) {
+          ImGui::SetTooltip("Last change %s", entry.last_changed_at.c_str());
+        }
+
+        ImGui::TableSetColumnIndex(4);
+        if (row_hovered) {
+          ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (row_content - design::space6) * 0.5F);
+          if (kit_button(new_window_label, ButtonKind::quiet, ButtonSize::compact)) {
+            open_new_window(entry.path);
+          }
+          frame_layout_.controls["front-door/recent/" + entry.name + "/new-window"] =
+              item_rectangle();
+        }
+        ImGui::PopID();
+      }
+      ImGui::EndDisabled();
+      ImGui::EndTable();
+    }
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+    end_front_door_panel(list_panel, palette, applied_high_contrast_);
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+    ImGui::TextUnformatted("Hover a repository for its folder. liquify keeps the last eight.");
+    ImGui::PopStyleColor();
+  }
+  block_bottom = std::max(block_bottom, ImGui::GetCursorScreenPos().y);
+  ImGui::PopStyleVar();
+  ImGui::EndChild();
+  storage->SetFloat(height_key, block_bottom - block_top);
+  ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, block_bottom));
+  ImGui::Dummy(ImVec2(0.0F, design::space8));
+
   draw_clone_dialog();
   draw_new_repository_dialog();
 }
