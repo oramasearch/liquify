@@ -29,7 +29,7 @@ if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT LIQUIFY_USE_SYSTEM_COMPILER)
   endif()
 endif()
 
-project(liquify VERSION 0.0.1 LANGUAGES C CXX
+project(liquify VERSION 0.1.0 LANGUAGES C CXX
         DESCRIPTION "liquify — the cross-platform IDE for liquid")
 
 set(CMAKE_CXX_STANDARD 26)
@@ -191,6 +191,12 @@ add_library(liquify-core STATIC
   src/user_error.cpp
   src/stub_tree.cpp
   src/version.cpp)
+# The one place the release version lives is project(VERSION) above; the code reads it from here.
+target_compile_definitions(liquify-core PUBLIC
+  LIQUIFY_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+  LIQUIFY_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+  LIQUIFY_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+  LIQUIFY_VERSION_STRING="${PROJECT_VERSION}")
 target_compile_definitions(liquify-core PRIVATE
   LIQUIFY_REVISION="${LIQUIFY_REVISION}"
   LIQUIFY_LIQUID_REVISION="${LIQUID_REVISION}")

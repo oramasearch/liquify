@@ -11,7 +11,7 @@ param(
     [string]$PfxPassword = '',
     [string]$Publisher = 'CN=Liquify CI',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
-    [string]$PackageVersion = '0.0.1.0'
+    [string]$PackageVersion = '0.1.0.0'
 )
 
 $ErrorActionPreference = 'Stop'

@@ -17,7 +17,7 @@ installer_identity="${LIQUIFY_APPLE_INSTALLER_IDENTITY:-}"
 notary_key_path="${LIQUIFY_APPLE_NOTARY_KEY_PATH:-}"
 notary_key_id="${LIQUIFY_APPLE_NOTARY_KEY_ID:-}"
 notary_issuer_id="${LIQUIFY_APPLE_NOTARY_ISSUER_ID:-}"
-version="${LIQUIFY_PACKAGE_VERSION:-0.0.1}"
+version="${LIQUIFY_PACKAGE_VERSION:-0.1.0}"
 
 if [[ ! -x "$binary_path" ]]; then
     echo "liquify binary is not executable: $binary_path" >&2

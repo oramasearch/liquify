@@ -137,6 +137,13 @@ if(APPLE)
       SKIP_RETURN_CODE 77)
 endif()
 
+# Every release version has its notes page (docs/releases/vX.Y.Z.md).
+add_test(NAME liquify-release-notes-exist
+  COMMAND ${CMAKE_COMMAND} -E cat ${CMAKE_SOURCE_DIR}/docs/releases/v${PROJECT_VERSION}.md)
+add_test(NAME liquify-release-version-packaging
+  COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DVERSION=${PROJECT_VERSION}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/test_release_version.cmake)
+
 add_test(
   NAME liquify-print-tree-unreadable
   COMMAND ${CMAKE_COMMAND}

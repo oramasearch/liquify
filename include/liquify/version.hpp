@@ -13,7 +13,7 @@ struct version {
 };
 
 [[nodiscard]] constexpr version current_version() noexcept {
-    return {0, 0, 1};
+    return {LIQUIFY_VERSION_MAJOR, LIQUIFY_VERSION_MINOR, LIQUIFY_VERSION_PATCH};
 }
 [[nodiscard]] std::string_view version_string() noexcept;
 [[nodiscard]] std::string_view liquid_revision() noexcept;

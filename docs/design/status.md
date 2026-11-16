@@ -170,12 +170,12 @@ their affected editor lines ([`../editor/build.md`](../editor/build.md)).
 
 ## Packaging and CI
 
-Every main-branch push and pull request repeats the clean-clone release build on Linux, macOS and
-Windows, runs the tests, the version command and the display-backed smoke self-test, and produces
-a hardened-runtime macOS `pkg` and `dmg`, a signed and install-tested Windows MSIX, and an AppImage
-exercised on Ubuntu and Fedora. `v*` tags publish those installers with signed and unsigned
-SHA-256 records; notarization runs when the release secrets are present. Hand-built packaging
-remains in place until liquid's projection and platform-signing targets land
+The workflows in `.github/workflows/` describe a clean-clone build on Linux, macOS and Windows and
+installer packaging (a hardened-runtime macOS `pkg` and `dmg`, a signed Windows MSIX, an
+AppImage), but GitHub Actions is turned off for this repository, so none of them runs. Proof is
+local: the build and the full suite, run when a release is cut
+([`../releases/README.md`](../releases/README.md)). v0.1.0 publishes no installer. Hand-built
+packaging remains in place until liquid's projection and platform-signing targets land
 ([`../build/ci.md`](../build/ci.md), [`../packaging/README.md`](../packaging/README.md)).
 
 Native window and Diagnostics screenshot rendering checks consume the current frame layout

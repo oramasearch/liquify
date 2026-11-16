@@ -76,7 +76,7 @@ state file contains the public actor and custody description, never a credential
 **libliquid.** liquid is a sibling module resolved by `LIQUIFY_LIQUID_SOURCE_DIR`
 (default `../liquid`), built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is `7ff6ed82f93b916ef206c5776e2761b19536d8f3`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
+`liquid::liquid`. The pin is `27d56ba3726f19834dce23125e0e15299f889ba7` (libliquid 0.2.0; the earlier `7ff6ed8` carried): liquid Phase 1 plus its Phase 2 build engine, Phase 3
 distribution foundation, compact shallow repository checkpoints, the persisted demand-driven
 query graph from liquid #20, tree-diff and record-enumeration APIs, and the per-checkout daemon and
 cursor fan-out from liquid #21. It also includes liquid #65's registered frontend modules and

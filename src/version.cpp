@@ -8,7 +8,7 @@
 
 namespace liquify {
 std::string_view version_string() noexcept {
-    return "0.0.1+" LIQUIFY_REVISION;
+    return LIQUIFY_VERSION_STRING "+" LIQUIFY_REVISION;
 }
 
 std::string_view liquid_revision() noexcept {

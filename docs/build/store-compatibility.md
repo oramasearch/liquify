@@ -1,10 +1,10 @@
 # CLI, IDE, and store compatibility
 
-liquify pins libliquid at `7ff6ed82f93b916ef206c5776e2761b19536d8f3` (liquid #283,
-bounded near-duplicate chunk compression). The previous pin, `fd7ee06ee9f493b2e37e107fe20771fc3853fcbc`,
-read object-map versions 1–4. The supported CLI writes version 5. The new pin reads versions 1–5
-and owns all store, pack, index-manifest, and repository migration behavior. liquify still builds
-it with `LIQUID_BUILD_CLI=OFF`; no liquid source is edited through the submodule.
+liquify v0.1.0 builds against liquid `27d56ba3726f19834dce23125e0e15299f889ba7` (libliquid 0.2.0),
+the commit liquid-bridge pins. liquid is a sibling checkout, not a submodule: check that commit
+out in `../liquid` (or pass `-DLIQUIFY_LIQUID_SOURCE_DIR`). The pin reads object-map versions 1-5
+and owns all store, pack, index-manifest, and repository migration behavior. liquify builds it
+with `LIQUID_BUILD_CLI=OFF`; no liquid source is edited from liquify.
 
 ## Supported artifacts
 
@@ -12,8 +12,8 @@ Until release numbers identify compatible artifacts, use exact source revisions:
 
 | Artifact | Supported revision |
 |---|---|
-| liquid CLI, built separately | `7ff6ed82f93b916ef206c5776e2761b19536d8f3` |
-| libliquid linked into liquify | `7ff6ed82f93b916ef206c5776e2761b19536d8f3` |
+| liquid CLI, built separately | `27d56ba3726f19834dce23125e0e15299f889ba7` |
+| libliquid linked into liquify | `27d56ba3726f19834dce23125e0e15299f889ba7` |
 | lake used for the native clone proof | `620c249c3e03c455b1392d4691488e7639d01ff6` |
 
 The lake check uses an existing native lake HTTP artifact as an external service. It is not a
@@ -24,7 +24,7 @@ memory, while repository bytes use the actual lake/libliquid storage implementat
 
 `liquify version` and `--command help.version` report the IDE revision, libliquid revision, store
 marker version 1, and supported object-map versions. The IDE's version string also carries its
-revision. Both numerical release versions remain `0.0.1`; upstream liquid's standalone version
+revision. liquify's release version is `0.1.0` (`project(VERSION)` in `CMakeLists.txt`, the only place it is written); liquid's numerical version is separate; upstream liquid's standalone version
 output still omits its revision, so record the CLI source revision and build provenance alongside
 the executable. The compatibility runner prints both paths and the source revision.
 
