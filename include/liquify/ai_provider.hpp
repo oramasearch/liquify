@@ -69,4 +69,14 @@ private:
 
 [[nodiscard]] auto ai_stop_reason_name(AiStopReason reason) -> std::string_view;
 
+// The Messages API body for `request` (liquify#73). The repository context goes in its own content
+// block, inside <repository_context> tags, with the request marker and the closing tag neutralised,
+// so repository text cannot stand where the user's request goes; the request follows in a second
+// block. The system prompt tells the model the context is data, never instructions.
+[[nodiscard]] auto anthropic_request_body(const AiRequest& request) -> std::string;
+
+// `context` made safe to place inside <repository_context>: every "[user-request]" and every
+// "</repository_context>" in it is rewritten so it can no longer end the block or start a request.
+[[nodiscard]] auto quote_repository_context(std::string_view context) -> std::string;
+
 } // namespace liquify
