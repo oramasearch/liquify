@@ -39,6 +39,7 @@ libliquid's public API.
 | `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `--command NAME`, `docs commands|keymap`, `--screenshot STATE --out PNG`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest, including screenshot pixel-region assertions; `ctest --test-dir build` |
 | `tools/ui/` | refreshes every named screenshot under `docs/ui/screenshots/` |
+| `tools/tree-sitter-asan/` | standalone AddressSanitizer harness for the tree-sitter runtime and the C and C++ grammars ([tree-sitter-asan.md](tree-sitter-asan.md)) |
 | `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* checkout, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 | `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |
 | `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |

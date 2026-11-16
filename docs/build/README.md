@@ -9,3 +9,6 @@ unit tests and the GPU window regression. [CI](ci.md) describes platform lanes a
 - [Source layout](layout.md): the source tree.
 - [Store compatibility](store-compatibility.md): supported CLI, IDE, and lake revisions,
   actionable errors, and the independent artifact integration check.
+- [tree-sitter under AddressSanitizer](tree-sitter-asan.md): the harness that runs the tree-sitter
+  runtime and the C and C++ grammars, the C++ external scanner included, over their upstream
+  corpora and mutated input, and the result of each run.
