@@ -2,10 +2,10 @@
 
 > **Status: experimental.** liquify is under active development and not ready for daily work.
 > Expect missing features, rough edges, changes to its settings and keymaps without notice, and
-> bugs that can lose unsaved work. There are no versioned releases yet. Use it to try liquid's
-> editing model, not on code you cannot afford to redo.
+> bugs that can lose unsaved work. The first release, v0.1.0, is an early preview. Use it to try
+> liquid's editing model, not on code you cannot afford to redo.
 
-**The IDE, built on liquid's incremental graph. Early: no release yet.**
+**The IDE, built on liquid's incremental graph. First release: v0.1.0.**
 
 liquify is a native, cross-platform editor for repositories kept in [liquid](https://github.com/oramasearch/liquid).
 Everything it knows about files, changes, builds, analysis and search comes from libliquid, so a
@@ -18,7 +18,7 @@ MIT-licensed.
 
 ## What it does
 
-What is built today, with its limit where there is one:
+What is built today. What is partial is listed once, under [Known limits](#known-limits).
 
 - **Front door**: open a folder, create a repository, clone one from lake, reopen a recent one,
   your local signing identity, more windows. [Docs](docs/ui/first-run.md)
@@ -27,30 +27,28 @@ What is built today, with its limit where there is one:
   change. [Docs](docs/ui/editor.md), [cut](docs/editor/cut.md)
 - **Navigation and C/C++ analysis**: Quick Open, symbol search, definitions, references,
   breadcrumbs and history; diagnostics, completion and structural edits (rename, extract
-  function) for C and C++. Quick Open does not yet pass its real-window acceptance scenario.
+  function) for C and C++. Quick Open and Symbol Search work from the keyboard.
   [Docs](docs/ui/navigation.md), [analysis](docs/editor/interactive-analysis.md)
 - **Lake**: push to the lake a repository came from, list, open and request reviews, comment at
-  the cursor and approve. Choosing among several lakes is not built yet. [Docs](docs/editor/review.md)
+  the cursor and approve. [Docs](docs/editor/review.md)
 - **Build and test**: F7 builds and F8 runs tests through liquid's daemon; with no recorded build,
-  F7 proposes a command and records it. Recording a build on macOS may need a filesystem extension
-  liquid's sandbox uses. [Docs](docs/editor/build.md)
+  F7 proposes a command and records it. [Docs](docs/editor/build.md)
 - **Shell**: one panel system (dock, float, tabs), a command palette with one row per action and
   rebindable keys, searchable `.liquid` settings, light and dark themes, accessibility labels,
   high contrast and reduced motion. Keys, the palette and the native macOS menus all run through
   one command registry, so a rebind in settings reaches all three at once.
   [Docs](docs/ui/README.md)
 - **Plugins**: native plugins, each run in its own sandboxed host process; a plugin a repository
-  names loads only once you trust its digest. Reads are not sandboxed, and Windows has no network
-  sandbox. [Docs](docs/plugins/README.md)
+  names loads only once you trust its digest. Plugin calls run off the UI thread, so a slow or
+  hung plugin does not stall the window. [Docs](docs/plugins/README.md)
 - **Optional**: multiplayer presence and attribution, and an AI assistant that is off by default
-  and opens no connection while off. Accepted assistant edits are still signed as you, not as the
-  assistant. [Docs](docs/multiplayer.md), [assistant](docs/editor/ai.md)
+  and opens no connection while off. [Docs](docs/multiplayer.md), [assistant](docs/editor/ai.md)
 
 The full list, area by area, is in [the implementation status](docs/design/status.md).
 
 ## Quickstart
 
-There is no release binary yet, so liquify is built from source.
+v0.1.0 ships no signed installer, so liquify is built from source.
 
 ### Build from source
 
@@ -73,9 +71,9 @@ the tests with `ctest --test-dir build --output-on-failure`; the native window t
 logged-in desktop. Linux requirements and the rest of the build options are in
 [`docs/build/local.md`](docs/build/local.md) and [`docs/build/ci.md`](docs/build/ci.md).
 
-liquid and liquify are not yet paired by version: build both from their default branches.
-`liquify version` names the IDE and library revisions, and
-[`docs/build/store-compatibility.md`](docs/build/store-compatibility.md) has the store
+liquid and liquify are not yet paired by version tags: build liquid at the commit
+[`docs/build/store-compatibility.md`](docs/build/store-compatibility.md) records for this release.
+`liquify version` names the IDE and library revisions, and that page also has the store
 compatibility rule.
 
 ## How it fits the stack
@@ -88,18 +86,18 @@ It never depends on lake or zetta directly.
 |---|---|---|
 | [liquid](https://github.com/oramasearch/liquid) | Version control, builds, packages, deploys | liquify links libliquid and drives its daemon |
 | [lake](https://github.com/oramasearch/lake) | The AI workspace, and where liquid repositories collect | liquify pushes, pulls and reviews on it through liquid |
-| [zetta](https://github.com/oramasearch/zetta) | The engine | not used by liquify |
-| [orama-operator](https://github.com/oramasearch/orama-operator) | Runs the stack on Kubernetes | not used by liquify |
 
 ## Known limits
 
-- No versioned release and no signed installer yet.
-- Quick Open and some keyboard paths still fail their real-window acceptance checks, and native
-  menus do not follow rebound keys.
+- No signed installer: build from source.
+- Quick Open can come up empty now and then, when liquid's store index fails to load; it is fixed
+  in liquid and reaches liquify with the next liquid update.
 - One lake per repository: the lake a repository was cloned from, or one you set.
-- Accepted assistant edits are signed as you; agent attribution waits on liquid.
-- Plugin sandboxes do not deny reads, and Windows has no network sandbox; a slow plugin can stall
-  the window for up to its deadline.
+- Accepted assistant edits are signed as you, not as the assistant acting for you; agent
+  attribution waits on liquid.
+- Plugin sandboxes do not deny reads, and Windows has no network sandbox.
+- Recording a build on macOS may need a filesystem extension liquid's sandbox uses.
+- A few toolbar labels and tooltips show a key's default binding after you rebind it.
 - The Linux and Windows builds are exercised less often than macOS.
 
 ## Documentation
