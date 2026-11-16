@@ -164,5 +164,5 @@ and supported lake revision are recorded in [`docs/build/store-compatibility.md`
    ./build/liquify --smoke 30`.
 5. There is no hosted CI: GitHub Actions are off and the workflow files are commented out. Tests
    run when a release is cut.
-6. Commits carry a DCO sign-off (`git commit -s`); pull requests target `dev` (see
-   `CONTRIBUTING.md`).
+6. The contributor has signed the Contributor License Agreement (`CLA.md`); pull requests target
+   `dev` (see `CONTRIBUTING.md`).
