@@ -2,17 +2,17 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "liquify-0e51b881160f",
-  "documentNamespace": "https://github.com/oramasearch/liquify/sbom/0e51b881160f067a860aa21d43476a46f89daff9",
+  "name": "liquify-87606fdd2b86",
+  "documentNamespace": "https://github.com/oramasearch/liquify/sbom/87606fdd2b8671f4983e43e69fbcab829ef9e2bf",
   "creationInfo": {
-    "created": "2026-11-15T19:39:17Z",
+    "created": "2026-11-16T01:55:59Z",
     "creators": [
       "Organization: OramaSearch, Inc.",
       "Tool: tools/sbom.py",
       "Tool: syft"
     ],
     "licenseListVersion": "3.29",
-    "comment": "Made from source commit 0e51b881160f067a860aa21d43476a46f89daff9 by tools/sbom.py."
+    "comment": "Made from source commit 87606fdd2b8671f4983e43e69fbcab829ef9e2bf by tools/sbom.py."
   },
   "documentDescribes": [
     "SPDXRef-DocumentRoot"
@@ -121,7 +121,7 @@
     {
       "name": "liquify",
       "SPDXID": "SPDXRef-DocumentRoot",
-      "versionInfo": "0e51b881160f",
+      "versionInfo": "87606fdd2b86",
       "downloadLocation": "git+https://github.com/oramasearch/liquify.git",
       "homepage": "https://github.com/oramasearch/liquify",
       "filesAnalyzed": false,
