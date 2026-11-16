@@ -23,8 +23,15 @@ order, the last docked placement, floating bounds, busy state, status text, and 
 | Structural editing | Editor tab | Selection expansion, definition and references, rename, extract |
 
 The activity bar remains the quick route to Repository, Search, Review, Build, and Multiplayer.
-It focuses the registered panel wherever that panel currently lives. The command palette is built
-from the same descriptor commands and adds `Panels: Show …` entries plus `Panels: Reset layout`.
+It focuses the registered panel wherever that panel currently lives.
+
+A panel's command list names the registry's own commands (`run.build`, `assistant.accept-edit`,
+`selection.expand`, ...), never a copy of them, so the palette shows each action once and a panel
+button, its key, the palette row and the native menu run the same command. The former
+panel-scoped names (`build.push`, `structural.expand`, ...) are aliases of those commands
+([`commands.md`](commands.md#former-names), liquify#34). The palette also lists `Show … Panel`,
+the `Show …` sidebar commands and `Reset Panel Layout`; each opens or resets its panel where it is
+docked.
 
 ## Docking and repository-local state
 

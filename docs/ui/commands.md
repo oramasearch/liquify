@@ -18,9 +18,7 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | View | Toggle Editor Split | `view.toggle-editor-split` | `Cmd+\` | `Ctrl+\` | `Ctrl+\` | Show or hide the secondary editor overview. |
 | View | Cycle Color Theme | `view.cycle-theme` | `Cmd+Shift+T` | `Ctrl+Shift+T` | `Ctrl+Shift+T` | Cycle system, light, and dark theme preferences. |
 | View | Show Repository | `view.repository` | `—` | `—` | `—` | Open the Repository sidebar. |
-| View | Show Search | `view.search` | `—` | `—` | `—` | Open the Search sidebar. |
 | View | Show Review | `view.review` | `—` | `—` | `—` | Open the Review sidebar. |
-| View | Show Build | `view.build` | `—` | `—` | `—` | Open the Build sidebar. |
 | View | Show Multiplayer | `view.multiplayer` | `—` | `—` | `—` | Open the Multiplayer sidebar. |
 | View | Show Diagnostics Panel | `panel.diagnostics` | `—` | `—` | `—` | Open the Diagnostics panel. |
 | View | Show Build Panel | `panel.build` | `—` | `—` | `—` | Open the build, test, and push panel. |
@@ -59,23 +57,32 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | Review | Refresh Review | `review.refresh` | `—` | `—` | `—` | Refresh the open review. |
 | View | Reset Panel Layout | `panel.reset-layout` | `—` | `—` | `—` | Restore the default panel layout. |
 | Preferences | Open Settings | `settings.open` | `Cmd+Comma` | `Ctrl+Comma` | `Ctrl+Comma` | Open the live settings surface. |
-| Build, test and push | Build | `build.start` | `—` | `—` | `—` | Start the configured build from the build panel. |
-| Build, test and push | Run All Tests | `build.test` | `—` | `—` | `—` | Run all configured test actions from the build panel. |
-| Build, test and push | Push | `build.push` | `—` | `—` | `—` | Push changes from the build panel. |
-| Assistant | Explain Diagnostic | `assistant.explain` | `—` | `—` | `—` | Explain the active diagnostic from the assistant panel. |
-| Assistant | Propose Edit | `assistant.propose` | `—` | `—` | `—` | Request an edit preview from the assistant panel. |
-| Assistant | Accept Edit | `assistant.accept` | `—` | `—` | `—` | Accept the assistant edit preview from the assistant panel. |
-| Assistant | Reject Edit | `assistant.reject` | `—` | `—` | `—` | Reject the assistant edit preview from the assistant panel. |
-| Assistant | Preview Assistant Context | `assistant.context` | `—` | `—` | `—` | Show the assistant context from the assistant panel. |
-| Structural editing | Expand Syntax Selection | `structural.expand` | `—` | `—` | `—` | Expand selection from the structural editing panel. |
-| Structural editing | Shrink Syntax Selection | `structural.shrink` | `—` | `—` | `—` | Shrink selection from the structural editing panel. |
-| Structural editing | Select Enclosing Definition | `structural.definition` | `—` | `—` | `—` | Select the enclosing definition from the structural editing panel. |
-| Structural editing | Select Symbol References | `structural.references` | `—` | `—` | `—` | Find symbol references from the structural editing panel. |
-| Structural editing | Rename Symbol | `structural.rename` | `—` | `—` | `—` | Preview a symbol rename from the structural editing panel. |
-| Structural editing | Extract Function | `structural.extract` | `—` | `—` | `—` | Preview function extraction from the structural editing panel. |
 | Assistant | Preview Assistant Context | `assistant.preview-context` | `Cmd+Shift+C` | `Ctrl+Shift+C` | `Ctrl+Shift+C` | Show exactly what will be sent before a request. |
 | Help | Show Version | `help.version` | `—` | `—` | `—` | Print the liquify and libliquid versions. |
 | Help | Command Reference | `help.command-reference` | `—` | `—` | `—` | Generate the command registry reference. |
+
+## Former names
+
+Each row above is one action. A panel lists the same command the palette lists, not a copy of it. These former panel-scoped names resolve to that command, so keymaps, scripts and `liquify --command` that use them keep working; the palette does not list them.
+
+| Former name | Resolves to |
+|---|---|
+| `build.start` | `run.build` |
+| `build.test` | `run.tests` |
+| `build.push` | `run.push` |
+| `assistant.explain` | `assistant.explain-diagnostic` |
+| `assistant.propose` | `assistant.propose-edit` |
+| `assistant.accept` | `assistant.accept-edit` |
+| `assistant.reject` | `assistant.reject-edit` |
+| `assistant.context` | `assistant.preview-context` |
+| `structural.expand` | `selection.expand` |
+| `structural.shrink` | `selection.shrink` |
+| `structural.definition` | `selection.enclosing-definition` |
+| `structural.references` | `selection.symbol-references` |
+| `structural.rename` | `refactor.rename` |
+| `structural.extract` | `refactor.extract-function` |
+| `view.build` | `panel.build` |
+| `view.search` | `edit.focus-search` |
 
 Plugin commands are appended at runtime under the Plugins group. Their ABI-declared default binding is resolved through the same keymap and conflict checks.
 

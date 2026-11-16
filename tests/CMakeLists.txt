@@ -90,8 +90,6 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
   set_tests_properties(liquify-native-acceptance-edit PROPERTIES WILL_FAIL TRUE)
   # #33 remains open: Quick Open has no keyboard result dispatch.
   set_tests_properties(liquify-native-acceptance-quick-open PROPERTIES WILL_FAIL TRUE)
-  # #34 remains open: palette keyboard selection does not dispatch a command.
-  set_tests_properties(liquify-native-acceptance-palette PROPERTIES WILL_FAIL TRUE)
   # #97 / liquid#526 remain open: a store liquify just cloned usually loses an index run when
   # liquify's handles write to it, so the first save fails before the push; now and then it
   # does not. Neither WILL_FAIL nor a pass is stable, so the scenario is run by hand until

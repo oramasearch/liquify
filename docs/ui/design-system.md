@@ -50,17 +50,29 @@ Node.js participates only in configure-time test availability and the explicit g
 
 ## Table headers
 
-Tables (the command palette's results, the front door's Recent repositories) use lake's compact
-table header: the `surface` role behind it, labels in the `text_secondary` (muted ink) role, and a
+Tables (the front door's Recent repositories) use lake's compact table header: the `surface` role behind it, labels in the `text_secondary` (muted ink) role, and a
 `border_subtle` hairline under the row (`table_headers` in `src/app.cpp`; `TableHeaderBg`,
 `TableBorderStrong`, `TableBorderLight` in `App::apply_theme`). Rows alternate between transparent
 and the `layer` role. ImGui's default header, a near-black bar with dark labels, is never shown
 (liquify#109).
 
-`Screenshot.TableHeadersReadAtAAContrastInBothThemes` renders the palette and the front door in
-light and dark, takes each header row's most common colour as its background and the pixel that
-differs most as its ink, and fails below 4.5:1. The native scenario `table-headers` captures both
-tables in the real window.
+`Screenshot.TableHeadersReadAtAAContrastInBothThemes` renders the palette's list heading and the
+front door's table header in light and dark, takes each header row's most common colour as its background and the pixel that
+differs most as its ink, and fails below 4.5:1. The native scenario `table-headers` captures both in
+the real window.
+
+## Command palette
+
+The command palette is lake's Go to (liquify#34): a titled dialog (`Command Palette`), a full-width
+search field (`palette/search`), a list heading in `text_secondary` with the result count and a
+`border_subtle` hairline under it (`palette/header`), then one compact row per action
+(`palette/row/<command>`). A row is the title in `text_primary`, the group after it in
+`text_secondary`, and the active binding as a key chip on the right: IBM Plex Mono 12 in
+`text_secondary` on `surface`, with a `border_subtle` outline and the panel radius. A hovered row
+takes `layer_hover`; the selected row takes `selected`. The first result is selected, Up and Down
+move the selection (and hovering a row moves it there), Enter runs it, a click runs the clicked row
+and Escape closes the dialog. Rows are not keyboard navigation targets, so the search field keeps
+the keyboard. A muted footer names the keys. `App::draw_command_palette` in `src/app.cpp` draws it.
 
 ## Type scale
 

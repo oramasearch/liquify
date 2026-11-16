@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include "liquify/app.hpp"
+#include "liquify/design_tokens.generated.hpp"
 #include "liquify/screenshot.hpp"
 #include "ui_pixel_assert.hpp"
 #include "ui_property_assert.hpp"
@@ -101,12 +102,34 @@ TEST(Screenshot, IconsDoNotTouchTheirLabels) {
   }
 }
 
+// liquify#34: lake's Go to. The search field, the recent command first and selected, one row per
+// action and no former panel-scoped copies.
 TEST(Screenshot, CommandPaletteShowsSearchAndRecentCommands) {
-  const auto image = render_state("command-palette-light");
-  EXPECT_TRUE(test::region_contains_color(image, {260, 140, 760, 520},
-                                          {255, 255, 255, 255}, 1, 100'000));
-  EXPECT_TRUE(test::region_contains_color(image, {270, 180, 725, 34},
-                                          {244, 244, 244, 255}, 1, 5'000));
+  for (const auto &[state, palette] :
+       {std::pair{"command-palette-light", design::light_palette},
+        std::pair{"command-palette-dark", design::dark_palette}}) {
+    const auto rendered = render_diagnostics(state);
+    const auto &controls = rendered.layout.controls;
+    ASSERT_TRUE(controls.contains("palette/search")) << state;
+    ASSERT_TRUE(controls.contains("palette/header")) << state;
+    ASSERT_TRUE(controls.contains("palette/row/view.repository")) << state;
+    EXPECT_FALSE(controls.contains("palette/row/build.push")) << state;
+    EXPECT_FALSE(controls.contains("palette/row/structural.expand")) << state;
+    const auto row = controls.at("palette/row/view.repository");
+    const auto scale = rendered.layout.drawable_scale;
+    const auto selected = test::Rgba{
+        static_cast<std::uint8_t>(std::lround(palette.selected.red * 255.0F)),
+        static_cast<std::uint8_t>(std::lround(palette.selected.green * 255.0F)),
+        static_cast<std::uint8_t>(std::lround(palette.selected.blue * 255.0F)), 255};
+    EXPECT_TRUE(test::region_contains_color(
+        rendered.image,
+        {static_cast<std::uint32_t>(row.x * scale.x),
+         static_cast<std::uint32_t>(row.y * scale.y),
+         static_cast<std::uint32_t>(row.width * scale.x),
+         static_cast<std::uint32_t>(row.height * scale.y)},
+        selected, 2, 1'000))
+        << state << ": the recent command is the selected row";
+  }
 }
 
 TEST(Screenshot, EditorViewShowsSearchGutterAndBothThemes) {

@@ -117,11 +117,8 @@ auto apply_edits(const std::filesystem::path &request_path,
 auto command_registry(const std::shared_ptr<liquify::PluginHost> &plugins)
     -> std::expected<liquify::CommandRegistry, std::string> {
   auto registry = liquify::CommandRegistry{};
-  for (const auto &command : liquify::builtin_commands()) {
-    auto added = registry.add(command);
-    if (!added) {
-      return std::unexpected(added.error());
-    }
+  if (auto errors = liquify::add_builtin_commands(registry); !errors.empty()) {
+    return std::unexpected(errors.front());
   }
   if (plugins) {
     for (const auto &plugin : plugins->commands()) {
@@ -158,6 +155,7 @@ auto run_named_command(std::string_view name) -> int {
     std::println(stderr, "liquify: command is not registered: {}", name);
     return 2;
   }
+  name = command->name;
   if (command->plugin) {
     auto result = configured->host->invoke_command(
         name, liquify::plugin_empty_map_cbor());

@@ -267,14 +267,21 @@ void NativeAcceptance::palette(App &app) {
   text(app, "Toggle bottom panel");
   require(app.command_palette_query_ == "Toggle bottom panel",
           "palette receives keyboard query");
+  require(app.command_palette_selection_ == 0,
+          "#34: the first result is selected");
   key(app, "Down");
+  require(app.command_palette_selection_ == 1 ||
+              app.commands_->search(app.command_palette_query_).size() == 1,
+          "#34: Down moves the selection");
+  key(app, "Up");
+  require(app.command_palette_selection_ == 0, "#34: Up moves it back");
   key(app, "Enter");
   std::printf("palette: visible=%d bottom_before=%d bottom_after=%d\n",
               popup("Command Palette"), before,
               app.shell_state_.bottom_panel_visible);
   require(!popup("Command Palette") &&
               app.shell_state_.bottom_panel_visible != before,
-          "palette Down/Enter dispatches selected command");
+          "#34: Enter runs the selected palette result");
 }
 
 void NativeAcceptance::tabs(App &app) {

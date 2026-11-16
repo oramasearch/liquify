@@ -19,30 +19,30 @@ constexpr auto review_commands = std::to_array<PanelCommand>({
     {"review.approve", "Review: Approve (Primary+Alt+A)"},
 });
 constexpr auto build_commands = std::to_array<PanelCommand>({
-    {"build.start", "Build (F7)"},
-    {"build.test", "Run all tests (F8)"},
-    {"build.push", "Push (F9)"},
+    {"run.build", "Build (F7)"},
+    {"run.tests", "Run all tests (F8)"},
+    {"run.push", "Push (F9)"},
 });
 constexpr auto multiplayer_commands = std::array<PanelCommand, 0>{};
 constexpr auto diagnostics_commands = std::array<PanelCommand, 0>{};
 constexpr auto assistant_commands = std::to_array<PanelCommand>({
     {"assistant.ask", "Assistant: Ask (Primary+Shift+A)"},
-    {"assistant.explain", "Assistant: Explain diagnostic (Primary+Shift+E)"},
-    {"assistant.propose", "Assistant: Propose edit (Primary+Shift+I)"},
-    {"assistant.accept", "Assistant: Accept edit (Primary+Enter)"},
-    {"assistant.reject", "Assistant: Reject edit (Primary+Backspace)"},
+    {"assistant.explain-diagnostic", "Assistant: Explain diagnostic (Primary+Shift+E)"},
+    {"assistant.propose-edit", "Assistant: Propose edit (Primary+Shift+I)"},
+    {"assistant.accept-edit", "Assistant: Accept edit (Primary+Enter)"},
+    {"assistant.reject-edit", "Assistant: Reject edit (Primary+Backspace)"},
     {"assistant.toggle", "Assistant: Toggle (Primary+Shift+L)"},
-    {"assistant.context", "Assistant: What will be sent (Primary+Shift+C)"},
+    {"assistant.preview-context", "Assistant: What will be sent (Primary+Shift+C)"},
 });
 constexpr auto plugin_commands = std::array<PanelCommand, 0>{};
 constexpr auto structural_commands = std::to_array<PanelCommand>({
-    {"structural.expand", "Selection: Expand (Primary+Shift+Right)"},
-    {"structural.shrink", "Selection: Shrink (Primary+Shift+Left)"},
-    {"structural.definition",
+    {"selection.expand", "Selection: Expand (Primary+Shift+Right)"},
+    {"selection.shrink", "Selection: Shrink (Primary+Shift+Left)"},
+    {"selection.enclosing-definition",
      "Selection: Enclosing definition (Primary+Shift+D)"},
-    {"structural.references", "Selection: Symbol references (Primary+Alt+F)"},
-    {"structural.rename", "Refactor: Rename (Primary+Shift+R)"},
-    {"structural.extract", "Refactor: Extract function (Primary+Shift+X)"},
+    {"selection.symbol-references", "Selection: Symbol references (Primary+Alt+F)"},
+    {"refactor.rename", "Refactor: Rename (Primary+Shift+R)"},
+    {"refactor.extract-function", "Refactor: Extract function (Primary+Shift+X)"},
 });
 
 constexpr auto descriptors = std::to_array<PanelDescriptor>({
