@@ -4378,18 +4378,23 @@ void App::draw_repository_tree() {
   }
   repository_->poll();
   if (repository_->navigation_loading()) {
-    ImGui::TextDisabled("Indexing paths and symbols...");
+    draw_panel_state("Indexing paths and symbols...");
   } else if (!repository_->navigation_error().empty()) {
+    // The tree works without the index, so its failure is a quiet warning, not a red block.
     draw_user_error(describe_index_failure(repository_->navigation_error(),
                                            repository_->path()),
-                    "index-failure");
+                    "index-failure",
+                    [this] {
+                      repository_->retry_navigation();
+                      request_repaint();
+                    },
+                    {.tone = NoticeTone::warning, .quiet = true});
   }
   if (!repository_->mutation_status().empty()) {
-    ImGui::TextWrapped("%s",
-                       std::string(repository_->mutation_status()).c_str());
+    draw_panel_state(repository_->mutation_status());
   }
   if (repository_->entries().empty()) {
-    ImGui::TextWrapped("This repository has no files.");
+    draw_panel_state("This repository has no files.");
     return;
   }
   draw_repository_entries({});
@@ -4425,7 +4430,7 @@ void App::draw_review_panel() {
   }
   if (snapshot.busy) {
     ImGui::SameLine();
-    ImGui::TextDisabled("loading...");
+    draw_panel_state("Loading...");
   }
   if (!snapshot.error.empty()) {
     draw_user_error(
@@ -4576,12 +4581,14 @@ void App::draw_repository_entries(std::string_view directory) {
           repository_->request_directory(path, entry.ref);
         }
         if (repository_->directory_loading(path)) {
-          ImGui::TextDisabled("loading...");
+          draw_panel_state("Loading...");
         } else if (!repository_->directory_error(path).empty()) {
+          // One unreadable folder leaves the rest of the tree working: a quiet warning.
           draw_user_error(
               describe_folder_failure(path, repository_->directory_error(path),
                                       repository_->path()),
-              "folder-failure/" + path);
+              "folder-failure/" + path, {},
+              {.tone = NoticeTone::warning, .quiet = true});
         } else {
           draw_repository_entries(path);
         }
@@ -5560,9 +5567,7 @@ void App::draw_structural_editing() {
 
 void App::draw_structural_panel() {
   if (structural_references_.empty() && !structural_preview_open_) {
-    ImGui::TextWrapped(
-        "%s",
-        panels_.descriptor(PanelId::structural_editing).empty_state.data());
+    draw_panel_state(panels_.descriptor(PanelId::structural_editing).empty_state);
     return;
   }
   if (!structural_references_.empty()) {
@@ -6090,7 +6095,7 @@ void App::draw_editor_toolbar() {
 
 void App::draw_multiplayer_details() {
   if (!multiplayer_) {
-    ImGui::TextDisabled("Open a repository file to inspect collaboration.");
+    draw_panel_state("Open a repository file to inspect collaboration.");
     return;
   }
   auto count = std::size_t{};
@@ -6106,7 +6111,7 @@ void App::draw_multiplayer_details() {
     ImGui::PopID();
   }
   if (count == 0) {
-    ImGui::TextDisabled("No other active sessions");
+    draw_panel_state("No other active sessions.");
   }
   if (ImGui::CollapsingHeader("Leases")) {
     for (const auto &value : multiplayer_->leases) {
@@ -6547,7 +6552,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
   }
   if (snapshot.build_running) {
     ImGui::SameLine();
-    ImGui::TextDisabled("running");
+    draw_panel_state("Running...");
   } else if (!snapshot.build_result.empty()) {
     ImGui::SameLine();
     ImGui::TextUnformatted(snapshot.build_result.c_str());
@@ -6608,7 +6613,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
       !snapshot.deploy.references.empty()) {
     ImGui::Separator();
     if (snapshot.deploy.running) {
-      ImGui::TextUnformatted("Pushing...");
+      draw_panel_state("Pushing...");
     }
     if (snapshot.deploy.failure) {
       draw_user_error(describe_push_failure(*snapshot.deploy.failure,
@@ -6636,8 +6641,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
       snapshot.test_results.empty() && !snapshot.deploy.running &&
       !snapshot.deploy.failure && snapshot.deploy.references.empty() &&
       !snapshot.build_error) {
-    ImGui::TextWrapped("%s",
-                       panels_.descriptor(PanelId::build).empty_state.data());
+    draw_panel_state(panels_.descriptor(PanelId::build).empty_state);
   }
   ImGui::EndChild();
 }
@@ -6778,7 +6782,7 @@ void App::draw_panel(PanelId id) {
     } else if (repository_) {
       draw_repository_tree();
     } else {
-      ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
+      draw_panel_state(panels_.descriptor(id).empty_state);
     }
     break;
   case PanelId::search:
@@ -6815,7 +6819,7 @@ void App::draw_panel(PanelId id) {
       ImGui::Selectable("src/app.cpp:7  repository");
       ImGui::Selectable("docs/ui/editor.md:18  repository configuration");
     } else if (!repository_) {
-      ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
+      draw_panel_state(panels_.descriptor(id).empty_state);
     } else {
       const auto snapshot = editor_graph_->snapshot();
       if (!snapshot.search.error.empty()) {
@@ -6847,9 +6851,9 @@ void App::draw_panel(PanelId id) {
     ImGui::InputTextWithHint("##repository-symbol-filter", "Filter symbols",
                              &symbol_search_query_);
     if (!repository_) {
-      ImGui::TextDisabled("Open a repository to search symbols.");
+      draw_panel_state("Open a repository to search symbols.");
     } else if (repository_->navigation_loading()) {
-      ImGui::TextDisabled("Indexing libliquid symbol records...");
+      draw_panel_state("Indexing symbols...");
     } else {
       for (const auto &match : rank_symbols(repository_->navigation_symbols(),
                                             symbol_search_query_, 12)) {
@@ -6905,7 +6909,7 @@ void App::draw_panel(PanelId id) {
     } else if (assistant_) {
       draw_assistant();
     } else {
-      ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
+      draw_panel_state(panels_.descriptor(id).empty_state);
     }
     break;
   case PanelId::plugins:
@@ -6914,7 +6918,7 @@ void App::draw_panel(PanelId id) {
       ImGui::TextDisabled("Index and formatter commands ready.");
     } else if (plugin_failures_.empty() && plugin_untrusted_.empty() &&
                plugin_panels_.empty()) {
-      ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
+      draw_panel_state(panels_.descriptor(id).empty_state);
     } else {
       draw_plugin_panels();
     }
@@ -7686,52 +7690,199 @@ auto App::begin_dialog(const char *title, int flags) -> bool {
 }
 
 void App::draw_user_error(const UserError &failure, std::string_view id,
-                          const std::function<void()> &retry) {
+                          const std::function<void()> &retry, NoticeLook look) {
   const auto palette =
       effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto tone = look.tone.value_or(failure.offline() ? NoticeTone::warning
+                                                         : NoticeTone::danger);
+  const auto role = tone == NoticeTone::danger    ? palette.danger
+                    : tone == NoticeTone::warning ? palette.warning
+                                                  : palette.info;
+  const auto soft = tone == NoticeTone::danger    ? palette.danger_soft
+                    : tone == NoticeTone::warning ? palette.warning_soft
+                                                  : palette.info_soft;
+  const auto key = std::string(id);
   ImGui::PushID(id.data(), id.data() + id.size());
-  ImGui::PushTextWrapPos(0.0F);
-  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.danger));
-  ImGui::TextUnformatted(failure.summary.c_str());
-  ImGui::PopStyleColor();
-  frame_layout_.controls[std::string(id) + "/summary"] = item_rectangle();
-  if (!failure.next_step.empty()) {
-    ImGui::TextUnformatted(failure.next_step.c_str());
-  }
-  ImGui::PopTextWrapPos();
+
   const auto has_action =
       !failure.action_label.empty() &&
       (failure.action == ErrorAction::retry
            ? static_cast<bool>(retry)
            : error_action_available(failure.action));
-  if (has_action) {
-    if (kit_button(failure.action_label.c_str(), ButtonKind::secondary)) {
-      if (failure.action == ErrorAction::retry) {
-        retry();
-      } else {
-        run_error_action(failure.action);
-      }
+  const auto has_details = !failure.details.empty();
+  auto *open = has_details ? &error_details_open_[key] : nullptr;
+
+  // lake's notice: 8 pixels above and below, 12 at the sides (8 for a quiet one), the dot and
+  // the text 8 apart (6 when quiet), the buttons 12 from the text.
+  const auto origin = ImGui::GetCursorScreenPos();
+  const auto width = std::max(ImGui::GetContentRegionAvail().x, design::space6 * 4.0F);
+  const auto side = look.quiet ? design::space2 : design::space3;
+  const auto dot = 6.0F;
+  const auto text_x = origin.x + side + dot + (look.quiet ? 6.0F : design::space2);
+  const auto right = origin.x + width - side;
+  const auto room = right - text_x;
+  const auto line = ImGui::GetTextLineHeight();
+  const auto local_x = [](float screen_x) {
+    return screen_x - ImGui::GetWindowPos().x + ImGui::GetScrollX();
+  };
+  const auto button_width = [](const char *label) {
+    return ImGui::CalcTextSize(label, nullptr, true).x + design::space2 * 2.0F;
+  };
+  const auto action_width = has_action ? button_width(failure.action_label.c_str()) : 0.0F;
+  // Details is measured with its longer label, so opening it never changes the layout.
+  const auto details_width =
+      has_details ? std::max(button_width("Details"), button_width("Hide details")) : 0.0F;
+  const auto summary_width = ImGui::CalcTextSize(failure.summary.c_str()).x;
+  const auto next_width =
+      failure.next_step.empty() ? 0.0F : ImGui::CalcTextSize(failure.next_step.c_str()).x;
+  const auto row_width = [&](bool with_next, bool with_details) {
+    auto buttons = action_width;
+    if (with_details && has_details) {
+      buttons += (buttons > 0.0F ? design::space2 : 0.0F) + details_width;
     }
-    frame_layout_.controls[std::string(id) + "/action"] = item_rectangle();
+    return summary_width + (with_next ? design::space2 + next_width : 0.0F) +
+           (buttons > 0.0F ? design::space3 + buttons : 0.0F);
+  };
+  // A quiet notice that has no room for Details makes its sentence the Details control.
+  const auto details_button =
+      has_details && (!look.quiet || row_width(false, true) <= room);
+  const auto summary_toggles = has_details && !details_button;
+  auto buttons = action_width;
+  if (details_button) {
+    buttons += (buttons > 0.0F ? design::space2 : 0.0F) + details_width;
   }
-  if (!failure.details.empty()) {
+  const auto next_inline = !look.quiet && !failure.next_step.empty() &&
+                           row_width(true, details_button) <= room;
+  const auto buttons_inline = row_width(next_inline, details_button) <= room;
+  const auto first_row = buttons > 0.0F && buttons_inline ? design::space6 : line;
+  const auto top = origin.y + design::space2;
+  const auto text_y = top + (first_row - line) * 0.5F;
+
+  auto *draw = ImGui::GetWindowDrawList();
+  draw->ChannelsSplit(2);
+  draw->ChannelsSetCurrent(1);
+
+  ImGui::SetCursorScreenPos(ImVec2(text_x, text_y));
+  ImGui::PushTextWrapPos(
+      local_x(buttons_inline && buttons > 0.0F ? right - buttons - design::space3 : right));
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_primary));
+  ImGui::TextUnformatted(failure.summary.c_str());
+  ImGui::PopStyleColor();
+  ImGui::PopTextWrapPos();
+  frame_layout_.controls[key + "/summary"] = item_rectangle();
+  const auto summary_min = ImGui::GetItemRectMin();
+  const auto summary_max = ImGui::GetItemRectMax();
+  auto bottom = std::max(top + first_row, summary_max.y);
+  auto summary_hovered = false;
+  if (summary_toggles) {
+    ImGui::SetCursorScreenPos(summary_min);
+    if (ImGui::InvisibleButton("details", ImVec2(summary_max.x - summary_min.x,
+                                                 summary_max.y - summary_min.y))) {
+      *open = !*open;
+    }
+    frame_layout_.controls[key + "/details"] = item_rectangle();
+    summary_hovered = ImGui::IsItemHovered();
+    if (summary_hovered) {
+      draw->AddLine(ImVec2(summary_min.x, summary_max.y),
+                    ImVec2(summary_max.x, summary_max.y),
+                    packed_color(palette.text_secondary), 1.0F);
+      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    }
+  }
+
+  if (!look.quiet && !failure.next_step.empty()) {
+    ImGui::SetCursorScreenPos(next_inline
+                                  ? ImVec2(summary_max.x + design::space2, text_y)
+                                  : ImVec2(text_x, bottom + 2.0F));
+    ImGui::PushTextWrapPos(local_x(next_inline && buttons > 0.0F
+                                       ? right - buttons - design::space3
+                                       : right));
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    ImGui::TextUnformatted(failure.next_step.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+    bottom = std::max(bottom, ImGui::GetItemRectMax().y);
+  }
+
+  if (buttons > 0.0F) {
+    // On the line, the buttons sit against the right edge at their drawn width.
+    auto drawn = action_width;
+    if (details_button) {
+      drawn += (drawn > 0.0F ? design::space2 : 0.0F) +
+               button_width(*open ? "Hide details" : "Details");
+    }
+    auto x = buttons_inline ? right - drawn : text_x;
+    const auto y = buttons_inline ? top : bottom + design::space2 * 0.5F;
     if (has_action) {
-      ImGui::SameLine();
+      ImGui::SetCursorScreenPos(ImVec2(x, y));
+      if (kit_button(failure.action_label.c_str(), ButtonKind::secondary,
+                     ButtonSize::compact)) {
+        if (failure.action == ErrorAction::retry) {
+          retry();
+        } else {
+          run_error_action(failure.action);
+        }
+      }
+      frame_layout_.controls[key + "/action"] = item_rectangle();
+      x = ImGui::GetItemRectMax().x + design::space2;
     }
-    auto &open = error_details_open_[std::string(id)];
-    if (kit_button(open ? "Hide details" : "Details", ButtonKind::secondary, ButtonSize::compact)) {
-      open = !open;
+    if (details_button) {
+      ImGui::SetCursorScreenPos(ImVec2(x, y));
+      if (kit_button(*open ? "Hide details" : "Details", ButtonKind::quiet,
+                     ButtonSize::compact)) {
+        *open = !*open;
+      }
+      frame_layout_.controls[key + "/details"] = item_rectangle();
     }
-    frame_layout_.controls[std::string(id) + "/details"] = item_rectangle();
-    if (open) {
-      ImGui::PushTextWrapPos(0.0F);
-      ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
-      ImGui::TextUnformatted(failure.details.c_str());
-      ImGui::PopStyleColor();
-      ImGui::PopTextWrapPos();
+    bottom = std::max(bottom, y + design::space6);
+  }
+
+  if (open != nullptr && *open) {
+    ImGui::SetCursorScreenPos(ImVec2(text_x, bottom + design::space2 * 0.5F));
+    ImGui::PushTextWrapPos(local_x(right));
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    ImGui::TextUnformatted(failure.details.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+    bottom = std::max(bottom, ImGui::GetItemRectMax().y);
+  }
+
+  const auto maximum = ImVec2(origin.x + width, bottom + design::space2);
+  auto border = role;
+  border.alpha = applied_high_contrast_ ? 1.0F : 0.45F;
+  draw->ChannelsSetCurrent(0);
+  draw->AddRectFilled(origin, maximum, packed_color(soft), design::panel_radius);
+  draw->AddRect(origin, maximum, packed_color(border), design::panel_radius, 0, 1.0F);
+  draw->AddCircleFilled(ImVec2(origin.x + side + dot * 0.5F, text_y + line * 0.5F),
+                        dot * 0.5F, packed_color(role));
+  draw->ChannelsMerge();
+
+  ImGui::SetCursorScreenPos(origin);
+  ImGui::Dummy(ImVec2(width, maximum.y - origin.y));
+  frame_layout_.controls[key + "/notice"] = item_rectangle();
+  // A quiet notice keeps its next step, and how to see Details, in its tooltip.
+  if (look.quiet && ImGui::IsItemHovered() &&
+      (summary_hovered || !ImGui::IsAnyItemHovered())) {
+    auto tip = failure.next_step;
+    if (summary_toggles) {
+      tip += tip.empty() ? "" : "\n";
+      tip += *open ? "Select to hide details." : "Select to show details.";
+    }
+    if (!tip.empty()) {
+      ImGui::SetTooltip("%s", tip.c_str());
     }
   }
   ImGui::PopID();
+}
+
+void App::draw_panel_state(std::string_view text) {
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  ImGui::PushTextWrapPos(0.0F);
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::TextUnformatted(text.data(), text.data() + text.size());
+  ImGui::PopStyleColor();
+  ImGui::PopTextWrapPos();
 }
 
 void App::open_cut_composer() {

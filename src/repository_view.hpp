@@ -82,6 +82,8 @@ public:
   void request_directory(std::string path, liquid::digest id);
   void request_move(std::string from, std::string to);
   void request_new_file(std::string path);
+  // Builds the path and symbol index again after it failed; does nothing while one is building.
+  void retry_navigation();
   void poll();
 
 private:

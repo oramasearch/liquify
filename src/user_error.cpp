@@ -425,10 +425,12 @@ auto describe_index_failure(std::string_view message, const std::filesystem::pat
     -> UserError {
     return {
         .kind = FailureKind::local,
-        .summary = "The file and symbol index could not be built",
+        .summary = "Search index unavailable",
         .next_step = "The tree still lists files; Quick Open and symbol search wait for the "
-                     "index. Reopen the repository to try again.",
+                     "index. Retry to build it again.",
         .details = without_absolute_paths(message, repository),
+        .action = ErrorAction::retry,
+        .action_label = "Retry",
     };
 }
 

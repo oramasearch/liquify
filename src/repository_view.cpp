@@ -828,6 +828,14 @@ auto RepositoryView::create_file(std::filesystem::path repository_path,
   return output;
 }
 
+void RepositoryView::retry_navigation() {
+  if (navigation_pending_) {
+    return;
+  }
+  navigation_error_.clear();
+  start_navigation_load();
+}
+
 void RepositoryView::start_navigation_load() {
   navigation_pending_.emplace(std::async(
       std::launch::async, &RepositoryView::load_navigation, repository_path_,
