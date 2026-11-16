@@ -25,11 +25,23 @@
 #include "liquid/runtime.hpp"
 #include "liquid/sync.hpp"
 #include "liquify/editor_model.hpp"
+#include "liquify/first_run.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/stub_tree.hpp"
 
 namespace liquify {
 namespace {
+
+// FNV-1a 64: a stable, short name for a repository's cache directory (not a security boundary; the
+// directory is the user's own).
+auto stable_name(std::string_view text) -> std::string {
+  auto hash = std::uint64_t{0xcbf29ce484222325ULL};
+  for (const auto character : text) {
+    hash ^= static_cast<unsigned char>(character);
+    hash *= 0x100000001b3ULL;
+  }
+  return std::format("{:016x}", hash);
+}
 
 auto error_message(const liquid::error &error) -> std::string {
   if (error.context.empty()) {
@@ -427,10 +439,14 @@ struct EditorGraph::Impl {
 
   void initialize() {
     initialize_daemon();
-    auto opened = InteractiveAnalysis::open(
-        repository_path / ".liquid" / "liquify-graph", plugins);
-    auto opened_stubs =
-        StubTrees::open(repository_path / ".liquid" / "liquify-stub-graph");
+    // The cache lives outside the repository (liquify#79).
+    const auto cache = analysis_cache_directory(repository_path);
+    {
+      auto created = std::error_code{};
+      std::filesystem::create_directories(cache, created);
+    }
+    auto opened = InteractiveAnalysis::open(cache / "liquify-graph", plugins);
+    auto opened_stubs = StubTrees::open(cache / "liquify-stub-graph");
     auto loaded_frontend = liquid::result<liquid::frontend_module>{std::unexpected(
         liquid::error{liquid::errc::not_found, "tree-sitter frontend is unavailable"})};
     if (!syntax_frontend_path.empty()) {
@@ -1726,6 +1742,17 @@ auto editor_graph_status(const EditorGraphSnapshot &snapshot) -> std::string {
   }
   output += std::format(" | validation backlog={}", backlog);
   return output;
+}
+
+auto analysis_cache_directory(const std::filesystem::path &repository_path,
+                              std::optional<std::filesystem::path> state_root)
+    -> std::filesystem::path {
+  auto code = std::error_code{};
+  auto canonical = std::filesystem::weakly_canonical(repository_path, code);
+  const auto identity =
+      (code ? std::filesystem::absolute(repository_path) : canonical).generic_string();
+  const auto root = state_root.value_or(default_first_run_state_path().parent_path());
+  return root / "analysis" / stable_name(identity);
 }
 
 } // namespace liquify

@@ -22,6 +22,12 @@ enum class DeclarationKind : std::uint8_t {
   namespace_ = 5,
 };
 
+// True when `value` names a DeclarationKind; checked before any cast from stored bytes (liquify#79).
+[[nodiscard]] constexpr auto valid_declaration_kind(std::uint8_t value) -> bool {
+  return value >= static_cast<std::uint8_t>(DeclarationKind::function) &&
+         value <= static_cast<std::uint8_t>(DeclarationKind::namespace_);
+}
+
 struct SourceRange {
   std::uint32_t start_byte{};
   std::uint32_t end_byte{};
