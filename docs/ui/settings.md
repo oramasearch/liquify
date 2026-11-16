@@ -56,7 +56,7 @@ liquify settings {
     max_tokens: 4096
   }
   lake {
-    account "orama" { url: "https://api.oramasearch.com/liquid" }
+    account "team" { url: "https://lake.example.com" }
   }
   telemetry { enabled: false }
 }
