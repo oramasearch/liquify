@@ -52,7 +52,7 @@ config.liquify.plugins=/opt/liquify/navigation.so;/opt/liquify/build.so
 **Repository metadata (not yours).** A repository may name plugins in its metadata value
 `config.liquify.plugins`; relative paths start at the repository root. A repository can arrive
 from anyone (an archive, a shared folder, another user's checkout), so **opening a repository
-never loads native code on its own say-so** ([liquify#71](https://github.com/oramasearch/liquify/issues/71)).
+never loads native code on its own say-so**.
 A repository-named plugin loads only when the SHA-256 digest of its exact bytes is already in the
 user's **trust store**:
 

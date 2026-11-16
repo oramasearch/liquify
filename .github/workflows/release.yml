@@ -1,4 +1,4 @@
-# Disabled 2026-11-15 at Steve's request: no hosted CI in oramasearch repositories.
+# Disabled 2026-11-15: this repository uses no hosted CI.
 # Actions are also turned off in the repository settings. Kept, commented, for reference.
 #
 # name: Release

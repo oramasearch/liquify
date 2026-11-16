@@ -4,7 +4,7 @@ liquify waits for a cause and then draws. It does not redraw on a schedule.
 
 An immediate-mode interface rebuilds itself every frame — that is the library's model, not a
 defect. Doing it when nothing has changed is, and it is what made an idle window cost roughly
-three quarters of a core ([#66](https://github.com/oramasearch/liquify/issues/66)): `App::run()`
+three quarters of a core: `App::run()`
 called `SDL_PollEvent`, which returns immediately, so the loop rebuilt and re-rendered the whole
 interface for as long as the application was open. `SDL_SetRenderVSync` capped the *rate* at the
 display refresh but did nothing about the *work*.

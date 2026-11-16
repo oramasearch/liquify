@@ -1616,8 +1616,8 @@ App::App(AppOptions options) : options_(std::move(options)) {
           .last_changed_at = "Yesterday",
           .branch = "main",
           .opened_at = std::chrono::sys_seconds{std::chrono::seconds{20}}},
-         {.path = "/Users/ora/projects/orama-bridge",
-          .name = "orama-bridge",
+         {.path = "/Users/ora/projects/website",
+          .name = "website",
           .last_change = "Update tracking",
           .last_changed_at = "Sep 4",
           .branch = "main",
@@ -1628,12 +1628,12 @@ App::App(AppOptions options) : options_(std::move(options)) {
       first_run_.open_failed("/Users/ora/projects/missing",
                              "repository marker is not readable");
     } else if (screenshot->view == ScreenshotView::lake_offline) {
-      first_run_.begin_clone("https://lake.orama.com/orama/example",
+      first_run_.begin_clone("https://lake.example.com/orama/example",
                              "/Users/ora/projects/example");
       first_run_.clone_failed(describe_clone_failure(
           {liquid::errc::unavailable, "nodename nor servname provided, or not known",
-           "lake.orama.com"},
-          "https://lake.orama.com/orama/example"));
+           "lake.example.com"},
+          "https://lake.example.com/orama/example"));
     }
   }
   if (screenshot != nullptr && screenshot->view != ScreenshotView::welcome &&

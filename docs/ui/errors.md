@@ -113,7 +113,7 @@ liquid's HTTP client reports DNS, connect and TLS handshake failures with the sa
 one code, the kind is read from the operating system's message: the resolver and connect messages
 listed above mean offline, and anything else is the handshake. The macOS TLS defect of liquid#368
 arrives as `unspecified system_category error` and is classified as a secure-connection failure.
-When liquid reports the stage itself ([liquid#530](https://github.com/oramasearch/liquid/issues/530)), this table reads it instead of the message.
+When liquid reports the stage itself, this table reads it instead of the message.
 
 ## How to verify
 

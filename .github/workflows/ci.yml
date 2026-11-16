@@ -1,4 +1,4 @@
-# Disabled 2026-11-15 at Steve's request: no hosted CI in oramasearch repositories.
+# Disabled 2026-11-15: this repository uses no hosted CI.
 # Actions are also turned off in the repository settings. Kept, commented, for reference.
 #
 # name: CI
@@ -35,8 +35,8 @@
 #           token: ${{ secrets.ORAMA_SUBMODULES_TOKEN }}
 #
 #       - name: Check out the liquid source
-#         # liquid is a sibling module of liquid-bridge, not a submodule of liquify. The bridge holds
-#         # the one pin; bump this ref when the bridge bumps liquid.
+#         # liquid is a sibling checkout, not a submodule of liquify. Bump this ref when the
+#         # liquid pin moves.
 #         uses: actions/checkout@v4
 #         with:
 #           repository: oramasearch/liquid

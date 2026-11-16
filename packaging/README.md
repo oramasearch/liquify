@@ -11,7 +11,7 @@ a `v*` tag (`GITHUB_REF=refs/tags/v...`), `macos/package.sh` stops before buildi
 Developer ID application and installer identities and the notary key (`LIQUIFY_APPLE_*`) are all set,
 and `windows/package.ps1` stops unless `-PfxPath` names a certificate and `-Publisher` is not the test
 publisher `CN=Liquify CI`. Ad hoc and self-signed packages remain for local and test builds. The
-workflow files are not changed (no CI); whether the release workflow stays is Steve's decision. Linux
+workflow files are not changed (no CI); whether the release workflow stays is the maintainers' decision. Linux
 packages are not signed by these scripts.
 The macOS scripts recursively bundle third-party dylibs, reject non-system absolute Mach-O load
 paths, and prove the signed app launches after being copied to a fresh location. See
