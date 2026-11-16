@@ -1,0 +1,250 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:d78ca19a-22db-59e9-bf6c-e89c734a545b",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-16T02:40:34Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "tools/sbom.py"
+        },
+        {
+          "type": "application",
+          "name": "syft"
+        }
+      ]
+    },
+    "supplier": {
+      "name": "OramaSearch, Inc."
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:github/oramasearch/corosio@9f8e865a7b5728a4093e9345456bc077194dbeff?package-id=Component-corosio-1db3e02efab6842b",
+      "type": "library",
+      "name": "corosio",
+      "version": "9f8e865a7b5728a4093e9345456bc077194dbeff",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSL-1.0"
+          }
+        }
+      ],
+      "purl": "pkg:github/oramasearch/corosio@9f8e865a7b5728a4093e9345456bc077194dbeff",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "UnknownPackage"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:github/ocornut/imgui@v1.91.5?package-id=Component-Dear-ImGui-7597987723e4d3fe",
+      "type": "library",
+      "name": "Dear ImGui",
+      "version": "v1.91.5",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:github/ocornut/imgui@v1.91.5",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "UnknownPackage"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:github/google/googletest@v1.17.0?package-id=Component-GoogleTest-34101f2b39cec8bc",
+      "type": "library",
+      "name": "GoogleTest",
+      "version": "v1.17.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "purl": "pkg:github/google/googletest@v1.17.0",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "UnknownPackage"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:github/oramasearch/http@af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4?package-id=Component-http-358a9beabd5949fb",
+      "type": "library",
+      "name": "http",
+      "version": "af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSL-1.0"
+          }
+        }
+      ],
+      "purl": "pkg:github/oramasearch/http@af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "UnknownPackage"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:github/ibm/plex@as%20vendored?package-id=Component-IBM-Plex-Sans-and-IBM-Plex-Mono-9836f46bf5669da7",
+      "type": "library",
+      "name": "IBM Plex Sans and IBM Plex Mono",
+      "version": "as vendored",
+      "licenses": [
+        {
+          "license": {
+            "id": "OFL-1.1"
+          }
+        }
+      ],
+      "purl": "pkg:github/ibm/plex@as%20vendored",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "UnknownPackage"
+        }
+      ]
+    },
+    {
+      "bom-ref": "DocumentRoot",
+      "type": "library",
+      "name": "liquify",
+      "version": "6c755474ae45",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "Component-Orama-design-tokens-163282b2d124a134",
+      "type": "library",
+      "name": "Orama design tokens",
+      "version": "as vendored",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:github/libsdl-org/sdl@release-3.2.0?package-id=Component-SDL3-fb1f1dd95106898f",
+      "type": "library",
+      "name": "SDL3",
+      "version": "release-3.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Zlib"
+          }
+        }
+      ],
+      "purl": "pkg:github/libsdl-org/sdl@release-3.2.0",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "UnknownPackage"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:github/tree-sitter/tree-sitter@d97971e24500218865c05ed1febdee2acf41bae1?package-id=Component-tree-sitter-25c632c3f623ff36",
+      "type": "library",
+      "name": "tree-sitter",
+      "version": "d97971e24500218865c05ed1febdee2acf41bae1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:github/tree-sitter/tree-sitter@d97971e24500218865c05ed1febdee2acf41bae1",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "UnknownPackage"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:github/tree-sitter/tree-sitter-c@b780e47fc780ddc8da13afa35a3f4ed5c157823d?package-id=Component-tree-sitter-c-509d5fce8a95c723",
+      "type": "library",
+      "name": "tree-sitter-c",
+      "version": "b780e47fc780ddc8da13afa35a3f4ed5c157823d",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:github/tree-sitter/tree-sitter-c@b780e47fc780ddc8da13afa35a3f4ed5c157823d",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "UnknownPackage"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:github/tree-sitter/tree-sitter-cpp@f41e1a044c8a84ea9fa8577fdd2eab92ec96de02?package-id=Component-tree-sitter-cpp-47d148c88a9d34dd",
+      "type": "library",
+      "name": "tree-sitter-cpp",
+      "version": "f41e1a044c8a84ea9fa8577fdd2eab92ec96de02",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:github/tree-sitter/tree-sitter-cpp@f41e1a044c8a84ea9fa8577fdd2eab92ec96de02",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "UnknownPackage"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "DocumentRoot",
+      "dependsOn": [
+        "Component-Orama-design-tokens-163282b2d124a134",
+        "pkg:github/google/googletest@v1.17.0?package-id=Component-GoogleTest-34101f2b39cec8bc",
+        "pkg:github/ibm/plex@as%20vendored?package-id=Component-IBM-Plex-Sans-and-IBM-Plex-Mono-9836f46bf5669da7",
+        "pkg:github/libsdl-org/sdl@release-3.2.0?package-id=Component-SDL3-fb1f1dd95106898f",
+        "pkg:github/ocornut/imgui@v1.91.5?package-id=Component-Dear-ImGui-7597987723e4d3fe",
+        "pkg:github/oramasearch/corosio@9f8e865a7b5728a4093e9345456bc077194dbeff?package-id=Component-corosio-1db3e02efab6842b",
+        "pkg:github/oramasearch/http@af0353a5b2868d5b8db7fb01ffb5c464f9deb8a4?package-id=Component-http-358a9beabd5949fb",
+        "pkg:github/tree-sitter/tree-sitter-c@b780e47fc780ddc8da13afa35a3f4ed5c157823d?package-id=Component-tree-sitter-c-509d5fce8a95c723",
+        "pkg:github/tree-sitter/tree-sitter-cpp@f41e1a044c8a84ea9fa8577fdd2eab92ec96de02?package-id=Component-tree-sitter-cpp-47d148c88a9d34dd",
+        "pkg:github/tree-sitter/tree-sitter@d97971e24500218865c05ed1febdee2acf41bae1?package-id=Component-tree-sitter-25c632c3f623ff36"
+      ]
+    }
+  ]
+}

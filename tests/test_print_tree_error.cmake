@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 if(NOT DEFINED LIQUIFY_EXECUTABLE)
   message(FATAL_ERROR "LIQUIFY_EXECUTABLE is required")
 endif()

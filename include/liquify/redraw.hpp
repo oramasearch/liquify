@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #ifndef LIQUIFY_REDRAW_HPP
 #define LIQUIFY_REDRAW_HPP
 

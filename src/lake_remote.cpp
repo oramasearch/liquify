@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/lake_remote.hpp"
 
 #include <cstdlib>

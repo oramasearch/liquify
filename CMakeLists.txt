@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.28)
 
 # liquify is C++26 on the same coroutine stack as Zetta (Capy/Corosio/Beast2), which

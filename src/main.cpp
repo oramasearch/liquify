@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include <charconv>
 #include <cstdio>
 #include <expected>

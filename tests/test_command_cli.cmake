@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 execute_process(
   COMMAND "${LIQUIFY_EXECUTABLE}" --command help.version
   RESULT_VARIABLE version_result

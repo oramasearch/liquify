@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/interactive_analysis.hpp"
 
 #include <algorithm>

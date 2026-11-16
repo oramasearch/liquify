@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/navigation.hpp"
 
 #include <algorithm>

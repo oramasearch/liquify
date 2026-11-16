@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/ai_provider.hpp"
 
 #include <array>
