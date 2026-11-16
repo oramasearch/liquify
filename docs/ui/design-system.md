@@ -161,6 +161,31 @@ choice's tile is filled with `action` and its label is in `action`; the others' 
 native strokes of `draw_shell_icon`; the front door added `new_folder`, `clone`, `window`, `key`
 and `branch`.
 
+## Editor chrome
+
+The editor area follows lake's quiet chrome (liquify#127). The region has no window padding of
+its own: its rows keep `space3` inside, and the text surface reaches the region's edges.
+
+- **One row carries the file**, `control_sm` (32) tall with a `border_subtle` hairline under it.
+  With only the file open, the breadcrumb is the row: path segments and the enclosing symbol as
+  compact quiet buttons divided by a disabled `/`, an unsaved `*`, and the `...` file menu at the
+  row's right edge. When panels open as editor tabs, the row starts with lake's tabs (the file's
+  name, then each panel with its icon): `text_secondary` until selected, the selected tab marked by
+  a 2-pixel `action` underline, never a filled box. The breadcrumb then follows the tabs without
+  the file's own name, which its tab already shows. Right-click a panel tab to close or move it.
+- **Left edges line up**: the first label's ink in the file row, the toolbar's Save button and the
+  lines under the toolbar (find, lease and hover text) start `space3` in from the region.
+- **The toolbar** sits `space2` under the file row; one hairline closes the chrome `space2` under its
+  last line, and the text surface starts under it.
+- **The gutter has no block fill**: it is the editor's `surface`, divided from the text by a
+  `border_subtle` hairline over the editor's full height. Line numbers are glyphs in the editor's
+  own face, right-aligned `space4` before the hairline (the fold column), in `text_tertiary`; the
+  current line's number is `text_secondary`.
+- **Focus is the caret and the current line**: no rule is drawn across the editor. While the editor
+  has focus the caret's line has a `layer` band across the text. The caret is `text_primary`, a
+  selection the `selection` role, in both themes. A file dragged over the editor outlines it with a
+  1-pixel `focus` line.
+
 ## Surfaces
 
 Lake's direction is flat surfaces and hairline boundaries, with shadows only on overlays
@@ -171,7 +196,8 @@ panel resize from a splitter that straddles the hairline without taking space
 (`App::edge_splitter`). The root window has no padding, so regions reach the window's edges.
 
 - The status bar is one compact row: a body line with `space2` above and below.
-- The editor gutter fills the editor's height, not only the lines that exist.
+- The editor gutter's hairline runs the editor's height, not only the lines that exist (*Editor
+  chrome* above).
 - File-kind icons come from one table (`file_icon`); a CMake file has its own build-file glyph
   instead of the plugin's plug.
 - The modal scrim is the theme's canvas, translucent (`ModalWindowDimBg`), so a dialog dims dark
