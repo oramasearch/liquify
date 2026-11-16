@@ -10,6 +10,8 @@ Non-negotiables, restated from `CLAUDE.md`:
 - **No AI attribution anywhere.** No `Co-Authored-By` for an assistant, no "Generated with", no
   session or model trailers, in commits or pull requests.
 - No time estimates. The word "seam" is banned; name the mechanism instead.
+- **All work gets its own GitHub issue**, opened before the work starts; close it with a comment
+  linking the pull request when the pull request is up.
 - Work on a feature branch named for the issue, open a pull request against `dev` that references
   the issue, and never push to `main` directly. Contributors sign the CLA (`CLA.md`) once.
 - Never take a dependency on Zetta or on lake; liquify talks only to liquid.
