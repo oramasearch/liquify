@@ -20,9 +20,9 @@ The macOS dependency policy, bundle audit, and relocation test are documented in
 
 | Platform | Release artifacts | CI verification |
 |---|---|---|
-| macOS | `liquify-0.0.1-macos.pkg`, `liquify-0.0.1-macos.dmg` | transitive Mach-O dependency audit, relocated launch before packaging and from the mounted dmg, hardened-runtime `codesign`, notarization and stapling when credentials are present, then `spctl` assessment |
-| Windows | `liquify-0.0.1-windows-x64.msix` | bundled non-system DLLs, SHA-256 Authenticode signature with RFC 3161 timestamp, `signtool verify`, `Add-AppxPackage`, installed `liquify version` with a system-only `PATH` |
-| Linux | `liquify-0.0.1-x86_64.AppImage` | `liquify version` on Ubuntu 24.04 and Fedora 42 |
+| macOS | `liquify-0.1.0-macos.pkg`, `liquify-0.1.0-macos.dmg` | transitive Mach-O dependency audit, relocated launch before packaging and from the mounted dmg, hardened-runtime `codesign`, notarization and stapling when credentials are present, then `spctl` assessment |
+| Windows | `liquify-0.1.0-windows-x64.msix` | bundled non-system DLLs, SHA-256 Authenticode signature with RFC 3161 timestamp, `signtool verify`, `Add-AppxPackage`, installed `liquify version` with a system-only `PATH` |
+| Linux | `liquify-0.1.0-x86_64.AppImage` | `liquify version` on Ubuntu 24.04 and Fedora 42 |
 
 The AppImage is the published Linux format. The checked-in
 [`com.oramasearch.Liquify.yml`](../../packaging/flatpak/com.oramasearch.Liquify.yml)
@@ -96,22 +96,22 @@ Verify the platform trust records with native tools:
 
 ```sh
 # macOS
-pkgutil --check-signature liquify-0.0.1-macos.pkg
-spctl --assess --type install --verbose=4 liquify-0.0.1-macos.pkg
+pkgutil --check-signature liquify-0.1.0-macos.pkg
+spctl --assess --type install --verbose=4 liquify-0.1.0-macos.pkg
 spctl --assess --type open --context context:primary-signature \
-  --verbose=4 liquify-0.0.1-macos.dmg
-xcrun stapler validate liquify-0.0.1-macos.pkg
-xcrun stapler validate liquify-0.0.1-macos.dmg
+  --verbose=4 liquify-0.1.0-macos.dmg
+xcrun stapler validate liquify-0.1.0-macos.pkg
+xcrun stapler validate liquify-0.1.0-macos.dmg
 
 # Linux
-APPIMAGE_EXTRACT_AND_RUN=1 ./liquify-0.0.1-x86_64.AppImage version
+APPIMAGE_EXTRACT_AND_RUN=1 ./liquify-0.1.0-x86_64.AppImage version
 ```
 
 On Windows, use a Developer PowerShell prompt:
 
 ```powershell
-signtool verify /pa /v .\liquify-0.0.1-windows-x64.msix
-Add-AppxPackage .\liquify-0.0.1-windows-x64.msix
+signtool verify /pa /v .\liquify-0.1.0-windows-x64.msix
+Add-AppxPackage .\liquify-0.1.0-windows-x64.msix
 $package = Get-AppxPackage OramaSearch.Liquify
 & "$($package.InstallLocation)\liquify.exe" version
 ```

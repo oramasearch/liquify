@@ -12,7 +12,7 @@ binary_path="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 linuxdeploy_path="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 output_directory="$3"
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-version="${LIQUIFY_PACKAGE_VERSION:-0.0.1}"
+version="${LIQUIFY_PACKAGE_VERSION:-0.1.0}"
 
 if [[ ! -x "$binary_path" ]]; then
     echo "liquify binary is not executable: $binary_path" >&2
