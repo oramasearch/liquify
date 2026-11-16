@@ -113,7 +113,9 @@ private:
   void field_label(const char *label);
   auto text_field(const char *label, std::string *value, const char *hint = nullptr) -> bool;
   auto slider_int(const char *label, int *value, int minimum, int maximum) -> bool;
-  void shell_region_begin(const char *id, float width, float height);
+  // A region of the shell. `scrolls` is false for fixed rows such as the status bar, whose
+  // content is sized to fit and must never show a scrollbar (liquify#130).
+  void shell_region_begin(const char *id, float width, float height, bool scrolls = true);
   void shell_region_end(const char *id);
   void hairline(float x0, float y0, float x1, float y1);
   auto edge_splitter(const char *id, float x, float y, float width, float height) -> float;

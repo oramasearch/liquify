@@ -206,3 +206,7 @@ panel resize from a splitter that straddles the hairline without taking space
 `Screenshot.ShellRegionsShareEdges` checks in both themes that neighbouring regions share an edge,
 that the regions reach the window's edges, and the status bar's height. The native scenario `look`
 captures the whole window and a dialog open in dark.
+
+The status bar is one row of lake's 32-pixel control height that never scrolls: its window
+padding centres a 24-pixel line, its table has no vertical cell padding, scrolling is off for the
+region, and each column's text is aligned to the compact buttons' frame (liquify#130).

@@ -8675,6 +8675,7 @@ void App::draw_status_bar() {
                           ImGuiTableColumnFlags_WidthFixed, 190.0F);
   ImGui::TableNextRow();
   ImGui::TableSetColumnIndex(0);
+  ImGui::AlignTextToFramePadding();
   const auto name = repository_ ? repository_->name() : std::string{"liquify"};
   if (kit_button(name.c_str(), ButtonKind::quiet, ButtonSize::compact) && repository_) {
     first_run_.return_to_welcome();
@@ -8684,6 +8685,7 @@ void App::draw_status_bar() {
     ImGui::TextUnformatted(std::string(repository_->branch()).c_str());
   }
   ImGui::TableSetColumnIndex(1);
+  ImGui::AlignTextToFramePadding();
   auto state = std::string{};
   if (editor_ && !editor_->error().empty()) {
     state = editor_->error();
@@ -8751,6 +8753,7 @@ void App::draw_status_bar() {
     }
   }
   ImGui::TableSetColumnIndex(2);
+  ImGui::AlignTextToFramePadding();
   if (editor_) {
     const auto cursor = editor_->cursor();
     ImGui::TextDisabled("Ln %zu:%zu", cursor.line + 1, cursor.byte + 1);
@@ -8799,10 +8802,12 @@ void App::draw_status_bar() {
 // The shell (liquify#102): regions share their edges, separated by hairlines, with no inset
 // frames or gaps; only overlays have shadows. Each region reports its rectangle so a property
 // test can check that neighbours touch.
-void App::shell_region_begin(const char *id, float width, float height) {
+void App::shell_region_begin(const char *id, float width, float height, bool scrolls) {
   ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0F);
   ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 0.0F);
-  ImGui::BeginChild(id, ImVec2(width, height), ImGuiChildFlags_AlwaysUseWindowPadding);
+  ImGui::BeginChild(id, ImVec2(width, height), ImGuiChildFlags_AlwaysUseWindowPadding,
+                    scrolls ? ImGuiWindowFlags_None
+                            : ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
   ImGui::PopStyleVar(2);
   // Regions touch; their contents keep the kit's spacing.
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
@@ -8856,9 +8861,9 @@ auto App::edge_splitter(const char *id, float x, float y, float width,
 }
 
 void App::draw_contents() {
-  // One compact row, as dense as lake's top bar.
-  const auto status_bar_height =
-      ImGui::GetTextLineHeight() + design::space2 * 2.0F;
+  // One row of lake's 32-pixel control height: the compact (24-pixel) buttons and the text sit
+  // centred in it, with the window padding taking up the rest (liquify#130).
+  const auto status_bar_height = design::control_sm;
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0F, 0.0F));
   const auto origin = ImGui::GetCursorScreenPos();
   const auto available = ImGui::GetContentRegionAvail();
@@ -8879,13 +8884,17 @@ void App::draw_contents() {
     ImGui::PopStyleVar();
     ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + center_height));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
-                        ImVec2(design::space3, design::space1));
+                        ImVec2(design::space3, (design::control_sm - design::space6) * 0.5F));
+    // Text in the row is aligned to the compact buttons' frame, so labels and buttons share one
+    // baseline.
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-                        ImVec2(design::space2, 0.0F));
-    shell_region_begin("status-bar", available.x, status_bar_height);
+                        ImVec2(design::space2,
+                               std::max(0.0F, (design::space6 - ImGui::GetFontSize()) * 0.5F)));
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(design::space2, 0.0F));
+    shell_region_begin("status-bar", available.x, status_bar_height, false);
     draw_status_bar();
     shell_region_end("status-bar");
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleVar(3);
     hairline(origin.x, origin.y + center_height, origin.x + available.x,
              origin.y + center_height);
   };
