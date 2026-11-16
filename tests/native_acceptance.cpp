@@ -939,6 +939,12 @@ void NativeAcceptance::look(App &app, const std::filesystem::path &output) {
   key(app, "Escape");
   open_file(app);
   capture_themes(app, output, "look-editor");
+  app.panels_.focus(PanelId::search);
+  app.shell_state_.sidebar_visible = true;
+  pulse(app);
+  require(app.frame_layout().controls.contains("search/query"),
+          "#101: the Search panel shows its labelled fields");
+  capture_themes(app, output, "look-search");
   app.first_run_.return_to_welcome();
   pulse(app);
   require(app.frame_layout().controls.at("welcome/title").height >=

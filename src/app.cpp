@@ -1758,7 +1758,7 @@ void App::draw_request_review_dialog() {
                            &request_review_reviewers_);
   frame_layout_.controls["request-review/reviewers"] = item_rectangle();
   ImGui::Spacing();
-  if (ImGui::Button("Request review")) {
+  if (kit_button("Request review", ButtonKind::primary)) {
     review_->request_review(parse_reviewers(request_review_reviewers_));
     editor_status_ = "Requesting a review";
     ImGui::CloseCurrentPopup();
@@ -2344,7 +2344,10 @@ void App::apply_theme() {
   style.WindowBorderSize = border_width;
   style.ChildBorderSize = border_width;
   style.PopupBorderSize = border_width;
-  style.FrameBorderSize = high_contrast ? border_width : 0.0F;
+  // Controls follow lake's kit (liquify#101): fields, checkboxes and secondary buttons carry a
+  // hairline; the one primary action per surface is filled with the action role.
+  style.FrameBorderSize = border_width;
+  style.GrabMinSize = design::space4;
   style.TabBorderSize = high_contrast ? border_width : 0.0F;
 
   auto *colors = style.Colors;
@@ -2362,7 +2365,7 @@ void App::apply_theme() {
   colors[ImGuiCol_TableRowBg] = ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
   colors[ImGuiCol_TableRowBgAlt] = imgui_color(palette.layer);
   colors[ImGuiCol_BorderShadow] = {0.0F, 0.0F, 0.0F, 0.0F};
-  colors[ImGuiCol_FrameBg] = imgui_color(palette.layer);
+  colors[ImGuiCol_FrameBg] = imgui_color(palette.surface);
   colors[ImGuiCol_FrameBgHovered] = imgui_color(palette.layer_hover);
   colors[ImGuiCol_FrameBgActive] = imgui_color(palette.selected);
   colors[ImGuiCol_TitleBg] = imgui_color(palette.surface);
@@ -2375,7 +2378,7 @@ void App::apply_theme() {
   colors[ImGuiCol_CheckMark] = imgui_color(palette.action);
   colors[ImGuiCol_SliderGrab] = imgui_color(palette.action);
   colors[ImGuiCol_SliderGrabActive] = imgui_color(palette.action_pressed);
-  colors[ImGuiCol_Button] = imgui_color(palette.layer);
+  colors[ImGuiCol_Button] = imgui_color(palette.surface);
   colors[ImGuiCol_ButtonHovered] = imgui_color(palette.layer_hover);
   colors[ImGuiCol_ButtonActive] = imgui_color(palette.selected);
   colors[ImGuiCol_Header] = imgui_color(palette.selected);
@@ -4267,7 +4270,7 @@ void App::draw_review_panel() {
         "Reviews live on the lake this repository pushes to, and it has none "
         "yet.");
     ImGui::PopTextWrapPos();
-    if (repository_ && ImGui::Button("Set lake")) {
+    if (repository_ && kit_button("Set lake", ButtonKind::primary)) {
       open_set_lake_dialog();
     }
     frame_layout_.controls["review/set-lake"] = item_rectangle();
@@ -4316,7 +4319,7 @@ void App::draw_review_panel() {
           "No reviews yet. A review asks people to read a change before it "
           "lands: cut your work as a change, push it, then request a review.");
       ImGui::PopTextWrapPos();
-      if (ImGui::Button("Request review")) {
+      if (kit_button("Request review", ButtonKind::primary)) {
         open_request_review();
       }
       frame_layout_.controls["review/request-empty"] = item_rectangle();
@@ -4612,7 +4615,7 @@ void App::draw_repository_action_popup() {
     editor_visible_ = false;
     ImGui::Text("Source: %s", repository_action_source_.c_str());
     ImGui::SetNextItemWidth(520.0F);
-    ImGui::InputText("Destination", &repository_action_target_);
+    text_field("Destination", &repository_action_target_);
     ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
                          repository_->mutation_running());
     if (ImGui::Button("Apply")) {
@@ -4635,7 +4638,7 @@ void App::draw_repository_action_popup() {
   if (begin_dialog("New File", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
     ImGui::SetNextItemWidth(520.0F);
-    ImGui::InputText("Path", &repository_action_target_);
+    text_field("Path", &repository_action_target_);
     ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
                          repository_->mutation_running());
     if (ImGui::Button("Create")) {
@@ -4925,7 +4928,7 @@ void App::draw_settings() {
   if (!options_.repository_path) {
     ImGui::BeginDisabled();
   }
-  if (ImGui::Checkbox("Repository overrides", &repository_scope)) {
+  if (checkbox("Repository overrides", &repository_scope)) {
     settings_scope_ =
         repository_scope ? SettingsScope::repository : SettingsScope::user;
   }
@@ -4977,7 +4980,8 @@ void App::draw_settings() {
     auto theme = static_cast<int>(settings_.theme);
     constexpr auto themes =
         std::array{"Follow operating system", "Light", "Dark"};
-    if (ImGui::Combo("Theme", &theme, themes.data(),
+    field_label("Theme");
+    if (ImGui::Combo("##theme", &theme, themes.data(),
                      static_cast<int>(themes.size()))) {
       settings_.theme = static_cast<ThemePreference>(theme);
       apply_settings_live();
@@ -4987,7 +4991,7 @@ void App::draw_settings() {
     ImGui::SameLine(150.0F);
     ImGui::TextUnformatted(settings_.fonts.ui_family.c_str());
     auto ui_size = static_cast<int>(settings_.fonts.ui_size);
-    if (ImGui::SliderInt("UI size", &ui_size, 11, 32)) {
+    if (slider_int("UI size", &ui_size, 11, 32)) {
       settings_.fonts.ui_size = static_cast<std::uint32_t>(ui_size);
       apply_settings_live(true);
       persist_settings();
@@ -4996,7 +5000,7 @@ void App::draw_settings() {
     ImGui::SameLine(150.0F);
     ImGui::TextUnformatted(settings_.fonts.editor_family.c_str());
     auto editor_size = static_cast<int>(settings_.fonts.editor_size);
-    if (ImGui::SliderInt("Editor size", &editor_size, 12, 16)) {
+    if (slider_int("Editor size", &editor_size, 12, 16)) {
       settings_.fonts.editor_size = static_cast<std::uint32_t>(editor_size);
       apply_settings_live(true);
       persist_settings();
@@ -5006,9 +5010,9 @@ void App::draw_settings() {
 
   if (begin_group(SettingsGroup::editor)) {
     auto changed = false;
-    changed |= ImGui::Checkbox("Wrap long lines", &settings_.editor.wrap);
-    changed |= ImGui::Checkbox("Show whitespace", &settings_.editor.whitespace);
-    changed |= ImGui::Checkbox("Format .liquid files on save",
+    changed |= checkbox("Wrap long lines", &settings_.editor.wrap);
+    changed |= checkbox("Show whitespace", &settings_.editor.whitespace);
+    changed |= checkbox("Format .liquid files on save",
                                &settings_.editor.format_on_save);
     if (changed) {
       apply_settings_live();
@@ -5018,7 +5022,8 @@ void App::draw_settings() {
   end_group();
 
   if (begin_group(SettingsGroup::keymap)) {
-    ImGui::TextDisabled("Command palette leaf overrides");
+    ImGui::TextDisabled("Key bindings for these commands; the full keymap is in "
+                        "your .liquid settings file.");
     constexpr auto commands = std::array{
         std::pair{"settings.open", "Cmd+,"},
         std::pair{"build.run", "F7"},
@@ -5031,8 +5036,10 @@ void App::draw_settings() {
         binding = default_binding;
       }
       ImGui::PushID(command);
-      ImGui::SetNextItemWidth(180.0F);
-      if (ImGui::InputText(command, &binding)) {
+      const auto *definition = commands_ ? commands_->find(command) : nullptr;
+      const auto title = definition != nullptr ? definition->title
+                                               : std::string(command);
+      if (text_field(title.c_str(), &binding)) {
         persist_settings();
       }
       ImGui::PopID();
@@ -5041,12 +5048,12 @@ void App::draw_settings() {
   end_group();
 
   if (begin_group(SettingsGroup::ai)) {
-    if (ImGui::Checkbox("Enable AI surface", &settings_.ai.enabled)) {
+    if (checkbox("Enable AI surface", &settings_.ai.enabled)) {
       apply_settings_live();
       persist_settings();
     }
     ImGui::Text("Provider: %s", settings_.ai.provider.c_str());
-    if (ImGui::InputText("Model", &settings_.ai.model)) {
+    if (text_field("Model", &settings_.ai.model)) {
       apply_settings_live();
       persist_settings();
     }
@@ -5091,7 +5098,7 @@ void App::draw_settings() {
       if (screenshot_mode()) {
         ImGui::TextDisabled("%s", account.url.c_str());
       } else {
-        if (ImGui::InputText("URL", &account.url)) {
+        if (text_field("URL", &account.url)) {
           persist_settings();
         }
       }
@@ -5143,7 +5150,7 @@ void App::draw_settings() {
   end_group();
 
   if (begin_group(SettingsGroup::telemetry)) {
-    if (ImGui::Checkbox("Enable telemetry", &settings_.telemetry)) {
+    if (checkbox("Enable telemetry", &settings_.telemetry)) {
       persist_settings();
     }
     ImGui::TextDisabled(
@@ -5189,7 +5196,7 @@ void App::draw_structural_editing() {
     rename_open_ = false;
   }
   if (begin_dialog("Rename Symbol", ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::InputText("New name", &structural_name_);
+    text_field("New name", &structural_name_);
     if (ImGui::Button("Preview") && editor_graph_ && editor_) {
       const auto byte = editor_->byte_offset(editor_->cursor());
       if (byte <= std::numeric_limits<std::uint32_t>::max()) {
@@ -5212,7 +5219,7 @@ void App::draw_structural_editing() {
     extract_function_open_ = false;
   }
   if (begin_dialog("Extract Function", ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::InputText("Function name", &structural_name_);
+    text_field("Function name", &structural_name_);
     if (ImGui::Button("Preview") && editor_graph_ && editor_) {
       if (const auto selection = editor_->selection()) {
         const auto range = SourceRange{
@@ -5286,7 +5293,7 @@ void App::draw_structural_panel() {
     auto accepted = std::ranges::find(structural_accepted_files_, path) !=
                     structural_accepted_files_.end();
     const auto label = path + "##structural-file";
-    if (ImGui::Checkbox(label.c_str(), &accepted)) {
+    if (checkbox(label.c_str(), &accepted)) {
       const auto found = std::ranges::find(structural_accepted_files_, path);
       if (accepted && found == structural_accepted_files_.end()) {
         structural_accepted_files_.push_back(path);
@@ -5694,64 +5701,68 @@ void App::draw_editor_modes() {
 }
 
 void App::draw_editor_toolbar() {
+  // One compact row (liquify#101): Save is the surface's primary action; the rest are
+  // secondary buttons in groups divided by hairlines, each explained by a tooltip.
   const auto origin = ImGui::GetCursorScreenPos();
   const auto available = ImGui::GetContentRegionAvail();
-  // A group caption sits above buttons whose own text is inset by the frame
-  // padding, so aligning the caption to the frame leaves it hanging to the
-  // left of everything it labels. Indent it by the same padding and tighten
-  // the gap beneath it, so the caption reads as belonging to its row.
-  const auto group_caption = [](const char *name) {
-    const auto &style = ImGui::GetStyle();
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + style.FramePadding.x);
-    ImGui::TextDisabled("%s", name);
-    ImGui::GetCurrentWindow()->DC.CursorPos.y -=
-        style.ItemSpacing.y - design::space1;
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto divider = [&] {
+    ImGui::SameLine(0.0F, design::space3);
+    const auto at = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddLine(
+        ImVec2(at.x, at.y + design::space1),
+        ImVec2(at.x, at.y + ImGui::GetFrameHeight() - design::space1),
+        packed_color(palette.border_subtle), 1.0F);
+    ImGui::Dummy(ImVec2(1.0F, ImGui::GetFrameHeight()));
+    ImGui::SameLine(0.0F, design::space3);
   };
-  const auto next_group = [&group_caption](const char *name, float width) {
-    ImGui::EndGroup();
-    const auto end = ImGui::GetItemRectMax().x;
-    const auto right =
-        ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-    if (end + width + design::space4 < right) {
-      ImGui::SameLine(0, design::space6);
+  const auto tooltip = [](const char *text) {
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+      ImGui::SetTooltip("%s", text);
     }
-    ImGui::BeginGroup();
-    group_caption(name);
   };
   ImGui::BeginGroup();
   const auto first_vertex = ImGui::GetWindowDrawList()->VtxBuffer.Size;
-  group_caption("File");
-  frame_layout_.toolbar_text = text_geometry(first_vertex);
   ImGui::BeginDisabled(review_diff_open_);
-  if (ImGui::Button("Save")) {
+  if (kit_button("Save", ButtonKind::primary)) {
     save_editor();
     editor_focused_ = true;
   }
+  frame_layout_.toolbar_text = text_geometry(first_vertex);
+  tooltip("Save this file as a drip (Primary+S)");
   ImGui::EndDisabled();
-  next_group("Build", 270.0F);
-  if (ImGui::Button("Build (F7)")) {
+  divider();
+  if (kit_button("Build (F7)", ButtonKind::secondary)) {
     request_build();
   }
+  tooltip("Build the repository with its recorded command");
   ImGui::SameLine();
-  if (ImGui::Button("Tests (F8)")) {
+  if (kit_button("Tests (F8)", ButtonKind::secondary)) {
     request_tests();
   }
+  tooltip("Run every test the build defines");
   ImGui::SameLine();
-  if (ImGui::Button("Push (F9)")) {
+  if (kit_button("Push (F9)", ButtonKind::secondary)) {
     request_push();
   }
-  next_group("View", 180.0F);
-  if (ImGui::Button(shell_state_.editor_split ? "Unsplit" : "Split")) {
+  tooltip("Push your changes to lake");
+  divider();
+  if (kit_button(shell_state_.editor_split ? "Unsplit" : "Split",
+                 ButtonKind::quiet)) {
     shell_state_.editor_split = !shell_state_.editor_split;
     persist_shell_state();
   }
+  tooltip("Show a second view of this file");
   ImGui::SameLine();
-  if (ImGui::Button(shell_state_.bottom_panel_visible ? "Hide panel"
-                                                      : "Show panel")) {
+  if (kit_button(shell_state_.bottom_panel_visible ? "Hide panel"
+                                                   : "Show panel",
+                 ButtonKind::quiet)) {
     shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
     persist_shell_state();
   }
-  next_group("Mode", 260.0F);
+  tooltip("Show or hide the bottom panel (Primary+J)");
+  divider();
   ImGui::BeginDisabled(review_diff_open_);
   draw_editor_modes();
   ImGui::EndDisabled();
@@ -5980,11 +5991,11 @@ void App::draw_editor() {
     ImGui::SetNextItemWidth(180.0F);
     ImGui::InputTextWithHint("##replace-buffer", "Replace", &replace_query_);
     ImGui::SameLine();
-    if (ImGui::Checkbox("Regex", &find_options_.regular_expression)) {
+    if (checkbox("Regex", &find_options_.regular_expression)) {
       buffer_matches_ = editor_->find(find_query_, find_options_);
     }
     ImGui::SameLine();
-    if (ImGui::Checkbox("Case", &find_options_.case_sensitive)) {
+    if (checkbox("Case", &find_options_.case_sensitive)) {
       buffer_matches_ = editor_->find(find_query_, find_options_);
     }
     ImGui::SameLine();
@@ -6154,7 +6165,7 @@ void App::draw_editor() {
 }
 
 void App::draw_diagnostics_panel(const EditorGraphSnapshot &graph_snapshot) {
-  ImGui::Checkbox("Repository details", &repository_details_open_);
+  checkbox("Repository details", &repository_details_open_);
   draw_repository_details(graph_snapshot);
   for (const auto &diagnostic : structural_diagnostics_) {
     detail_text(diagnostic);
@@ -6486,19 +6497,20 @@ void App::draw_panel(PanelId id) {
     }
     break;
   case PanelId::search:
-    if (ImGui::Button("Quick Open", ImVec2(-1.0F, 0.0F))) {
+    if (kit_button("Quick open", ButtonKind::secondary)) {
       invoke_navigation_action(NavigationAction::quick_open);
     }
-    if (ImGui::Button("Symbol Search", ImVec2(-1.0F, 0.0F))) {
+    ImGui::SameLine();
+    if (kit_button("Symbol search", ButtonKind::secondary)) {
       invoke_navigation_action(NavigationAction::symbol_search);
     }
     ImGui::Separator();
-    ImGui::InputTextWithHint("##repository-search", "Search this repository",
-                             &sidebar_search_);
-    ImGui::InputTextWithHint("##repository-replace", "Replace with",
-                             &replace_query_);
-    ImGui::Checkbox("Regular expression", &find_options_.regular_expression);
-    if (ImGui::Button("Find", ImVec2(-1.0F, 0.0F))) {
+    text_field("Search", &sidebar_search_, "Text or /regular expression/");
+    frame_layout_.controls["search/query"] = item_rectangle();
+    text_field("Replace with", &replace_query_);
+    frame_layout_.controls["search/replace"] = item_rectangle();
+    checkbox("Regular expression", &find_options_.regular_expression);
+    if (kit_button("Find", ButtonKind::primary)) {
       if (editor_graph_) {
         const auto query = find_options_.regular_expression
                                ? "/" + sidebar_search_ + "/"
@@ -6506,8 +6518,8 @@ void App::draw_panel(PanelId id) {
         editor_graph_->request_search(query);
       }
     }
-    if (ImGui::Button("Replace all in repository", ImVec2(-1.0F, 0.0F)) &&
-        editor_graph_) {
+    ImGui::SameLine();
+    if (kit_button("Replace all", ButtonKind::secondary) && editor_graph_) {
       editor_graph_->request_replace(sidebar_search_, replace_query_,
                                      find_options_.regular_expression);
     }
@@ -6546,6 +6558,7 @@ void App::draw_panel(PanelId id) {
     }
     ImGui::Separator();
     ImGui::TextUnformatted("Symbols");
+    ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##repository-symbol-filter", "Filter symbols",
                              &symbol_search_query_);
     if (!repository_) {
@@ -6968,8 +6981,8 @@ void App::draw_build_setup_dialog() {
   ImGui::Spacing();
   ImGui::BeginDisabled(build_setup_command_.empty() ||
                        build_setup_operation_.has_value());
-  if (ImGui::Button(build_setup_operation_ ? "Recording..."
-                                           : "Record and build")) {
+  if (kit_button(build_setup_operation_ ? "Recording..." : "Record and build",
+                 ButtonKind::primary)) {
     build_setup_failure_ = {};
     build_setup_operation_.emplace(std::async(
         std::launch::async,
@@ -7028,7 +7041,7 @@ void App::draw_set_lake_dialog() {
   }
   ImGui::Spacing();
   ImGui::BeginDisabled(set_lake_url_.empty());
-  if (ImGui::Button("Set lake")) {
+  if (kit_button("Set lake", ButtonKind::primary)) {
     set_lake_failure_ = record_lake_remote(repository_path(), set_lake_url_);
     if (set_lake_failure_.empty()) {
       options_.lake_url = set_lake_url_;
@@ -7047,6 +7060,90 @@ void App::draw_set_lake_dialog() {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
+}
+
+// The controls kit (liquify#101), mirroring lake's: button kinds, a checkbox that shows its
+// state, labels above full-width fields, and sliders with one handle shape.
+auto App::kit_button(const char *label, ButtonKind kind, float width,
+                     float height) -> bool {
+  const auto size = ImVec2(width, height);
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  auto pushed = 0;
+  const auto push = [&pushed](ImGuiCol slot, design::Rgba color) {
+    ImGui::PushStyleColor(slot, imgui_color(color));
+    ++pushed;
+  };
+  if (kind == ButtonKind::primary) {
+    push(ImGuiCol_Button, palette.action);
+    push(ImGuiCol_ButtonHovered, palette.action_hover);
+    push(ImGuiCol_ButtonActive, palette.action_pressed);
+    push(ImGuiCol_Text, design::Rgba{1.0F, 1.0F, 1.0F, 1.0F});
+    push(ImGuiCol_Border, palette.action);
+  } else if (kind == ButtonKind::destructive) {
+    push(ImGuiCol_Button, palette.surface);
+    push(ImGuiCol_ButtonHovered, palette.danger_soft);
+    push(ImGuiCol_Text, palette.danger);
+    push(ImGuiCol_Border, palette.danger);
+  } else if (kind == ButtonKind::quiet) {
+    push(ImGuiCol_Button, design::Rgba{0.0F, 0.0F, 0.0F, 0.0F});
+    push(ImGuiCol_Border, design::Rgba{0.0F, 0.0F, 0.0F, 0.0F});
+  } else {
+    push(ImGuiCol_Border, palette.border_strong);
+  }
+  const auto pressed = ImGui::Button(label, size);
+  ImGui::PopStyleColor(pushed);
+  return pressed;
+}
+
+auto App::checkbox(const char *label, bool *value) -> bool {
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto checked = *value;
+  ImGui::PushStyleColor(ImGuiCol_Border, imgui_color(checked ? palette.action
+                                                             : palette.border_strong));
+  // A compact box, as lake's: the frame padding sets the square's size.
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                      ImVec2(ImGui::GetStyle().FramePadding.x, design::space1 * 0.5F));
+  ImGui::PushStyleColor(ImGuiCol_FrameBg,
+                        imgui_color(checked ? palette.action : palette.surface));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered,
+                        imgui_color(checked ? palette.action_hover : palette.layer_hover));
+  ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0F, 1.0F, 1.0F, 1.0F));
+  const auto changed = ImGui::Checkbox(label, value);
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(4);
+  return changed;
+}
+
+void App::field_label(const char *label) {
+  ImGui::TextUnformatted(label);
+  ImGui::SetNextItemWidth(-FLT_MIN);
+}
+
+auto App::text_field(const char *label, std::string *value, const char *hint) -> bool {
+  field_label(label);
+  const auto id = std::string("##") + label;
+  return hint == nullptr ? ImGui::InputText(id.c_str(), value)
+                         : ImGui::InputTextWithHint(id.c_str(), hint, value);
+}
+
+// One handle shape for every slider: an integer slider's grab otherwise widens with a small
+// range, which is why the two size sliders in Settings looked different.
+auto App::slider_int(const char *label, int *value, int minimum, int maximum) -> bool {
+  field_label(label);
+  auto fraction = static_cast<float>(*value);
+  const auto id = std::string("##") + label;
+  if (!ImGui::SliderFloat(id.c_str(), &fraction, static_cast<float>(minimum),
+                          static_cast<float>(maximum), "%.0f")) {
+    return false;
+  }
+  const auto rounded = static_cast<int>(std::lround(fraction));
+  if (rounded == *value) {
+    return false;
+  }
+  *value = rounded;
+  return true;
 }
 
 // The type scale (liquify#100), from the design tokens lake uses: a title (24, semibold), a
@@ -7257,7 +7354,7 @@ void App::draw_cut_composer() {
                      !cut_message_summary(cut_message_).empty() &&
                      !cut_operation_;
   ImGui::BeginDisabled(!ready);
-  if (ImGui::Button(cut_operation_ ? "Cutting..." : "Cut change")) {
+  if (kit_button(cut_operation_ ? "Cutting..." : "Cut change", ButtonKind::primary)) {
     cut_failure_ = {};
     cut_operation_.emplace(std::async(
         std::launch::async,
@@ -7313,7 +7410,7 @@ void App::draw_clone_dialog() {
   ImGui::Spacing();
   const auto ready = !clone_remote_.empty() && !clone_path_.empty();
   ImGui::BeginDisabled(!ready);
-  if (ImGui::Button("Clone")) {
+  if (kit_button("Clone", ButtonKind::primary)) {
     begin_clone_repository(clone_remote_, clone_path_);
     ImGui::CloseCurrentPopup();
   }
@@ -7390,7 +7487,7 @@ void App::draw_new_repository_dialog() {
   }
   ImGui::Spacing();
   ImGui::BeginDisabled(new_repository_path_.empty());
-  if (ImGui::Button("Create repository")) {
+  if (kit_button("Create repository", ButtonKind::primary)) {
     begin_create_repository(new_repository_path_);
     ImGui::CloseCurrentPopup();
   }
@@ -7436,7 +7533,7 @@ void App::draw_welcome() {
                                            first_run_.pending_path())},
         "open-failure");
     ImGui::TextDisabled("%s", first_run_.pending_path().string().c_str());
-    if (ImGui::Button("Retry")) {
+    if (kit_button("Retry", ButtonKind::primary)) {
       begin_open_repository(first_run_.pending_path());
     }
     ImGui::SameLine();
@@ -7451,7 +7548,7 @@ void App::draw_welcome() {
   } else if (phase == RepositoryLifecyclePhase::offline ||
              phase == RepositoryLifecyclePhase::failed) {
     draw_user_error(first_run_.clone_failure(), "clone-failure");
-    if (ImGui::Button("Retry clone")) {
+    if (kit_button("Retry clone", ButtonKind::primary)) {
       begin_clone_repository(first_run_.clone_remote(),
                              first_run_.pending_path());
     }
@@ -7472,7 +7569,7 @@ void App::draw_welcome() {
   }
 
   ImGui::BeginDisabled(repository_operation_.has_value());
-  if (ImGui::Button("Open folder", ImVec2(150.0F, 38.0F))) {
+  if (kit_button("Open folder", ButtonKind::primary, 150.0F, 38.0F)) {
     show_folder_dialog();
   }
   frame_layout_.controls["front-door/open"] = item_rectangle();

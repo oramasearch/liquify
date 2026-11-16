@@ -84,3 +84,25 @@ title, supporting copy and next step as one block.
 title is at least 1.5 times its copy, its section heading taller than the copy, and a panel header
 taller than body text, in both themes. The native scenario `look` captures the empty editor, the
 palette, Settings, the editor and the front door in the real window.
+
+## Controls
+
+liquify's controls mirror lake's kit (liquify#101), in `src/app.cpp`:
+
+| Control | Helper | Look |
+|---|---|---|
+| Primary button | `kit_button(label, ButtonKind::primary)` | Filled with `action`, white label. One per surface: Open folder on the front door, Save in the editor toolbar, the confirm button of each dialog (Clone, Create repository, Cut change, Set lake, Request review, Record and build), Find in Search |
+| Secondary button | `kit_button(label, ButtonKind::secondary)`, and every plain `ImGui::Button` | `surface` with a `border_strong` hairline |
+| Quiet button | `ButtonKind::quiet` | No fill or border until hovered: the toolbar's view toggles |
+| Destructive button | `ButtonKind::destructive` | `danger` label and hairline |
+| Checkbox | `checkbox(label, &value)` | A compact box with a `border_strong` outline; checked is filled with `action` and a white mark. Every checkbox has a label |
+| Field | `text_field(label, &value, hint)` | Label above, full width of its panel, `surface` with a hairline |
+| Slider | `slider_int(label, &value, min, max)` | Label above, full width, one handle shape whatever the range |
+
+The editor toolbar is one row: Save, then Build, Tests and Push, then the view toggles and the
+editing modes, divided by hairlines; each button has a tooltip. The keymap settings label each
+binding by its command's title, not its id.
+
+`Screenshot.SearchFieldsFillTheirPanel` checks the Search panel's fields share one width and fill
+their panel; the native scenario `look` captures the toolbar, Search, Settings and the front door
+in the real window.
