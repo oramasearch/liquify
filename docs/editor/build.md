@@ -15,6 +15,16 @@ critical action includes liquid's scheduling reason and local and remote estimat
 build is captured by the daemon; the
 editor immediately requests a new plan; unchanged actions remain visible as hits in that plan.
 
+**Set up build.** A repository with no recorded build answers F7 with "This repository has no build
+set up yet" and a **Set up build** button (also the `run.set-up-build` command). The Set Up Build
+dialog proposes a command from what the repository's root holds and says why: `CMakeLists.txt`
+gives `cmake -S . -B build && cmake --build build`, a `Makefile` gives `make`, a `build.sh` gives
+`sh ./build.sh`; otherwise the field is empty and the dialog asks for the command. The person can
+change it. **Record and build** runs it once through libliquid's wrap API
+(`liquid::build::wrap(repository, {"/bin/sh", "-c", command})`, `src/build_setup.cpp`), which
+records it exactly as `liquid wrap <command>` does, and then starts the F7 build. A failure to record,
+or a non-zero exit, is shown in the dialog with the error component and records nothing.
+
 **Tests.** `repository::tests()` supplies the listed targets. The All tests control uses
 `repository::run_tests()` and each target's Run control passes the target name as its filter. A
 result says `hit` when liquid reused the recorded action and `ran` when an observed input required
@@ -64,7 +74,9 @@ and requires an honest unavailable daemon and absent-remote state. `opened-clone
 a test lake (liquid's `forge_double`) with libliquid, opens the folder in liquify, types, saves,
 cuts, presses F9 and requires every reference applied and a fresh clone from the test lake to
 serve the edit. `set-lake-push` presses F9 with no lake, clicks **Set lake**, types the address
-and requires the next F9 to reach that lake. `front-door-clone-push` does the whole loop from the
+and requires the next F9 to reach that lake. `set-up-build` makes a CMake repository, presses F7, clicks **Set up build**, requires the CMake
+proposal, records it and requires the next F7 to find the recorded build (sandboxed execution on
+macOS still needs macFUSE). `front-door-clone-push` does the whole loop from the
 front door's clone; it is disabled until liquify#97 (liquid#526), because the first save into a
 store liquify itself just cloned usually loses an index run (and now and then does not). Successful and failed sandboxed
 actions remain owed on macOS until macFUSE is available; see

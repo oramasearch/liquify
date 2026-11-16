@@ -27,10 +27,10 @@ Each failure is shown once, in the panel that owns it, and the status bar names 
 
 | Failure | Panel | Sentence | Action |
 |---|---|---|---|
-| Build or test run (F7, F8), no recorded build | Build | This repository has no build set up yet | Set up build (#107) |
+| Build or test run (F7, F8), no recorded build | Build | This repository has no build set up yet | Set up build |
 | Build or test run, the build service is not running | Build | The build service is not running for this repository | |
 | Build or test run, anything else | Build | The build did not finish | Build again |
-| Push (F9), no sync remote | Build | This repository has no lake to push to | Set lake (#104) |
+| Push (F9), no sync remote | Build | This repository has no lake to push to | Set lake |
 | Push, the lake failed | Build | The lake failure classes below, worded for a push | Push again, where retrying can help |
 | Code analysis (diagnostics, hover, definition, completion) | Diagnostics | Code analysis could not update | |
 | The path and symbol index | Repository sidebar | The file and symbol index could not be built | |
@@ -42,8 +42,9 @@ The status bar shows the first of build, push and code-analysis failures as its 
 "Open *panel*"; selecting it focuses the panel and shows the sidebar or bottom area that holds it
 (`App::status_failure`). Any other status text has absolute paths removed before it is shown.
 
-A failure's action is drawn only when liquify can perform it (`App::error_action_available`); Set
-up build and Set lake appear once their dialogs exist. Until then the next step says what to do.
+A failure's action is drawn only when liquify can perform it (`App::error_action_available`): Set
+up build opens the Set Up Build dialog ([`../editor/build.md`](../editor/build.md)), Set lake the Set
+Lake dialog, and Retry repeats the operation.
 
 Build and push failures are recorded separately from code-analysis failures in the editor graph
 (`EditorGraphSnapshot::build_error`, `DeploySnapshot::failure`, `query_failure`), so a failed

@@ -164,6 +164,7 @@ add_library(liquify-core STATIC
   src/context_builder.cpp
   src/editor_buffer.cpp
   src/editor_model.cpp
+  src/build_setup.cpp
   src/change_cut.cpp
   src/editor_graph.cpp
   src/input.cpp

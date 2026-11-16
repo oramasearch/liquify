@@ -832,6 +832,76 @@ void NativeAcceptance::fill_clone(App &app, const std::string &remote,
           "address and folder typed into Clone from Lake");
 }
 
+// A fresh CMake repository: F7 proposes the CMake command, records it through libliquid's wrap
+// API and builds, with no terminal.
+void NativeAcceptance::set_up_build(const std::filesystem::path &output) {
+  const auto folder =
+      output / ("cmake-" + std::to_string(std::chrono::steady_clock::now()
+                                               .time_since_epoch()
+                                               .count()));
+  std::filesystem::create_directories(folder);
+  const auto cmake = std::string("cmake_minimum_required(VERSION 3.20)\n"
+                                 "project(answer CXX)\n"
+                                 "add_executable(answer main.cpp)\n");
+  const auto main = std::string("int main() { return 0; }\n");
+  std::ofstream(folder / "CMakeLists.txt") << cmake;
+  std::ofstream(folder / "main.cpp") << main;
+  {
+    auto repo = liquid::runtime::block_on(liquid::repository::create(folder));
+    require(repo.has_value(), "CMake repository created");
+    for (const auto &[name, text] :
+         {std::pair{"CMakeLists.txt", cmake}, std::pair{"main.cpp", main}}) {
+      const auto bytes = std::as_bytes(std::span(text));
+      require(liquid::runtime::block_on(
+                  repo->write(name, {bytes.begin(), bytes.end()}))
+                  .has_value(),
+              std::string("persisted ") + name);
+    }
+  }
+  App app({.repository_path = folder});
+  require(launch(app, 2) == 0, "real native application window initialized");
+  pulse(app);
+  app.editor_graph_->wait_until_idle();
+  key(app, "F7");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+  require(app.editor_graph_->snapshot().build_error.has_value(),
+          "F7 with no recorded build reports it");
+  click(app, app.frame_layout().controls.at("status/failure"));
+  require(app.frame_layout().controls.contains("build-failure/action"),
+          "#107: the build failure offers Set up build");
+  click(app, app.frame_layout().controls.at("build-failure/action"));
+  pulse(app);
+  require(popup("Set Up Build"), "Set up build opened its dialog");
+  require(app.build_setup_command_ ==
+              "cmake -S . -B build && cmake --build build",
+          "#107: the dialog proposes the CMake command and names it");
+  capture_themes(app, output, "set-up-build");
+  click(app, app.frame_layout().controls.at("build-setup/submit"));
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(120);
+  while ((app.build_setup_operation_ || popup("Set Up Build")) &&
+         app.build_setup_failure_.empty() &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  std::printf("set-up-build: failure='%s' details='%s'\n",
+              app.build_setup_failure_.summary.c_str(),
+              app.build_setup_failure_.details.c_str());
+  require(app.build_setup_failure_.empty() && !popup("Set Up Build"),
+          "#107: the command was recorded through libliquid's wrap API");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+  const auto snapshot = app.editor_graph_->snapshot();
+  std::printf("set-up-build: build_error='%s' result='%s' actions=%zu\n",
+              snapshot.build_error ? snapshot.build_error->message.c_str() : "",
+              snapshot.build_result.c_str(), snapshot.build_actions.size());
+  require(!snapshot.build_error ||
+              snapshot.build_error->code != liquid::errc::not_configured,
+          "#107: F7 now finds the recorded build");
+  capture_themes(app, output, "set-up-build-done");
+}
+
 void NativeAcceptance::wait_for_repository_operation(App &app) {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -947,6 +1017,11 @@ void NativeAcceptance::clone_failures(App &app,
 int NativeAcceptance::run(std::string_view scenario,
                           const std::filesystem::path &output) {
   std::filesystem::create_directories(output);
+  if (scenario == "set-up-build") {
+    set_up_build(output);
+    std::printf("native acceptance: PASS set-up-build\n");
+    return 0;
+  }
   if (scenario == "request-review") {
     request_review(output);
     std::printf("native acceptance: PASS request-review\n");

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "liquify/app_state.hpp"
+#include "liquify/build_setup.hpp"
 #include "liquify/change_cut.hpp"
 #include "liquify/lake_remote.hpp"
 #include "liquify/command.hpp"
@@ -118,6 +119,9 @@ private:
   void configure_review();
   void open_request_review();
   void draw_request_review_dialog();
+  void open_build_setup();
+  void poll_build_setup();
+  void draw_build_setup_dialog();
   void draw_split_editor();
   void draw_repository_tree();
   void draw_repository_entries(std::string_view directory);
@@ -411,6 +415,13 @@ private:
   bool assistant_was_running_{};
   // Which error components show liquid's raw message, by component id.
   std::map<std::string, bool, std::less<>> error_details_open_;
+  // Set Up Build dialog.
+  bool build_setup_requested_{};
+  bool build_setup_close_requested_{};
+  BuildProposal build_proposal_;
+  std::string build_setup_command_;
+  UserError build_setup_failure_;
+  std::optional<std::future<UserError>> build_setup_operation_;
   // Request Review dialog.
   bool request_review_requested_{};
   std::string request_review_reviewers_;

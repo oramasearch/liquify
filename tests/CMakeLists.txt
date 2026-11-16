@@ -2,6 +2,7 @@ add_executable(liquify-tests
   test_ai.cpp
   test_redraw.cpp
   test_app_state.cpp
+  test_build_setup.cpp
   test_change_cut.cpp
   test_command.cpp
   test_editor_buffer.cpp
@@ -76,7 +77,7 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
   foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette modal-input tabs build
       front-door-clone-failures cut
       front-door-clone-push set-lake-push opened-clone-push
-      request-review front-door-actions)
+      request-review front-door-actions set-up-build)
     add_test(NAME liquify-native-acceptance-${scenario}
       COMMAND liquify-native-acceptance ${scenario}
         ${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario})

@@ -34,6 +34,7 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | Run | Build | `run.build` | `F7` | `F7` | `F7` | Plan and start the configured build. |
 | Run | Run All Tests | `run.tests` | `F8` | `F8` | `F8` | List and run all configured test actions. |
 | Run | Push | `run.push` | `F9` | `F9` | `F9` | Push changes to the lake this repository came from. |
+| Run | Set Up Build | `run.set-up-build` | `—` | `—` | `—` | Record the command that builds this repository. |
 | Run | Set Lake | `run.set-lake` | `—` | `—` | `—` | Choose the lake repository this one pushes to. |
 | Change | Cut Change | `change.cut` | `Cmd+Shift+K` | `Ctrl+Shift+K` | `Ctrl+Shift+K` | Name the drips saved since the last change as one change. |
 | Review | Next Hunk | `review.next-hunk` | `Option+Down` | `Alt+Down` | `Alt+Down` | Move to the next review hunk. |
