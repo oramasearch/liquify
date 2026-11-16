@@ -124,6 +124,12 @@ and supported lake revision are recorded in [`docs/build/store-compatibility.md`
 
 ## Rules
 
+- **All work gets its own GitHub issue.** Every piece of work (a fix, a feature, a document, a
+  chore, a refactor) has an issue in this repository before it starts, one issue per piece of
+  work, saying what, why and how it will be checked. Its pull request names the issue. When the
+  pull request is up, the issue is closed with a comment saying what changed and linking the pull
+  request; never use `fixes #N` or `closes #N`. Work found along the way gets its own new issue
+  rather than riding along in another.
 - `src/app.cpp` is the **one** translation unit that includes SDL3 or ImGui. No other file
   may name an SDL or ImGui type; the shell exposes plain C++ (`liquify::App`).
 - Zetta's GUI (`src/gui/app.cpp` in the Zetta repository) is a reference for the SDL/ImGui
@@ -159,9 +165,9 @@ and supported lake revision are recorded in [`docs/build/store-compatibility.md`
    feature sections to it. Update `docs/design/status.md` for the status of your area and
    `docs/README.md` for any new page.
 3. Does this file's **Status** and **Decisions** still hold?
-4. The full local proof is green: `cmake -S . -B build -G Ninja && cmake --build build &&
-   ctest --test-dir build --output-on-failure && ./build/liquify version &&
-   ./build/liquify --smoke 30`.
+4. It builds: `cmake -S . -B build -G Ninja && cmake --build build`, with the tests the change
+   needs written. The full proof (`ctest --test-dir build --output-on-failure`,
+   `./build/liquify version`, `./build/liquify --smoke 30`) runs when a release is cut.
 5. There is no hosted CI: GitHub Actions are off and the workflow files are commented out. Tests
    run when a release is cut.
 6. The contributor has signed the Contributor License Agreement (`CLA.md`); pull requests target
