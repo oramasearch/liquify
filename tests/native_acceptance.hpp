@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 #include <string_view>
 
 #include "liquify/app.hpp"
@@ -35,6 +36,15 @@ private:
   static void tabs(App &app);
   static void build(App &app, const std::filesystem::path &output);
   static void cut(App &app, const std::filesystem::path &output);
+  static void edit_save_cut(App &app, std::string_view marker,
+                            std::string_view message);
+  static void push(App &app);
+  static auto lake_file(const std::string &remote,
+                        const std::filesystem::path &folder, std::string path)
+      -> std::string;
+  static void clone_push(App &app, const std::filesystem::path &output);
+  static void set_lake_push(App &app, const std::filesystem::path &output);
+  static void opened_clone_push(const std::filesystem::path &output);
   static void wait_for_repository_operation(App &app);
   static void capture_themes(App &app, const std::filesystem::path &output,
                              std::string_view name);

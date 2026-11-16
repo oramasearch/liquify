@@ -15,7 +15,7 @@ order, the last docked placement, floating bounds, busy state, status text, and 
 | Repository | Sidebar | — |
 | Search | Sidebar | — |
 | Review | Sidebar | Refresh, hunk and comment navigation, new comment, approve |
-| Build, test and deploy | Bottom | Build, run tests, deploy |
+| Build, test and push | Bottom | Build, run tests, push |
 | Multiplayer | Sidebar | — |
 | Diagnostics | Bottom | — |
 | Assistant | Bottom | Ask, explain, propose, accept, reject, toggle, inspect context |
@@ -54,7 +54,7 @@ repository sidebar. Review, plugin, assistant and structural failures still use 
 One status-bar channel reports progress and completion for builds, saved-drip sync, repository
 folder hydration, and assistant streaming. Selecting the message focuses its source panel. A failure
 is named in the status bar by its sentence and the panel that holds it ("This repository has no
-build set up yet · Open Build, test and deploy"); selecting it opens that panel.
+build set up yet · Open Build, test and push"); selecting it opens that panel.
 Determinate work includes a progress bar. The channel offers Cancel only when the controller can
 honour it: assistant streaming currently can; the pinned libliquid build handle, sync endpoint, and
 repository directory future do not expose cancellation.

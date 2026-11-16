@@ -7,7 +7,7 @@ both in the same change. The specification lives in
 [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
 
 In one line: a retained GPU editor with graph-backed interactive C/C++ analysis, inline build,
-test and deploy, structural editing, review in place, native plugins, and an optional AI surface,
+test and push, structural editing, review in place, native plugins, and an optional AI surface,
 over one pinned libliquid.
 
 ## Shell and repository
@@ -62,7 +62,9 @@ keymap conflict reporting, native menus and headless `--command` invocation
 ([`../ui/commands.md`](../ui/commands.md)). Cut Change (palette, Change menu, Primary+Shift+K)
 names the drips saved since the last change as one change through libliquid's cut API, after
 showing what it gathers ([`../editor/cut.md`](../editor/cut.md)). While a modal dialog is open,
-typed text reaches only the dialog, never the source behind it.
+typed text reaches only the dialog, never the source behind it. F9 is Push: it pushes to the
+repository's sync remote or the lake it was cloned from, and with neither offers Set Lake
+([`../editor/build.md`](../editor/build.md)).
 The searchable settings surface reads a user `.liquid` file plus repository overrides and applies
 theme, fonts, editor behavior, keymaps, optional AI, lake accounts and default-off telemetry live.
 Parser and typed validation errors remain inline, group reset is local, and credential values never
@@ -136,7 +138,7 @@ when the user has trusted their SHA-256 digest with `liquify plugin trust`, from
 store outside every repository; otherwise they are listed as not trusted and never loaded
 ([liquify#71](https://github.com/oramasearch/liquify/issues/71)). Plugins still run in-process.
 
-## Build, test and deploy
+## Build, test and push
 
 F7 plans and starts the configured build through the attached daemon, then renders its action
 event stream, critical path and scheduler decisions. F8 lists and runs graph test actions. F9

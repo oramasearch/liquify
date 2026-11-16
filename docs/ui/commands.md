@@ -23,7 +23,7 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | View | Show Build | `view.build` | `—` | `—` | `—` | Open the Build sidebar. |
 | View | Show Multiplayer | `view.multiplayer` | `—` | `—` | `—` | Open the Multiplayer sidebar. |
 | View | Show Diagnostics Panel | `panel.diagnostics` | `—` | `—` | `—` | Open the Diagnostics panel. |
-| View | Show Build Panel | `panel.build` | `—` | `—` | `—` | Open the build, test, and deploy panel. |
+| View | Show Build Panel | `panel.build` | `—` | `—` | `—` | Open the build, test, and push panel. |
 | View | Show Assistant Panel | `panel.assistant` | `—` | `—` | `—` | Open the Assistant panel. |
 | View | Show Plugins Panel | `panel.plugins` | `—` | `—` | `—` | Open the Plugins panel. |
 | Go | Go to Definition | `go.definition` | `F12` | `F12` | `F12` | Open the selected symbol definition. |
@@ -33,7 +33,8 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | Refactor | Extract Function | `refactor.extract-function` | `Cmd+Shift+X` | `Ctrl+Shift+X` | `Ctrl+Shift+X` | Preview a C or C++ function extraction. |
 | Run | Build | `run.build` | `F7` | `F7` | `F7` | Plan and start the configured build. |
 | Run | Run All Tests | `run.tests` | `F8` | `F8` | `F8` | List and run all configured test actions. |
-| Run | Deploy | `run.deploy` | `F9` | `F9` | `F9` | Push saved drips to the configured sync remote. |
+| Run | Push | `run.push` | `F9` | `F9` | `F9` | Push changes to the lake this repository came from. |
+| Run | Set Lake | `run.set-lake` | `—` | `—` | `—` | Choose the lake repository this one pushes to. |
 | Change | Cut Change | `change.cut` | `Cmd+Shift+K` | `Ctrl+Shift+K` | `Ctrl+Shift+K` | Name the drips saved since the last change as one change. |
 | Review | Next Hunk | `review.next-hunk` | `Option+Down` | `Alt+Down` | `Alt+Down` | Move to the next review hunk. |
 | Review | Previous Hunk | `review.previous-hunk` | `Option+Up` | `Alt+Up` | `Alt+Up` | Move to the previous review hunk. |
@@ -56,9 +57,9 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | Review | Refresh Review | `review.refresh` | `—` | `—` | `—` | Refresh the open review. |
 | View | Reset Panel Layout | `panel.reset-layout` | `—` | `—` | `—` | Restore the default panel layout. |
 | Preferences | Open Settings | `settings.open` | `Cmd+Comma` | `Ctrl+Comma` | `Ctrl+Comma` | Open the live settings surface. |
-| Build, test and deploy | Build | `build.start` | `—` | `—` | `—` | Start the configured build from the build panel. |
-| Build, test and deploy | Run All Tests | `build.test` | `—` | `—` | `—` | Run all configured test actions from the build panel. |
-| Build, test and deploy | Deploy | `build.deploy` | `—` | `—` | `—` | Push saved drips from the build panel. |
+| Build, test and push | Build | `build.start` | `—` | `—` | `—` | Start the configured build from the build panel. |
+| Build, test and push | Run All Tests | `build.test` | `—` | `—` | `—` | Run all configured test actions from the build panel. |
+| Build, test and push | Push | `build.push` | `—` | `—` | `—` | Push changes from the build panel. |
 | Assistant | Explain Diagnostic | `assistant.explain` | `—` | `—` | `—` | Explain the active diagnostic from the assistant panel. |
 | Assistant | Propose Edit | `assistant.propose` | `—` | `—` | `—` | Request an edit preview from the assistant panel. |
 | Assistant | Accept Edit | `assistant.accept` | `—` | `—` | `—` | Accept the assistant edit preview from the assistant panel. |

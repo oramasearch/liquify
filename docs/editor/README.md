@@ -111,7 +111,7 @@ measured edit-to-result duration. Selecting a diagnostic opens its blob and move
 range. Failed actions publish their diagnostics from the daemon event stream directly to the
 retained line layer.
 
-## Build, test and deploy
+## Build, test and push
 
 [`build.md`](build.md) describes the graph-backed panels. F7 requests the configured repository
 build through the in-process daemon, F8 runs registered graph tests, F9 pushes saved drips to the
@@ -134,7 +134,7 @@ recorded in [`../app-shell/README.md`](../app-shell/README.md).
 
 Linux proof deferred (decision 33). The current macOS measurement is the display-backed smoke run
 recorded above. It measures the editor's retained rendering and edit-to-present path while the
-build, test, and deploy controller is verified by
+build, test, and push controller is verified by
 `EditorGraph.PresentsBuildEventsTestsAndRefusedReferences`.
 
 ## Phase 4 exit measurement

@@ -2,10 +2,13 @@
 
 #include "../src/editor_buffer.hpp"
 #include "../src/repository_view.hpp"
+#include "forge_double.hpp"
+#include "liquid/drive.hpp"
 #include "liquid/identity.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
 #include "liquify/editor_graph.hpp"
+#include "liquify/lake_remote.hpp"
 #include "ui_property_assert.hpp"
 
 #include <arpa/inet.h>
@@ -17,6 +20,7 @@
 #include <chrono>
 #include <cstdio>
 #include <thread>
+#include <algorithm>
 #include <array>
 #include <format>
 #include <fstream>
@@ -374,6 +378,18 @@ void NativeAcceptance::cut(App &app, const std::filesystem::path &output) {
   text(app, marker);
   require(app.editor_->dirty(), "typed text reached the retained editor");
   key(app, "s", true);
+  std::printf("save: dirty=%d status='%s' buffer_error='%s'\n", app.editor_->dirty(),
+              app.editor_status_.c_str(), std::string(app.editor_->error()).c_str());
+  if (app.editor_->dirty()) {
+    auto options = liquid::repository_options{};
+    options.session = app.multiplayer_session_;
+    auto probe = liquid::runtime::block_on(
+        liquid::repository::open(*app.options_.repository_path, options));
+    std::printf("probe: path=%s ok=%d error='%s' context='%s'\n",
+                app.options_.repository_path->string().c_str(), probe.has_value(),
+                probe ? "" : probe.error().message.c_str(),
+                probe ? "" : probe.error().context.c_str());
+  }
   require(!app.editor_->dirty(), "Primary+S saved the edit as a drip");
   key(app, "k", true, true);
   const auto deadline =
@@ -442,6 +458,219 @@ void NativeAcceptance::cut(App &app, const std::filesystem::path &output) {
   const auto saved = read_back(app.repository_->path());
   require(saved.contains(marker), "the cut change holds the typed edit");
   capture_themes(app, output, "cut-done");
+}
+
+// Types into the open editor, saves, and cuts a change through the composer.
+void NativeAcceptance::edit_save_cut(App &app, std::string_view marker,
+                                     std::string_view message) {
+  click(app, app.frame_layout().editor);
+  text(app, marker);
+  key(app, "s", true);
+  std::printf("save: dirty=%d status='%s' buffer_error='%s'\n", app.editor_->dirty(),
+              app.editor_status_.c_str(), std::string(app.editor_->error()).c_str());
+  if (app.editor_->dirty()) {
+    auto options = liquid::repository_options{};
+    options.session = app.multiplayer_session_;
+    auto probe = liquid::runtime::block_on(
+        liquid::repository::open(*app.options_.repository_path, options));
+    std::printf("probe: path=%s ok=%d error='%s' context='%s'\n",
+                app.options_.repository_path->string().c_str(), probe.has_value(),
+                probe ? "" : probe.error().message.c_str(),
+                probe ? "" : probe.error().context.c_str());
+  }
+  require(!app.editor_->dirty(), "Primary+S saved the edit as a drip");
+  key(app, "k", true, true);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while ((!popup("Cut Change") || !app.cut_pending_) &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  require(popup("Cut Change") && app.cut_pending_ &&
+              !app.cut_pending_->drips.empty(),
+          "Cut Change lists the saved drip");
+  click(app, app.frame_layout().controls.at("cut/message"));
+  text(app, message);
+  click(app, app.frame_layout().controls.at("cut/submit"));
+  while ((app.cut_operation_ || popup("Cut Change")) &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  require(app.cut_result_.has_value(), "the change was cut");
+}
+
+// Presses F9 and waits for the push to finish.
+void NativeAcceptance::push(App &app) {
+  key(app, "F9");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+}
+
+// Clones `remote` into a fresh folder with libliquid alone and returns main.cpp.
+auto NativeAcceptance::lake_file(const std::string &remote,
+                                 const std::filesystem::path &folder,
+                                 std::string path) -> std::string {
+  {
+    auto client = liquid::runtime::block_on(
+        liquid::drive_client::open(folder, remote));
+    require(client.has_value(), "verification clone opened");
+    require(liquid::runtime::block_on(client->pin("")).has_value() &&
+                liquid::runtime::block_on(client->sync()).has_value(),
+            "verification clone synced from the test lake");
+  }
+  auto repository =
+      liquid::runtime::block_on(liquid::repository::open(folder));
+  require(repository.has_value(), "verification clone opened as a repository");
+  const auto bytes =
+      liquid::runtime::block_on(repository->read(std::move(path)));
+  require(bytes.has_value(), "file read from the verification clone");
+  return {reinterpret_cast<const char *>(bytes->data()), bytes->size()};
+}
+
+void NativeAcceptance::clone_push(App &app, const std::filesystem::path &output) {
+  auto lake = liquid::test::forge_double{};
+  require(lake.advance_head("main.cpp", source).has_value(),
+          "test lake holds main.cpp");
+  click(app, app.frame_layout().controls.at("front-door/clone"));
+  for (int attempt = 0; attempt < 3 && !popup("Clone from lake"); ++attempt) {
+    click(app, app.frame_layout().controls.at("front-door/clone"));
+  }
+  require(popup("Clone from lake"), "Clone from lake dialog opened");
+  app.clone_remote_ = lake.url();
+  const auto stamp = std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count());
+  app.clone_path_ = (output / ("clone-" + stamp)).string();
+  pulse(app);
+  click(app, app.frame_layout().controls.at("clone/submit"));
+  wait_for_repository_operation(app);
+  require(app.repository_ != nullptr && app.repository_->error().empty(),
+          "the lake repository was cloned and opened");
+  const auto recorded = recorded_lake_remote(app.repository_->path());
+  std::printf("clone: recorded_remote='%s' lake='%s'\n",
+              recorded ? recorded->c_str() : "?", lake.url().c_str());
+  require(recorded && *recorded == lake.url(),
+          "#104: a clone records the lake it came from");
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (std::chrono::steady_clock::now() < deadline &&
+         (!app.frame_layout().controls.contains("repository/main.cpp") ||
+          app.repository_->navigation_loading())) {
+    pulse(app);
+  }
+  click(app, app.frame_layout().controls.at("repository/main.cpp"));
+  std::printf("clone: opened='%s' bytes=%zu\n",
+              app.editor_ ? std::string(app.editor_->display_path()).c_str() : "",
+              app.editor_ ? app.editor_->text().size() : 0);
+  require(app.editor_ && app.editor_->display_path() == "main.cpp",
+          "the cloned main.cpp opened in the editor");
+  source_tab(app);
+  const auto marker = std::string("/* pushed from the native window */");
+  edit_save_cut(app, marker, "Push from liquify");
+  push(app);
+  const auto &deploy = app.editor_graph_->snapshot().deploy;
+  std::printf("push: remote='%s' objects=%llu references=%zu failure='%s'\n",
+              deploy.remote.c_str(),
+              static_cast<unsigned long long>(deploy.objects),
+              deploy.references.size(),
+              deploy.failure ? deploy.failure->message.c_str() : "");
+  require(!deploy.failure && deploy.remote == lake.url() &&
+              !deploy.references.empty() &&
+              std::ranges::all_of(deploy.references,
+                                  [](const auto &reference) {
+                                    return reference.outcome ==
+                                           liquid::sync_ref_outcome_kind::applied;
+                                  }),
+          "#104: F9 pushed the change to the lake it was cloned from");
+  capture_themes(app, output, "push-done");
+  const auto served = lake_file(lake.url(), output / ("verify-" + stamp), "main.cpp");
+  require(served.contains(marker),
+          "#104: the lake serves the pushed edit to a fresh clone");
+}
+
+void NativeAcceptance::set_lake_push(App &app,
+                                     const std::filesystem::path &output) {
+  auto lake = liquid::test::forge_double{};
+  open_file(app);
+  const auto marker = std::string("/* first push */");
+  edit_save_cut(app, marker, "First push");
+  push(app);
+  require(app.editor_graph_->snapshot().deploy.failure.has_value(),
+          "F9 with no lake reports it");
+  click(app, app.frame_layout().controls.at("status/failure"));
+  require(app.frame_layout().controls.contains("push-failure/action"),
+          "#104: the push failure offers Set lake");
+  capture_themes(app, output, "push-no-lake");
+  click(app, app.frame_layout().controls.at("push-failure/action"));
+  pulse(app);
+  require(popup("Set Lake"), "Set lake opened the Set Lake dialog");
+  // The address field has the keyboard when the dialog opens.
+  text(app, lake.url());
+  require(app.set_lake_url_ == lake.url(), "address typed into Set Lake");
+  capture_themes(app, output, "set-lake");
+  click(app, app.frame_layout().controls.at("set-lake/submit"));
+  std::printf("set-lake: popup=%d failure='%s' details='%s'\n", popup("Set Lake"),
+              app.set_lake_failure_.summary.c_str(), app.set_lake_failure_.details.c_str());
+  require(!popup("Set Lake") && app.set_lake_failure_.empty(),
+          "Set lake recorded the lake");
+  push(app);
+  const auto &deploy = app.editor_graph_->snapshot().deploy;
+  std::printf("push: remote='%s' objects=%llu references=%zu failure='%s'\n",
+              deploy.remote.c_str(),
+              static_cast<unsigned long long>(deploy.objects),
+              deploy.references.size(),
+              deploy.failure ? deploy.failure->message.c_str() : "");
+  // The test lake already holds a repository of its own, so it refuses this unrelated history;
+  // what this proves is that F9 now reaches the lake Set Lake recorded, and says why it refused.
+  const auto failure = describe_push_failure(
+      deploy.failure.value_or(liquid::error{}), deploy.remote,
+      app.repository_->path());
+  std::printf("push: summary='%s' step='%s'\n", failure.summary.c_str(),
+              failure.next_step.c_str());
+  require(deploy.remote == lake.url() && deploy.failure &&
+              failure.action != ErrorAction::set_sync_remote &&
+              failure.summary.contains("holds a different repository"),
+          "#104: F9 pushed to the lake Set Lake recorded");
+  capture_themes(app, output, "push-other-history");
+}
+
+// A folder cloned from the test lake by libliquid alone, then opened in liquify.
+void NativeAcceptance::opened_clone_push(const std::filesystem::path &output) {
+  auto lake = liquid::test::forge_double{};
+  require(lake.advance_head("main.cpp", source).has_value(),
+          "test lake holds main.cpp");
+  const auto stamp = std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count());
+  const auto folder = output / ("clone-" + stamp);
+  static_cast<void>(lake_file(lake.url(), folder, "main.cpp"));
+  App app({.repository_path = folder});
+  require(launch(app, 2) == 0, "real native application window initialized");
+  pulse(app);
+  open_file(app);
+  const auto marker = std::string("/* pushed from the native window */");
+  edit_save_cut(app, marker, "Push from liquify");
+  push(app);
+  const auto &deploy = app.editor_graph_->snapshot().deploy;
+  std::printf("push: remote='%s' objects=%llu references=%zu failure='%s'\n",
+              deploy.remote.c_str(),
+              static_cast<unsigned long long>(deploy.objects),
+              deploy.references.size(),
+              deploy.failure ? deploy.failure->message.c_str() : "");
+  require(!deploy.failure && deploy.remote == lake.url() &&
+              !deploy.references.empty() &&
+              std::ranges::all_of(deploy.references,
+                                  [](const auto &reference) {
+                                    return reference.outcome ==
+                                           liquid::sync_ref_outcome_kind::applied;
+                                  }),
+          "#104: F9 pushed the change to the lake the folder was cloned from");
+  app.panels_.focus(PanelId::build);
+  app.shell_state_.bottom_panel_visible = true;
+  pulse(app);
+  capture_themes(app, output, "push-done");
+  const auto served =
+      lake_file(lake.url(), output / ("verify-" + stamp), "main.cpp");
+  require(served.contains(marker),
+          "#104: the lake serves the pushed edit to a fresh clone");
 }
 
 void NativeAcceptance::wait_for_repository_operation(App &app) {
@@ -548,7 +777,12 @@ void NativeAcceptance::clone_failures(App &app,
             "Details shows liquid's message on request");
     capture_themes(app, output, "clone-" + std::string(item.name));
     click(app, app.frame_layout().controls.at("clone-failure/details"));
-    click(app, app.frame_layout().controls.at("clone-failure/back"));
+    for (int attempt = 0;
+         attempt < 3 &&
+         app.first_run_.phase() != RepositoryLifecyclePhase::welcome;
+         ++attempt) {
+      click(app, app.frame_layout().controls.at("clone-failure/back"));
+    }
     require(app.first_run_.phase() == RepositoryLifecyclePhase::welcome,
             "Back returns to the front door");
   }
@@ -557,6 +791,11 @@ void NativeAcceptance::clone_failures(App &app,
 int NativeAcceptance::run(std::string_view scenario,
                           const std::filesystem::path &output) {
   std::filesystem::create_directories(output);
+  if (scenario == "opened-clone-push") {
+    opened_clone_push(output);
+    std::printf("native acceptance: PASS opened-clone-push\n");
+    return 0;
+  }
   if (scenario.starts_with("front-door-")) {
     App app({});
     const auto launch_status = launch(app, 2);
@@ -567,6 +806,8 @@ int NativeAcceptance::run(std::string_view scenario,
     pulse(app);
     if (scenario == "front-door-clone-failures") {
       clone_failures(app, output);
+    } else if (scenario == "front-door-clone-push") {
+      clone_push(app, output);
     } else {
       throw std::runtime_error("unknown native acceptance scenario");
     }
@@ -603,6 +844,8 @@ int NativeAcceptance::run(std::string_view scenario,
     build(app, output);
   } else if (scenario == "cut") {
     cut(app, output);
+  } else if (scenario == "set-lake-push") {
+    set_lake_push(app, output);
   } else {
     throw std::runtime_error("unknown native acceptance scenario");
   }

@@ -167,6 +167,7 @@ add_library(liquify-core STATIC
   src/change_cut.cpp
   src/editor_graph.cpp
   src/input.cpp
+  src/lake_remote.cpp
   src/first_run.cpp
   src/interactive_analysis.cpp
   src/panel.cpp

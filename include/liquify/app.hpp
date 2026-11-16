@@ -15,6 +15,7 @@
 
 #include "liquify/app_state.hpp"
 #include "liquify/change_cut.hpp"
+#include "liquify/lake_remote.hpp"
 #include "liquify/command.hpp"
 #include "liquify/editor_model.hpp"
 #include "liquify/first_run.hpp"
@@ -110,6 +111,8 @@ private:
   void open_cut_composer();
   void poll_cut_composer();
   void draw_cut_composer();
+  void open_set_lake_dialog();
+  void draw_set_lake_dialog();
   void draw_split_editor();
   void draw_repository_tree();
   void draw_repository_entries(std::string_view directory);
@@ -157,7 +160,7 @@ private:
   void request_completion();
   void request_build();
   void request_tests(std::string filter = {});
-  void request_deploy();
+  void request_push();
   void expand_structural_selection();
   void shrink_structural_selection();
   void select_enclosing_definition();
@@ -403,6 +406,10 @@ private:
   bool assistant_was_running_{};
   // Which error components show liquid's raw message, by component id.
   std::map<std::string, bool, std::less<>> error_details_open_;
+  // Set Lake dialog.
+  bool set_lake_requested_{};
+  std::string set_lake_url_;
+  UserError set_lake_failure_;
   // Cut Change composer.
   bool cut_composer_requested_{};
   bool cut_close_requested_{};

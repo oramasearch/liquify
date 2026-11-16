@@ -53,11 +53,11 @@ then visible floating-panel controls.
 | Screen | Focus order after the activity bar |
 |---|---|
 | Welcome | status actions, Theme, High contrast |
-| Repository | panel menu, tree rows, editor tab, mode, save, build, tests, deploy, split, bottom-panel toggle, source editor, bottom tabs, status actions, Theme, High contrast |
+| Repository | panel menu, tree rows, editor tab, mode, save, build, tests, push, split, bottom-panel toggle, source editor, bottom tabs, status actions, Theme, High contrast |
 | C++ editor | repository controls, editor tab and toolbar, source editor, diagnostics and other bottom tabs, status actions, Theme, High contrast |
 | Editor view | search field and results, editor tab and toolbar, source editor, find and replace controls, bottom tabs, status actions, Theme, High contrast |
 | Diagnostics | repository controls, editor tab and toolbar, source editor, bottom tabs, diagnostic rows, status actions, Theme, High contrast |
-| Build | build sidebar controls, editor tab and toolbar, source editor, bottom tabs, build, test and deploy actions, status actions, Theme, High contrast |
+| Build | build sidebar controls, editor tab and toolbar, source editor, bottom tabs, build, test and push actions, status actions, Theme, High contrast |
 | Review | review refresh, change and hunk controls, comment controls, approve, editor controls, bottom tabs, status actions, Theme, High contrast |
 | Assistant | repository and editor controls, bottom tabs, assistant toggle, prompt, ask, explain, propose, context, accept and reject, status actions, Theme, High contrast |
 | Plugins | repository and editor controls, bottom tabs, registered plugin commands, status actions, Theme, High contrast |

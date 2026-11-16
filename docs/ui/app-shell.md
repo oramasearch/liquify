@@ -10,7 +10,7 @@ divider is interactive.
 The activity bar switches among Repository, Search, Review, Build, and Multiplayer. Repository
 renders the annotated `RepositoryView` tree and Search filters its libliquid symbol records;
 Review continues to render `ReviewController`; Build invokes the existing editor-graph build,
-test, and deploy requests. Search also runs liquid repository queries and opens results at their
+test, and push requests. Search also runs liquid repository queries and opens results at their
 source locations. Multiplayer displays the presence records used by the editor gutter. Quick
 Open, Symbol Search, recent locations, references, and call hierarchy use modal or result windows
 over the same shell ([`navigation.md`](navigation.md)).
@@ -160,7 +160,7 @@ The committed evidence is:
 | Editor tabs and split | [light](screenshots/editor-cpp-light.png) | [dark](screenshots/editor-cpp-dark.png) |
 | Editor view | [light](screenshots/editor-view-light.png) | [dark](screenshots/editor-view-dark.png) |
 | Diagnostics | [light](screenshots/diagnostics-light.png) | [dark](screenshots/diagnostics-dark.png) |
-| Build/test/deploy | [light](screenshots/build-light.png) | [dark](screenshots/build-dark.png) |
+| Build/test/push | [light](screenshots/build-light.png) | [dark](screenshots/build-dark.png) |
 | Assistant | [light](screenshots/assistant-light.png) | [dark](screenshots/assistant-dark.png) |
 | Review | [light](screenshots/review-light.png) | [dark](screenshots/review-dark.png) |
 | Plugins | [light](screenshots/plugins-light.png) | [dark](screenshots/plugins-dark.png) |
