@@ -27,6 +27,11 @@ public:
   static void resize(App &app);
   static void fonts(App &app);
   static void source_tab(App &app);
+  // macOS: the key equivalent the native menu item for `command` shows ("Cmd+Shift+P", "F6");
+  // empty elsewhere.
+  static auto menu_key(App &app, std::string_view command) -> std::string;
+  // macOS: chooses the native menu item for `command`; false elsewhere.
+  static bool choose_menu(App &app, std::string_view command);
 
 private:
   static void open_file(App &app);
@@ -34,6 +39,8 @@ private:
   static void edit(App &app, const std::filesystem::path &output);
   static void quick_open(App &app);
   static void palette(App &app);
+  static void rebind(App &app);
+  static void commands(App &app);
   static void modal_input(App &app);
   static void tabs(App &app);
   static void build(App &app, const std::filesystem::path &output);

@@ -9,7 +9,9 @@
 #include <string>
 #include <vector>
 
+#include "liquify/app.hpp"
 #include "liquify/command.hpp"
+#include "liquify/navigation.hpp"
 
 namespace liquify {
 namespace {
@@ -207,6 +209,146 @@ TEST(CommandRegistry, DefaultKeymapMatchesCommittedFile) {
   const auto parsed = parse_keymap(committed, path);
   EXPECT_TRUE(parsed.diagnostics.empty());
   EXPECT_FALSE(parsed.overrides.empty());
+}
+
+// liquify#34: the window has an implementation for every built-in command, so a palette row, a
+// menu item or a key never names an action that does nothing.
+TEST(CommandDispatch, EveryBuiltinCommandHasAWindowImplementation) {
+  for (const auto &command : builtin_commands()) {
+    EXPECT_TRUE(App::handles_command(command.name)) << command.name;
+  }
+  for (const auto &alias : builtin_command_aliases()) {
+    EXPECT_FALSE(App::handles_command(alias.name))
+        << alias.name << " runs through its target, not a second handler";
+  }
+  EXPECT_FALSE(App::handles_command("missing.command"));
+}
+
+// A window key event becomes the chord the registry resolves; there is no other key path.
+TEST(CommandDispatch, KeyEventsResolveThroughTheRegistry) {
+  auto registry = registry_for(CommandPlatform::macos);
+  const auto resolve = [&registry](std::string_view key, bool primary,
+                                   bool control, bool alt, bool shift)
+      -> std::string {
+    const auto chord = key_chord_from_event(key, primary, control, alt, shift,
+                                            CommandPlatform::macos);
+    if (!chord) {
+      return "no chord";
+    }
+    const auto *command = registry.command_for(*chord);
+    return command == nullptr ? "" : command->name;
+  };
+  EXPECT_EQ(resolve("P", true, false, false, true), "edit.command-palette");
+  EXPECT_EQ(resolve("P", true, false, false, false), "go.quick-open");
+  EXPECT_EQ(resolve("A", true, false, false, false), "edit.select-all");
+  EXPECT_EQ(resolve("F7", false, false, false, false), "run.build");
+  EXPECT_EQ(resolve("F12", false, false, false, true), "go.references");
+  EXPECT_EQ(resolve("Left", false, false, true, false), "go.back");
+  EXPECT_EQ(resolve("Return", false, false, false, false), "repository.open");
+  EXPECT_EQ(resolve("Keypad Enter", false, false, false, false), "repository.open");
+  EXPECT_EQ(resolve(".", true, false, false, true), "go.breadcrumbs");
+  EXPECT_EQ(resolve("\\", true, false, false, false), "view.toggle-editor-split");
+  EXPECT_EQ(resolve(",", true, false, false, false), "settings.open");
+  EXPECT_EQ(resolve("Q", true, false, false, false), "app.quit");
+  // The macOS Control key is its own modifier: Ctrl+A is not Cmd+A.
+  EXPECT_EQ(resolve("A", false, true, false, false), "");
+  EXPECT_EQ(resolve("Left Shift", false, false, false, true), "no chord");
+
+  // On Linux and Windows `control` is the primary key and is not counted twice.
+  auto linux_registry = registry_for(CommandPlatform::linux);
+  const auto chord = key_chord_from_event("S", true, true, false, false,
+                                          CommandPlatform::linux);
+  ASSERT_TRUE(chord);
+  ASSERT_NE(linux_registry.command_for(*chord), nullptr);
+  EXPECT_EQ(linux_registry.command_for(*chord)->name, "file.save");
+}
+
+TEST(CommandDispatch, ScopesKeepContextualKeysOutOfTheWay) {
+  auto registry = registry_for(CommandPlatform::macos);
+  EXPECT_EQ(registry.find("repository.open")->scope, CommandScope::repository);
+  EXPECT_EQ(registry.find("edit.select-all")->scope, CommandScope::editor);
+  EXPECT_EQ(registry.find("edit.paste")->scope, CommandScope::editor);
+  EXPECT_EQ(registry.find("go.quick-open")->scope, CommandScope::global);
+  EXPECT_EQ(registry.find("run.build")->scope, CommandScope::global);
+}
+
+// A rebind replaces the old chord, which then resolves to nothing; resetting and reapplying (what
+// a live edit in settings does) gives the same result, and the default comes back once the
+// override is gone.
+TEST(CommandDispatch, RebindReplacesTheOldChordAndResetsCleanly) {
+  auto registry = registry_for(CommandPlatform::macos);
+  const auto f6 = *parse_key_chord("F6", CommandPlatform::macos);
+  const auto cmd_a = *parse_key_chord("Primary+A", CommandPlatform::macos);
+  const auto overrides = std::vector<KeymapOverride>{
+      {"edit.select-all", split_binding_list("F6"), {"Settings > Keymap", 1, 1}}};
+  EXPECT_TRUE(registry.apply_overrides(overrides).empty());
+  EXPECT_EQ(registry.command_for(f6)->name, "edit.select-all");
+  EXPECT_EQ(registry.command_for(cmd_a), nullptr);
+  EXPECT_EQ(registry.binding_label("edit.select-all"), "F6");
+
+  registry.reset_bindings();
+  EXPECT_TRUE(registry.apply_overrides(overrides).empty());
+  EXPECT_EQ(registry.command_for(f6)->name, "edit.select-all");
+
+  registry.reset_bindings();
+  EXPECT_EQ(registry.command_for(f6), nullptr);
+  EXPECT_EQ(registry.command_for(cmd_a)->name, "edit.select-all");
+  EXPECT_EQ(registry.binding_label("edit.select-all"), "Cmd+A");
+}
+
+TEST(CommandDispatch, ConflictingRebindDisablesTheChordAndNamesBothCommands) {
+  auto registry = registry_for(CommandPlatform::macos);
+  const auto overrides = std::vector<KeymapOverride>{
+      {"edit.select-all", {"Primary+L"}, {"Settings > Keymap", 1, 1}}};
+  EXPECT_TRUE(registry.apply_overrides(overrides).empty());
+  const auto chord = *parse_key_chord("Primary+L", CommandPlatform::macos);
+  EXPECT_EQ(registry.command_for(chord), nullptr);
+  const auto *conflict = registry.conflict_for(chord);
+  ASSERT_NE(conflict, nullptr);
+  EXPECT_EQ(conflict->binding, "Cmd+L");
+  EXPECT_EQ(conflict->commands,
+            (std::vector<std::string>{"edit.select-all", "selection.line"}));
+  EXPECT_EQ(registry.conflict_for(*parse_key_chord("Primary+A",
+                                                   CommandPlatform::macos)),
+            nullptr);
+  registry.reset_bindings();
+  EXPECT_TRUE(registry.conflicts().empty());
+}
+
+// The settings surface's former ids still rebind the registry command they name.
+TEST(CommandDispatch, SettingsSurfaceIdsResolveToRegistryCommands) {
+  auto registry = registry_for(CommandPlatform::macos);
+  EXPECT_EQ(registry.find("build.run")->name, "run.build");
+  EXPECT_EQ(registry.find("tests.run")->name, "run.tests");
+  EXPECT_EQ(registry.find("push.run")->name, "run.push");
+  EXPECT_EQ(registry.find("palette.open")->name, "edit.command-palette");
+  const auto overrides = std::vector<KeymapOverride>{
+      {"build.run", split_binding_list("F6, Cmd+Shift+B"), {"settings", 1, 1}}};
+  EXPECT_TRUE(registry.apply_overrides(overrides).empty());
+  EXPECT_EQ(registry.binding_label("run.build"), "F6, Cmd+Shift+B");
+}
+
+TEST(CommandDispatch, SplitsSettingsBindingLists) {
+  EXPECT_EQ(split_binding_list("F6"), (std::vector<std::string>{"F6"}));
+  EXPECT_EQ(split_binding_list("F6, Cmd+K"),
+            (std::vector<std::string>{"F6", "Cmd+K"}));
+  EXPECT_EQ(split_binding_list("Primary+,"),
+            (std::vector<std::string>{"Primary+,"}));
+  EXPECT_TRUE(split_binding_list("").empty());
+}
+
+// Navigation actions are registry commands: searched, bound and shown in the reference.
+TEST(CommandDispatch, NavigationActionsAreInTheRegistry) {
+  auto registry = registry_for(CommandPlatform::macos);
+  const auto reference = generate_command_reference();
+  for (const auto &command : navigation_commands()) {
+    ASSERT_NE(registry.find(command.name), nullptr) << command.name;
+    EXPECT_NE(reference.find("`" + std::string(command.name) + "`"),
+              std::string::npos)
+        << command.name;
+  }
+  EXPECT_EQ(registry.binding_label("go.quick-open"), "Cmd+P");
+  EXPECT_EQ(registry.binding_label("go.breadcrumbs"), "Cmd+Shift+Period");
 }
 
 } // namespace

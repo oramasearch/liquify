@@ -57,40 +57,12 @@
 #endif
 
 #if defined(__APPLE__) && defined(__OBJC__)
-enum NativeMenuCommand : std::int32_t {
-  menu_save = 1,
-  menu_close,
-  menu_quit,
-  menu_palette,
-  menu_sidebar,
-  menu_panel,
-  menu_split,
-  menu_theme,
-  menu_contrast,
-  menu_copy,
-  menu_cut,
-  menu_paste,
-  menu_definition,
-  menu_hover,
-  menu_build,
-  menu_tests,
-  menu_push,
-  menu_next_hunk,
-  menu_previous_hunk,
-  menu_next_comment,
-  menu_expand_selection,
-  menu_shrink_selection,
-  menu_quick_open,
-  menu_symbol_search,
-  menu_references,
-  menu_call_hierarchy,
-  menu_open_recent,
-  menu_back,
-  menu_forward,
-  menu_cut_change,
-};
+// A native menu item pushes SDL_EVENT_USER with this code plus its index in the App's
+// native_menu_commands_, and the event loop runs that registry command (liquify#34). The base
+// keeps menu codes apart from the repaint wake code.
+constexpr std::int32_t native_menu_code_base = 0x10000;
 
-@interface LiquifyMenuTarget : NSObject
+@interface LiquifyMenuTarget : NSObject <NSMenuDelegate>
 - (void)performLiquifyCommand:(id)sender;
 @end
 
@@ -98,106 +70,173 @@ enum NativeMenuCommand : std::int32_t {
 - (void)performLiquifyCommand:(id)sender {
   auto event = SDL_Event{};
   event.type = SDL_EVENT_USER;
-  event.user.code = static_cast<Sint32>([sender tag]);
+  event.user.code =
+      native_menu_code_base + static_cast<Sint32>([sender tag]);
   SDL_PushEvent(&event);
 }
-@end
 
-struct NativeMenuEntry {
-  NSString *title;
-  NSString *key;
-  NSEventModifierFlags modifiers;
-  NativeMenuCommand command;
-};
+// The menus show each command's resolved key equivalent but never take the key press: keys go
+// to the window, where the registry's dispatcher applies scope and conflicts. A menu shortcut
+// therefore cannot run outside its scope or around a rebind (liquify#34).
+- (BOOL)menuHasKeyEquivalent:(NSMenu *)menu
+                    forEvent:(NSEvent *)event
+                      target:(id *)target
+                      action:(SEL *)action {
+  return NO;
+}
+@end
 
 static LiquifyMenuTarget *native_menu_target = nullptr;
 static NSMutableArray *native_accessibility_elements = nullptr;
 
-static void add_native_menu(NSMenu *main_menu, NSString *title,
-                            std::initializer_list<NativeMenuEntry> entries) {
-  auto *root =
-      [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
-  auto *menu = [[NSMenu alloc] initWithTitle:title];
-  for (const auto &entry : entries) {
-    auto *item =
-        [[NSMenuItem alloc] initWithTitle:entry.title
-                                   action:@selector(performLiquifyCommand:)
-                            keyEquivalent:entry.key];
-    [item setKeyEquivalentModifierMask:entry.modifiers];
-    [item setTag:entry.command];
-    [item setTarget:native_menu_target];
-    [menu addItem:item];
-  }
-  [root setSubmenu:menu];
-  [main_menu addItem:root];
+static NSString *native_string(std::string_view value) {
+  return [[NSString alloc] initWithBytes:value.data()
+                                  length:value.size()
+                                encoding:NSUTF8StringEncoding];
 }
 
-static void install_native_menu() {
-  native_menu_target = [[LiquifyMenuTarget alloc] init];
+static NSString *native_character(unichar character) {
+  return [NSString stringWithCharacters:&character length:1];
+}
+
+// The key equivalent AppKit draws for a registry chord, or empty for a key it cannot draw.
+static NSString *native_key_equivalent(const liquify::KeyChord &chord,
+                                       NSEventModifierFlags *modifiers) {
+  *modifiers = 0;
+  if ((chord.modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::primary)) != 0) {
+    *modifiers |= NSEventModifierFlagCommand;
+  }
+  if ((chord.modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::control)) != 0) {
+    *modifiers |= NSEventModifierFlagControl;
+  }
+  if ((chord.modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::alt)) != 0) {
+    *modifiers |= NSEventModifierFlagOption;
+  }
+  if ((chord.modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::shift)) != 0) {
+    *modifiers |= NSEventModifierFlagShift;
+  }
+  const auto &key = chord.key;
+  if (key.size() == 1) {
+    return native_string(std::string(
+        1, static_cast<char>(std::tolower(static_cast<unsigned char>(key.front())))));
+  }
+  if (key.size() >= 2 && key.front() == 'F' &&
+      std::isdigit(static_cast<unsigned char>(key[1])) != 0) {
+    return native_character(
+        static_cast<unichar>(NSF1FunctionKey + std::stoi(key.substr(1)) - 1));
+  }
+  static const auto named = std::to_array<std::pair<std::string_view, unichar>>({
+      {"Enter", '\r'},
+      {"Tab", '\t'},
+      {"Space", ' '},
+      {"Backspace", NSBackspaceCharacter},
+      {"Delete", NSDeleteFunctionKey},
+      {"Escape", 0x1b},
+      {"Left", NSLeftArrowFunctionKey},
+      {"Right", NSRightArrowFunctionKey},
+      {"Up", NSUpArrowFunctionKey},
+      {"Down", NSDownArrowFunctionKey},
+      {"Home", NSHomeFunctionKey},
+      {"End", NSEndFunctionKey},
+      {"PageUp", NSPageUpFunctionKey},
+      {"PageDown", NSPageDownFunctionKey},
+      {"Backslash", '\\'},
+      {"Comma", ','},
+      {"Period", '.'},
+  });
+  for (const auto &[name, character] : named) {
+    if (name == key) {
+      return native_character(character);
+    }
+  }
+  *modifiers = 0;
+  return @"";
+}
+
+static NSMenuItem *native_command_item(const liquify::CommandRegistry &registry,
+                                       const liquify::CommandDefinition &command,
+                                       std::vector<std::string> &commands) {
+  auto modifiers = NSEventModifierFlags{};
+  auto *key = @"";
+  if (const auto bindings = registry.bindings(command.name); !bindings.empty()) {
+    key = native_key_equivalent(bindings.front(), &modifiers);
+  }
+  auto *item = [[NSMenuItem alloc] initWithTitle:native_string(command.title)
+                                          action:@selector(performLiquifyCommand:)
+                                   keyEquivalent:key];
+  [item setKeyEquivalentModifierMask:modifiers];
+  [item setTag:static_cast<NSInteger>(commands.size())];
+  [item setTarget:native_menu_target];
+  commands.push_back(command.name);
+  return item;
+}
+
+// The menu bar is built from the registry: one menu per group, in registration order, one item
+// per command with its resolved key equivalent. Rebuilt whenever a binding changes.
+static void install_native_menu(const liquify::CommandRegistry &registry,
+                                std::vector<std::string> &commands) {
+  if (native_menu_target == nullptr) {
+    native_menu_target = [[LiquifyMenuTarget alloc] init];
+  }
+  commands.clear();
   auto *main_menu = [[NSMenu alloc] initWithTitle:@"liquify"];
+  [main_menu setDelegate:native_menu_target];
   auto *application_root = [[NSMenuItem alloc] initWithTitle:@"liquify"
                                                       action:nil
                                                keyEquivalent:@""];
   auto *application_menu = [[NSMenu alloc] initWithTitle:@"liquify"];
+  [application_menu setDelegate:native_menu_target];
   auto *about =
       [[NSMenuItem alloc] initWithTitle:@"About liquify"
                                  action:@selector(orderFrontStandardAboutPanel:)
                           keyEquivalent:@""];
   [application_menu addItem:about];
   [application_menu addItem:[NSMenuItem separatorItem]];
-  auto *quit =
-      [[NSMenuItem alloc] initWithTitle:@"Quit liquify"
-                                 action:@selector(performLiquifyCommand:)
-                          keyEquivalent:@"q"];
-  [quit setTag:menu_quit];
-  [quit setTarget:native_menu_target];
-  [application_menu addItem:quit];
+  if (const auto *quit = registry.find("app.quit")) {
+    [application_menu addItem:native_command_item(registry, *quit, commands)];
+  }
   [application_root setSubmenu:application_menu];
   [main_menu addItem:application_root];
 
-  constexpr auto command = NSEventModifierFlagCommand;
-  constexpr auto command_shift =
-      NSEventModifierFlagCommand | NSEventModifierFlagShift;
-  add_native_menu(main_menu, @"File",
-                  {{@"Save", @"s", command, menu_save},
-                   {@"Close File", @"w", command, menu_close}});
-  add_native_menu(main_menu, @"Edit",
-                  {{@"Copy", @"c", command, menu_copy},
-                   {@"Cut", @"x", command, menu_cut},
-                   {@"Paste", @"v", command, menu_paste},
-                   {@"Command Palette", @"p", command_shift, menu_palette}});
-  add_native_menu(main_menu, @"Selection",
-                  {{@"Expand Selection", @"", 0, menu_expand_selection},
-                   {@"Shrink Selection", @"", 0, menu_shrink_selection}});
-  add_native_menu(
-      main_menu, @"View",
-      {{@"Toggle Sidebar", @"b", command, menu_sidebar},
-       {@"Toggle Bottom Panel", @"j", command, menu_panel},
-       {@"Toggle Editor Split", @"\\", command, menu_split},
-       {@"Cycle Color Theme", @"t", command_shift, menu_theme},
-       {@"Toggle High Contrast", @"h", command_shift, menu_contrast}});
-  add_native_menu(main_menu, @"Go",
-                  {{@"Quick Open", @"p", command, menu_quick_open},
-                   {@"Symbol Search", @"t", command, menu_symbol_search},
-                   {@"Go to Definition", @"", 0, menu_definition},
-                   {@"Find References", @"", 0, menu_references},
-                   {@"Call Hierarchy", @"", 0, menu_call_hierarchy},
-                   {@"Open Recent", @"r", command, menu_open_recent},
-                   {@"Back", @"", 0, menu_back},
-                   {@"Forward", @"", 0, menu_forward},
-                   {@"Show Hover", @"", 0, menu_hover}});
-  add_native_menu(main_menu, @"Change",
-                  {{@"Cut Change…", @"k", command_shift, menu_cut_change}});
-  add_native_menu(main_menu, @"Run",
-                  {{@"Build", @"", 0, menu_build},
-                   {@"Test", @"", 0, menu_tests},
-                   {@"Push", @"", 0, menu_push}});
-  add_native_menu(main_menu, @"Review",
-                  {{@"Next Hunk", @"", 0, menu_next_hunk},
-                   {@"Previous Hunk", @"", 0, menu_previous_hunk},
-                   {@"Next Comment", @"", 0, menu_next_comment}});
+  auto groups = std::vector<std::string>{};
+  for (const auto &command : registry.commands()) {
+    if (std::ranges::find(groups, command.group) == groups.end()) {
+      groups.push_back(command.group);
+    }
+  }
+  for (const auto &group : groups) {
+    auto *title = native_string(group);
+    auto *root = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+    auto *menu = [[NSMenu alloc] initWithTitle:title];
+    [menu setDelegate:native_menu_target];
+    for (const auto &command : registry.commands()) {
+      if (command.group == group && command.name != "app.quit") {
+        [menu addItem:native_command_item(registry, command, commands)];
+      }
+    }
+    [root setSubmenu:menu];
+    [main_menu addItem:root];
+  }
   [NSApp setMainMenu:main_menu];
 }
+
+#ifdef LIQUIFY_NATIVE_WINDOW_TESTS
+// The native menu item that runs `command`, for the acceptance tests.
+static NSMenuItem *native_menu_item(const std::vector<std::string> &commands,
+                                    std::string_view command) {
+  const auto found = std::ranges::find(commands, command);
+  if (found == commands.end()) {
+    return nil;
+  }
+  const auto tag = static_cast<NSInteger>(found - commands.begin());
+  for (NSMenuItem *root in [[NSApp mainMenu] itemArray]) {
+    if (auto *item = [[root submenu] itemWithTag:tag]; item != nil) {
+      return item;
+    }
+  }
+  return nil;
+}
+#endif
 
 static NSString *accessibility_role(liquify::AccessibilityRole role) {
   switch (role) {
@@ -268,49 +307,6 @@ constexpr float editor_padding = design::space2;
 constexpr float editor_gutter_width = 72.0F;
 constexpr float activity_bar_width = design::control_lg;
 constexpr float divider_size = design::space1;
-
-auto normalized_binding(std::string_view binding) -> std::string {
-  auto output = std::string{};
-  for (const auto value : binding) {
-    if (value != ' ') {
-      output.push_back(
-          static_cast<char>(std::tolower(static_cast<unsigned char>(value))));
-    }
-  }
-  return output;
-}
-
-auto binding_matches(std::string_view binding, std::uint32_t key,
-                     std::uint16_t modifiers) -> bool {
-  const auto normalized = normalized_binding(binding);
-  const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
-  const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
-  const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
-  const auto wants_primary = normalized.contains("cmd+") ||
-                             normalized.contains("ctrl+") ||
-                             normalized.contains("primary+");
-  const auto wants_shift = normalized.contains("shift+");
-  const auto wants_alt =
-      normalized.contains("alt+") || normalized.contains("option+");
-  if (primary != wants_primary || shift != wants_shift || alt != wants_alt) {
-    return false;
-  }
-  const auto separator = normalized.rfind('+');
-  const auto expected_key = separator == std::string::npos
-                                ? normalized
-                                : normalized.substr(separator + 1);
-  return expected_key == normalized_binding(SDL_GetKeyName(key));
-}
-
-auto command_matches(const Settings &settings, std::string_view command,
-                     std::string_view default_binding, std::uint32_t key,
-                     std::uint16_t modifiers) -> bool {
-  const auto found = settings.keymap.find(std::string(command));
-  const auto binding = found == settings.keymap.end()
-                           ? default_binding
-                           : std::string_view(found->second);
-  return binding_matches(binding, key, modifiers);
-}
 
 auto imgui_color(design::Rgba color) -> ImVec4 {
   return {color.red, color.green, color.blue, color.alpha};
@@ -1714,7 +1710,7 @@ App::App(AppOptions options) : options_(std::move(options)) {
                             ? ThemePreference::dark
                             : ThemePreference::light;
       settings_.editor.wrap = true;
-      settings_.keymap["build.run"] = "F7";
+      settings_.keymap["run.build"] = "F7";
       settings_.lake_accounts.push_back(
           {"team", "https://lake.example.com"});
     }
@@ -2122,22 +2118,88 @@ void App::configure_commands() {
       }
     }
   }
-  const auto apply_file = [this](const std::filesystem::path &path) {
-    const auto loaded = load_keymap(path);
+  keymap_file_overrides_.clear();
+  const auto read_file = [this](const std::filesystem::path &path) {
+    auto loaded = load_keymap(path);
     for (const auto &diagnostic : loaded.diagnostics) {
       command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
     }
-    for (const auto &diagnostic :
-         commands_->apply_overrides(loaded.overrides)) {
-      command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
-    }
+    std::ranges::move(loaded.overrides,
+                      std::back_inserter(keymap_file_overrides_));
   };
   if (!screenshot_mode() && !options_.smoke) {
-    apply_file(global_settings_path());
+    read_file(global_settings_path());
     if (options_.repository_path) {
-      apply_file(repository_settings_path(*options_.repository_path));
+      read_file(repository_settings_path(*options_.repository_path));
     }
   }
+  command_registration_diagnostics_ = command_diagnostics_;
+  apply_command_bindings();
+}
+
+// The one place bindings are resolved (liquify#34): defaults, then the files' `keymap` records,
+// then the settings surface's Keymap group. Keys, the palette and the native menus all read the
+// result, so a rebind reaches every one of them at once.
+void App::apply_command_bindings() {
+  if (!commands_) {
+    return;
+  }
+  commands_->reset_bindings();
+  command_diagnostics_ = command_registration_diagnostics_;
+  for (const auto &diagnostic :
+       commands_->apply_overrides(keymap_file_overrides_)) {
+    command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
+  }
+  auto overrides = std::vector<KeymapOverride>{};
+  for (const auto &[command, text] : settings_.keymap) {
+    overrides.push_back(
+        {command, split_binding_list(text), {"Settings > Keymap", 1, 1}});
+  }
+  for (const auto &diagnostic : commands_->apply_overrides(overrides)) {
+    command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
+  }
+  for (const auto &conflict : commands_->conflicts()) {
+    auto owners = std::string{};
+    for (const auto &command : conflict.commands) {
+      owners += (owners.empty() ? "" : ", ") + command;
+    }
+    command_diagnostics_.push_back(conflict.binding + " is bound to " +
+                                   owners +
+                                   "; it runs neither until one is rebound");
+  }
+  refresh_native_menu();
+}
+
+void App::refresh_native_menu() {
+#if defined(__APPLE__) && defined(__OBJC__)
+  if (initialized_ && !screenshot_mode() && commands_) {
+    install_native_menu(*commands_, native_menu_commands_);
+  }
+#endif
+}
+
+bool App::set_keymap_binding(std::string_view command, std::string text) {
+  const auto *definition = commands_ ? commands_->find(command) : nullptr;
+  if (definition == nullptr) {
+    return false;
+  }
+  const auto name = definition->name;
+  // A former id (build.run) is stored under the command it names.
+  std::erase_if(settings_.keymap, [&](const auto &entry) {
+    const auto *other = commands_->find(entry.first);
+    return other != nullptr && other->name == name;
+  });
+  const auto chords = split_binding_list(text);
+  auto valid = !chords.empty();
+  for (const auto &chord : chords) {
+    valid = valid && parse_key_chord(chord, commands_->platform()).has_value();
+  }
+  settings_.keymap[name] = std::move(text);
+  apply_command_bindings();
+  if (valid) {
+    persist_settings();
+  }
+  return valid;
 }
 
 bool App::invoke_command(std::string_view name) {
@@ -2146,63 +2208,549 @@ bool App::invoke_command(std::string_view name) {
     return false;
   }
   // A former panel-scoped id (build.start, structural.expand, ...) runs the command it names.
-  name = definition->name;
-  commands_->record_use(name);
+  const auto command = definition->name;
+  const auto title = definition->title;
+  commands_->record_use(command);
   if (definition->plugin) {
-    invoke_plugin_command(name);
+    invoke_plugin_command(command);
     return true;
   }
-  if (name == "file.save") {
-    save_editor();
-  } else if (name == "file.close") {
-    close_editor();
-  } else if (name == "edit.undo" || name == "edit.redo") {
-    undo_editor(name == "edit.redo");
-  } else if (name == "edit.command-palette") {
-    command_palette_open_ = true;
-  } else if (name == "settings.open") {
-    settings_open_ = true;
-  } else if (name == "view.toggle-sidebar") {
-    shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
-    persist_shell_state();
-  } else if (name == "view.toggle-bottom-panel") {
-    shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
-    persist_shell_state();
-  } else if (name == "view.toggle-editor-split") {
-    shell_state_.editor_split = !shell_state_.editor_split;
-    persist_shell_state();
-  } else if (name == "view.cycle-theme") {
-    cycle_theme();
-  } else if (name == "go.definition") {
-    request_definition();
-  } else if (name == "go.hover") {
-    request_hover();
-  } else if (name == "go.completion") {
-    request_completion();
-  } else if (name == "run.build") {
-    request_build();
-  } else if (name == "run.tests") {
-    request_tests();
-  } else if (name == "run.push") {
-    request_push();
-  } else if (name == "change.cut") {
-    open_cut_composer();
-  } else if (name == "run.set-lake") {
-    open_set_lake_dialog();
-  } else if (name == "review.request") {
-    open_request_review();
-  } else if (name == "run.set-up-build") {
-    open_build_setup();
-  } else if (name == "assistant.toggle") {
-    toggle_assistant();
-  } else if (name == "panel.reset-layout") {
-    reset_panel_layout();
-  } else if (name == "help.version") {
-    editor_status_ = "liquify " + std::string(version_string());
-  } else {
-    execute_panel_command(name);
+  const auto handlers = command_handlers();
+  const auto found = std::ranges::find(handlers, command, &CommandHandler::name);
+  if (found == handlers.end()) {
+    editor_status_ = title + " has no action in this window";
+    return false;
+  }
+  if (auto reason = found->run(*this)) {
+    editor_status_ = title + ": " + *reason;
+    return false;
   }
   return true;
+}
+
+auto App::handles_command(std::string_view name) -> bool {
+  return std::ranges::find(command_handlers(), name, &CommandHandler::name) !=
+         command_handlers().end();
+}
+
+// Every built-in command's implementation, in one table (liquify#34). A handler returns nothing
+// when it acted, or the reason it could not, which invoke_command puts in the status bar: no
+// command succeeds as a silent no-op. test_command.cpp checks that every built-in has a row.
+auto App::command_handlers() -> std::span<const CommandHandler> {
+  using Result = CommandResult;
+  static constexpr auto no_file = "open a file first";
+  static constexpr auto read_only = "review diffs are read-only";
+  static constexpr auto no_selection = "select an entry in the repository tree first";
+  static constexpr auto no_review = "open a review first";
+  static const auto handlers = std::to_array<CommandHandler>({
+      {"file.close",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.close_editor();
+         return {};
+       }},
+      {"file.save",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.save_editor();
+         return {};
+       }},
+      {"app.quit",
+       [](App &app) -> Result {
+         app.request_quit();
+         return {};
+       }},
+      {"edit.command-palette",
+       [](App &app) -> Result {
+         app.command_palette_open_ = true;
+         return {};
+       }},
+      {"settings.open",
+       [](App &app) -> Result {
+         app.settings_open_ = true;
+         return {};
+       }},
+      {"edit.select-all",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.editor_->select_all();
+         return {};
+       }},
+      {"edit.toggle-input-mode",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.editor_->set_mode(app.editor_->mode() == EditingMode::standard
+                                   ? EditingMode::modal_command
+                                   : EditingMode::standard);
+         return {};
+       }},
+      {"edit.find",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.find_open_ = true;
+         app.buffer_matches_ = app.editor_->find(app.find_query_, app.find_options_);
+         return {};
+       }},
+      {"edit.focus-search",
+       [](App &app) -> Result {
+         app.open_command_panel("edit.focus-search");
+         return {};
+       }},
+      {"edit.undo",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.undo_editor(false);
+         return {};
+       }},
+      {"edit.redo",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.undo_editor(true);
+         return {};
+       }},
+      {"edit.copy",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.copy_editor_selection(false);
+         return {};
+       }},
+      {"edit.cut",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.copy_editor_selection(true);
+         return {};
+       }},
+      {"edit.paste",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.paste_editor_clipboard();
+         return {};
+       }},
+      {"selection.expand",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.expand_structural_selection();
+         return {};
+       }},
+      {"selection.shrink",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.shrink_structural_selection();
+         return {};
+       }},
+      {"selection.enclosing-definition",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.select_enclosing_definition();
+         return {};
+       }},
+      {"selection.symbol-references",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.select_symbol_references();
+         return {};
+       }},
+      {"selection.line",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.editor_->select(SelectionKind::line);
+         return {};
+       }},
+      {"selection.add-cursor-up",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         const auto cursor = app.editor_->cursor();
+         if (cursor.line == 0) {
+           return "the cursor is on the first line";
+         }
+         app.editor_->add_cursor({cursor.line - 1, cursor.byte});
+         return {};
+       }},
+      {"selection.add-cursor-down",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         const auto cursor = app.editor_->cursor();
+         if (cursor.line + 1 >= app.editor_->line_count()) {
+           return "the cursor is on the last line";
+         }
+         app.editor_->add_cursor({cursor.line + 1, cursor.byte});
+         return {};
+       }},
+      {"view.toggle-sidebar",
+       [](App &app) -> Result {
+         app.shell_state_.sidebar_visible = !app.shell_state_.sidebar_visible;
+         app.persist_shell_state();
+         return {};
+       }},
+      {"view.toggle-bottom-panel",
+       [](App &app) -> Result {
+         app.shell_state_.bottom_panel_visible =
+             !app.shell_state_.bottom_panel_visible;
+         app.persist_shell_state();
+         return {};
+       }},
+      {"view.toggle-editor-split",
+       [](App &app) -> Result {
+         app.shell_state_.editor_split = !app.shell_state_.editor_split;
+         app.persist_shell_state();
+         return {};
+       }},
+      {"view.cycle-theme",
+       [](App &app) -> Result {
+         app.cycle_theme();
+         return {};
+       }},
+      {"view.toggle-high-contrast",
+       [](App &app) -> Result {
+         app.toggle_high_contrast();
+         return {};
+       }},
+      {"view.repository",
+       [](App &app) -> Result {
+         app.open_command_panel("view.repository");
+         return {};
+       }},
+      {"view.review",
+       [](App &app) -> Result {
+         app.open_command_panel("view.review");
+         return {};
+       }},
+      {"view.multiplayer",
+       [](App &app) -> Result {
+         app.open_command_panel("view.multiplayer");
+         return {};
+       }},
+      {"panel.diagnostics",
+       [](App &app) -> Result {
+         app.open_command_panel("panel.diagnostics");
+         return {};
+       }},
+      {"panel.build",
+       [](App &app) -> Result {
+         app.open_command_panel("panel.build");
+         return {};
+       }},
+      {"panel.assistant",
+       [](App &app) -> Result {
+         app.open_command_panel("panel.assistant");
+         return {};
+       }},
+      {"panel.plugins",
+       [](App &app) -> Result {
+         app.open_command_panel("panel.plugins");
+         return {};
+       }},
+      {"panel.reset-layout",
+       [](App &app) -> Result {
+         app.reset_panel_layout();
+         return {};
+       }},
+      {"go.definition",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.request_definition();
+         return {};
+       }},
+      {"go.hover",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.request_hover();
+         return {};
+       }},
+      {"go.completion",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.request_completion();
+         return {};
+       }},
+      {"go.quick-open",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::quick_open);
+         return {};
+       }},
+      {"go.symbol",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::symbol_search);
+         return {};
+       }},
+      {"go.references",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.invoke_navigation_action(NavigationAction::find_references);
+         return {};
+       }},
+      {"go.call-hierarchy",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.invoke_navigation_action(NavigationAction::call_hierarchy);
+         return {};
+       }},
+      {"go.breadcrumbs",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.invoke_navigation_action(NavigationAction::focus_breadcrumbs);
+         return {};
+       }},
+      {"go.open-recent",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::open_recent);
+         return {};
+       }},
+      {"go.back",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::back);
+         return {};
+       }},
+      {"go.forward",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::forward);
+         return {};
+       }},
+      {"repository.open",
+       [](App &app) -> Result {
+         if (app.repository_selection_.empty() ||
+             app.repository_selection_blob_.empty()) {
+           return "select a file in the repository tree first";
+         }
+         app.invoke_navigation_action(NavigationAction::open);
+         return {};
+       }},
+      {"repository.rename",
+       [](App &app) -> Result {
+         if (app.repository_selection_.empty()) {
+           return no_selection;
+         }
+         app.invoke_navigation_action(NavigationAction::rename);
+         return {};
+       }},
+      {"repository.move",
+       [](App &app) -> Result {
+         if (app.repository_selection_.empty()) {
+           return no_selection;
+         }
+         app.invoke_navigation_action(NavigationAction::move);
+         return {};
+       }},
+      {"repository.new-file",
+       [](App &app) -> Result {
+         if (app.repository_selection_.empty()) {
+           return no_selection;
+         }
+         app.invoke_navigation_action(NavigationAction::new_file);
+         return {};
+       }},
+      {"repository.reveal",
+       [](App &app) -> Result {
+         if (!app.options_.repository_path) {
+           return "open a repository first";
+         }
+         app.invoke_navigation_action(NavigationAction::reveal);
+         return {};
+       }},
+      {"refactor.rename",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.open_rename();
+         return {};
+       }},
+      {"refactor.extract-function",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.open_extract_function();
+         return {};
+       }},
+      {"run.build",
+       [](App &app) -> Result {
+         app.request_build();
+         return {};
+       }},
+      {"run.tests",
+       [](App &app) -> Result {
+         app.request_tests();
+         return {};
+       }},
+      {"run.push",
+       [](App &app) -> Result {
+         app.request_push();
+         return {};
+       }},
+      {"run.set-up-build",
+       [](App &app) -> Result {
+         app.open_build_setup();
+         return {};
+       }},
+      {"run.set-lake",
+       [](App &app) -> Result {
+         app.open_set_lake_dialog();
+         return {};
+       }},
+      {"change.cut",
+       [](App &app) -> Result {
+         app.open_cut_composer();
+         return {};
+       }},
+      {"review.next-hunk",
+       [](App &app) -> Result {
+         app.navigate_hunk(true);
+         return {};
+       }},
+      {"review.previous-hunk",
+       [](App &app) -> Result {
+         app.navigate_hunk(false);
+         return {};
+       }},
+      {"review.next-comment",
+       [](App &app) -> Result {
+         app.navigate_comment();
+         return {};
+       }},
+      {"review.new-comment",
+       [](App &app) -> Result {
+         app.begin_review_comment();
+         return {};
+       }},
+      {"review.approve",
+       [](App &app) -> Result {
+         if (!app.review_) {
+           return no_review;
+         }
+         app.review_->request_approve();
+         return {};
+       }},
+      {"review.request",
+       [](App &app) -> Result {
+         app.open_request_review();
+         return {};
+       }},
+      {"review.refresh",
+       [](App &app) -> Result {
+         if (!app.review_) {
+           return "this repository has no lake to review on";
+         }
+         if (app.review_->snapshot().review.selected) {
+           app.review_->request_refresh();
+         } else {
+           app.review_->request_list();
+         }
+         return {};
+       }},
+      {"assistant.ask",
+       [](App &app) -> Result {
+         app.request_assistant_context(AssistantAction::ask);
+         return {};
+       }},
+      {"assistant.explain-diagnostic",
+       [](App &app) -> Result {
+         app.request_assistant_context(AssistantAction::explain_diagnostic);
+         return {};
+       }},
+      {"assistant.propose-edit",
+       [](App &app) -> Result {
+         app.request_assistant_context(AssistantAction::propose_edit);
+         return {};
+       }},
+      {"assistant.accept-edit",
+       [](App &app) -> Result {
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.accept_assistant_edit();
+         return {};
+       }},
+      {"assistant.reject-edit",
+       [](App &app) -> Result {
+         if (!app.assistant_) {
+           return "the assistant is off for this repository";
+         }
+         app.assistant_->reject();
+         return {};
+       }},
+      {"assistant.toggle",
+       [](App &app) -> Result {
+         app.toggle_assistant();
+         return {};
+       }},
+      {"assistant.preview-context",
+       [](App &app) -> Result {
+         app.request_assistant_context(std::nullopt);
+         return {};
+       }},
+      {"help.version",
+       [](App &app) -> Result {
+         app.editor_status_ = "liquify " + std::string(version_string());
+         return {};
+       }},
+      {"help.command-reference",
+       [](App &) -> Result {
+         return "run `liquify docs commands` to generate it";
+       }},
+  });
+  return handlers;
 }
 
 bool App::init() {
@@ -2319,7 +2867,6 @@ bool App::init_window(bool high_pixel_density) {
   }
 #if defined(__APPLE__) && defined(__OBJC__)
   if (!screenshot_mode()) {
-    install_native_menu();
     install_native_accessibility(window_);
   }
 #endif
@@ -2580,6 +3127,7 @@ void App::apply_settings_live(bool rebuild_fonts) {
     fonts_rebuild_requested_ = true;
   }
   apply_theme();
+  apply_command_bindings();
 }
 
 void App::persist_settings() {
@@ -3926,171 +4474,71 @@ void App::handle_file_drop(const std::filesystem::path &source,
   editor_status_ = "imported " + destination.generic_string();
 }
 
+// A key press runs a command only through the registry's resolved bindings (liquify#34): there
+// is no shortcut outside it, so a rebind or an unbind in settings cannot be bypassed. A chord
+// whose command is out of scope falls through to the focused surface.
+auto App::command_scope_active(CommandScope scope) const -> bool {
+  const auto modal = ImGui::GetCurrentContext() != nullptr &&
+                     ImGui::GetTopMostPopupModal() != nullptr;
+  switch (scope) {
+  case CommandScope::global:
+    return true;
+  case CommandScope::editor:
+    return editor_ && editor_focused_ && !modal;
+  case CommandScope::repository:
+    return repository_focused_ && !modal;
+  }
+  return false;
+}
+
+auto App::dispatch_key_command(std::uint32_t key, std::uint16_t modifiers)
+    -> bool {
+  if (!commands_) {
+    return false;
+  }
+  const auto platform = commands_->platform();
+  const auto gui = (modifiers & SDL_KMOD_GUI) != 0;
+  const auto control = (modifiers & SDL_KMOD_CTRL) != 0;
+  const auto chord = key_chord_from_event(
+      SDL_GetKeyName(key), platform == CommandPlatform::macos ? gui : control,
+      control, (modifiers & SDL_KMOD_ALT) != 0,
+      (modifiers & SDL_KMOD_SHIFT) != 0, platform);
+  if (!chord) {
+    return false;
+  }
+  if (const auto *conflict = commands_->conflict_for(*chord)) {
+    const auto claimed = std::ranges::any_of(conflict->commands, [&](const auto &name) {
+      const auto *command = commands_->find(name);
+      return command != nullptr && command_scope_active(command->scope);
+    });
+    if (!claimed) {
+      return false;
+    }
+    auto owners = std::string{};
+    for (const auto &name : conflict->commands) {
+      owners += (owners.empty() ? "" : ", ") + name;
+    }
+    editor_status_ = conflict->binding + " is bound to " + owners +
+                     "; rebind one in Settings to use it";
+    return true;
+  }
+  const auto *command = commands_->command_for(*chord);
+  if (command == nullptr || !command_scope_active(command->scope)) {
+    return false;
+  }
+  static_cast<void>(invoke_command(std::string(command->name)));
+  return true;
+}
+
 void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
-  const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
   const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
-  const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
-  if (command_matches(settings_, "file.close", "Primary+W", key, modifiers)) {
-    close_editor();
-    return;
-  }
-  if (primary && key == SDLK_Q) {
-    request_quit();
-    return;
-  }
-  if (command_matches(settings_, "settings.open", "Primary+,", key,
-                      modifiers)) {
-    settings_open_ = true;
-    return;
-  }
-  if (primary && key == SDLK_B) {
-    shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
-    persist_shell_state();
-    return;
-  }
-  if (primary && key == SDLK_J) {
-    shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
-    persist_shell_state();
-    return;
-  }
-  if (primary && key == SDLK_BACKSLASH) {
-    shell_state_.editor_split = !shell_state_.editor_split;
-    persist_shell_state();
-    return;
-  }
-  if (primary && shift && key == SDLK_T) {
-    cycle_theme();
-    return;
-  }
-  if (command_matches(settings_, "palette.open", "Primary+Shift+P", key,
-                      modifiers)) {
-    command_palette_open_ = true;
-    return;
-  }
-  if (primary && key == SDLK_P) {
-    invoke_navigation_action(NavigationAction::quick_open);
-    return;
-  }
-  if (primary && key == SDLK_T) {
-    invoke_navigation_action(NavigationAction::symbol_search);
-    return;
-  }
-  if (primary && !alt && key == SDLK_R) {
-    invoke_navigation_action(NavigationAction::open_recent);
-    return;
-  }
-  if (alt && key == SDLK_LEFT) {
-    invoke_navigation_action(NavigationAction::back);
-    return;
-  }
-  if (alt && key == SDLK_RIGHT) {
-    invoke_navigation_action(NavigationAction::forward);
-    return;
-  }
-  if (primary && shift && key == SDLK_PERIOD) {
-    invoke_navigation_action(NavigationAction::focus_breadcrumbs);
-    return;
-  }
-  if (shift && key == SDLK_F12) {
-    invoke_navigation_action(NavigationAction::find_references);
-    return;
-  }
-  if (alt && key == SDLK_F12) {
-    invoke_navigation_action(NavigationAction::call_hierarchy);
-    return;
-  }
-  if (key == SDLK_F2) {
-    invoke_navigation_action(NavigationAction::rename);
-    return;
-  }
-  if (primary && shift && key == SDLK_M) {
-    invoke_navigation_action(NavigationAction::move);
-    return;
-  }
-  if (primary && key == SDLK_N) {
-    invoke_navigation_action(NavigationAction::new_file);
-    return;
-  }
-  if (primary && alt && key == SDLK_R) {
-    invoke_navigation_action(NavigationAction::reveal);
-    return;
-  }
-  if (repository_focused_ && (key == SDLK_RETURN || key == SDLK_KP_ENTER)) {
-    invoke_navigation_action(NavigationAction::open);
-    return;
-  }
-  if (command_matches(settings_, "build.run", "F7", key, modifiers)) {
-    request_build();
-    return;
-  }
-  if (command_matches(settings_, "tests.run", "F8", key, modifiers)) {
-    request_tests();
-    return;
-  }
-  if (command_matches(settings_, "push.run", "F9", key, modifiers)) {
-    request_push();
-    return;
-  }
-  if (command_matches(settings_, "change.cut", "Primary+Shift+K", key,
-                      modifiers)) {
-    static_cast<void>(invoke_command("change.cut"));
+  if (dispatch_key_command(key, modifiers)) {
     return;
   }
   if (!editor_) {
     return;
   }
   if (!editor_focused_) {
-    return;
-  }
-  if (primary && shift && key == SDLK_F) {
-    panels_.focus(PanelId::search);
-    panels_.clear_focus_request();
-    shell_state_.sidebar_visible = true;
-    persist_shell_state();
-    return;
-  }
-  if (primary && key == SDLK_F) {
-    find_open_ = true;
-    buffer_matches_ = editor_->find(find_query_, find_options_);
-    return;
-  }
-  if (primary && key == SDLK_Z) {
-    undo_editor(shift);
-    return;
-  }
-  if (primary && key == SDLK_L) {
-    editor_->select(SelectionKind::line);
-    return;
-  }
-  if (primary && alt && (key == SDLK_UP || key == SDLK_DOWN)) {
-    const auto cursor = editor_->cursor();
-    if (key == SDLK_UP && cursor.line > 0) {
-      editor_->add_cursor({cursor.line - 1, cursor.byte});
-    } else if (key == SDLK_DOWN && cursor.line + 1 < editor_->line_count()) {
-      editor_->add_cursor({cursor.line + 1, cursor.byte});
-    }
-    return;
-  }
-  if (primary && alt && key == SDLK_C) {
-    begin_review_comment();
-    return;
-  }
-  if (primary && alt && key == SDLK_A) {
-    if (review_) {
-      review_->request_approve();
-    }
-    return;
-  }
-  if (alt && key == SDLK_DOWN) {
-    navigate_hunk(true);
-    return;
-  }
-  if (alt && key == SDLK_UP) {
-    navigate_hunk(false);
-    return;
-  }
-  if (alt && key == SDLK_C) {
-    navigate_comment();
     return;
   }
   if (review_diff_open_) {
@@ -4102,88 +4550,6 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
       return;
     }
   }
-  if (primary && shift && key == SDLK_RIGHT) {
-    expand_structural_selection();
-    return;
-  }
-  if (primary && shift && key == SDLK_LEFT) {
-    shrink_structural_selection();
-    return;
-  }
-  if (primary && shift && key == SDLK_D) {
-    select_enclosing_definition();
-    return;
-  }
-  if (primary && shift && key == SDLK_R) {
-    open_rename();
-    return;
-  }
-  if (primary && shift && key == SDLK_X) {
-    open_extract_function();
-    return;
-  }
-  if (primary && shift && key == SDLK_L) {
-    toggle_assistant();
-    return;
-  }
-  if (primary && shift && key == SDLK_A) {
-    request_assistant_context(AssistantAction::ask);
-    return;
-  }
-  if (primary && shift && key == SDLK_E) {
-    request_assistant_context(AssistantAction::explain_diagnostic);
-    return;
-  }
-  if (primary && shift && key == SDLK_I) {
-    request_assistant_context(AssistantAction::propose_edit);
-    return;
-  }
-  if (primary && shift && key == SDLK_C) {
-    request_assistant_context(std::nullopt);
-    return;
-  }
-  if (primary && (key == SDLK_RETURN || key == SDLK_KP_ENTER)) {
-    accept_assistant_edit();
-    return;
-  }
-  if (primary && key == SDLK_BACKSPACE) {
-    if (assistant_) {
-      assistant_->reject();
-    }
-    return;
-  }
-  if (command_matches(settings_, "file.save", "Primary+S", key, modifiers)) {
-    if (review_diff_open_) {
-      editor_status_ = "review diffs are read-only";
-      return;
-    }
-    save_editor();
-    return;
-  }
-  if (key == SDLK_F12) {
-    request_definition();
-    return;
-  }
-  if (key == SDLK_F1) {
-    request_hover();
-    return;
-  }
-  if (primary && key == SDLK_SPACE) {
-    request_completion();
-    return;
-  }
-  if (primary && key == SDLK_A) {
-    editor_->select_all();
-    return;
-  }
-  if (primary && key == SDLK_M) {
-    const auto next = editor_->mode() == EditingMode::standard
-                          ? EditingMode::modal_command
-                          : EditingMode::standard;
-    editor_->set_mode(next);
-    return;
-  }
-
   if (editor_->mode() == EditingMode::modal_command) {
     if (key == SDLK_I) {
       editor_->set_mode(EditingMode::modal_insert);
@@ -4927,103 +5293,20 @@ void App::draw_assistant() {
   }
 }
 
-void App::execute_panel_command(std::string_view command) {
-  if (command == "review.refresh") {
-    if (review_) {
-      const auto snapshot = review_->snapshot();
-      if (snapshot.review.selected) {
-        review_->request_refresh();
-      } else {
-        review_->request_list();
-      }
-    }
-  } else if (command == "review.next-hunk") {
-    navigate_hunk(true);
-  } else if (command == "review.previous-hunk") {
-    navigate_hunk(false);
-  } else if (command == "review.next-comment") {
-    navigate_comment();
-  } else if (command == "review.new-comment") {
-    begin_review_comment();
-  } else if (command == "review.approve") {
-    if (review_) {
-      review_->request_approve();
-    }
-  } else if (command == "run.build") {
-    request_build();
-  } else if (command == "run.tests") {
-    request_tests();
-  } else if (command == "run.push") {
-    request_push();
-  } else if (command == "assistant.ask") {
-    request_assistant_context(AssistantAction::ask);
-  } else if (command == "assistant.explain-diagnostic") {
-    request_assistant_context(AssistantAction::explain_diagnostic);
-  } else if (command == "assistant.propose-edit") {
-    request_assistant_context(AssistantAction::propose_edit);
-  } else if (command == "assistant.accept-edit") {
-    accept_assistant_edit();
-  } else if (command == "assistant.reject-edit") {
-    if (assistant_) {
-      assistant_->reject();
-    }
-  } else if (command == "assistant.toggle") {
-    toggle_assistant();
-  } else if (command == "assistant.preview-context") {
-    request_assistant_context(std::nullopt);
-  } else if (command == "selection.expand") {
-    expand_structural_selection();
-  } else if (command == "selection.shrink") {
-    shrink_structural_selection();
-  } else if (command == "selection.enclosing-definition") {
-    select_enclosing_definition();
-  } else if (command == "selection.symbol-references") {
-    select_symbol_references();
-  } else if (command == "refactor.rename") {
-    open_rename();
-  } else if (command == "refactor.extract-function") {
-    open_extract_function();
-  } else if (command == "edit.find") {
-    if (editor_ != nullptr) {
-      find_open_ = true;
-      buffer_matches_ = editor_->find(find_query_, find_options_);
-    }
-  } else if (command == "edit.select-all") {
-    if (editor_ != nullptr) {
-      editor_->select_all();
-    }
-  } else if (command == "selection.line") {
-    if (editor_ != nullptr) {
-      editor_->select(SelectionKind::line);
-    }
-  } else if (command == "selection.add-cursor-up" ||
-             command == "selection.add-cursor-down") {
-    if (editor_ != nullptr) {
-      const auto cursor = editor_->cursor();
-      if (command == "selection.add-cursor-up" && cursor.line > 0) {
-        editor_->add_cursor({cursor.line - 1, cursor.byte});
-      } else if (command == "selection.add-cursor-down" &&
-                 cursor.line + 1 < editor_->line_count()) {
-        editor_->add_cursor({cursor.line + 1, cursor.byte});
-      }
-    }
-  } else if (command == "edit.toggle-input-mode") {
-    if (editor_ != nullptr) {
-      editor_->set_mode(editor_->mode() == EditingMode::standard
-                            ? EditingMode::modal_command
-                            : EditingMode::standard);
-    }
-  } else if (const auto panel = command_panel(command)) {
-    // The view.* and panel.* commands open their panel where it is docked.
-    panels_.focus(*panel);
-    const auto placement = panels_.layout(*panel).placement;
-    if (placement == PanelPlacement::sidebar) {
-      shell_state_.sidebar_visible = true;
-    } else if (placement == PanelPlacement::bottom) {
-      shell_state_.bottom_panel_visible = true;
-    }
-    persist_shell_state();
+// The view.* and panel.* commands open their panel where it is docked.
+void App::open_command_panel(std::string_view command) {
+  const auto panel = command_panel(command);
+  if (!panel) {
+    return;
   }
+  panels_.focus(*panel);
+  const auto placement = panels_.layout(*panel).placement;
+  if (placement == PanelPlacement::sidebar) {
+    shell_state_.sidebar_visible = true;
+  } else if (placement == PanelPlacement::bottom) {
+    shell_state_.bottom_panel_visible = true;
+  }
+  persist_shell_state();
 }
 
 void App::draw_command_palette() {
@@ -5345,24 +5628,31 @@ void App::draw_settings() {
   if (begin_group(SettingsGroup::keymap)) {
     ImGui::TextDisabled("Key bindings for these commands; the full keymap is in "
                         "your .liquid settings file.");
+    // Each field shows the registry's resolved binding and rebinds it live: keys, the palette
+    // and the native menus follow as you type (liquify#34). Several chords: "F6, Cmd+K".
     constexpr auto commands = std::array{
-        std::pair{"settings.open", "Cmd+,"},
-        std::pair{"build.run", "F7"},
-        std::pair{"tests.run", "F8"},
-        std::pair{"push.run", "F9"},
+        "edit.command-palette", "go.quick-open", "settings.open",
+        "run.build",            "run.tests",     "run.push",
     };
-    for (const auto &[command, default_binding] : commands) {
-      auto &binding = settings_.keymap[command];
-      if (binding.empty()) {
-        binding = default_binding;
-      }
-      ImGui::PushID(command);
+    for (const auto *command : commands) {
       const auto *definition = commands_ ? commands_->find(command) : nullptr;
-      const auto title = definition != nullptr ? definition->title
-                                               : std::string(command);
-      if (text_field(title.c_str(), &binding)) {
-        persist_settings();
+      if (definition == nullptr) {
+        continue;
       }
+      const auto stored = std::ranges::find_if(settings_.keymap, [&](const auto &entry) {
+        const auto *other = commands_->find(entry.first);
+        return other != nullptr && other->name == definition->name;
+      });
+      auto binding = stored != settings_.keymap.end()
+                         ? stored->second
+                         : commands_->binding_label(definition->name);
+      const auto title = definition->title;
+      ImGui::PushID(command);
+      if (text_field(title.c_str(), &binding)) {
+        static_cast<void>(set_keymap_binding(command, binding));
+      }
+      frame_layout_.controls[std::string("settings/keymap/") + command] =
+          item_rectangle();
       ImGui::PopID();
     }
   }
@@ -9497,104 +9787,14 @@ int App::run() {
         input_.clear_drop_target();
       }
 #if defined(__APPLE__) && defined(__OBJC__)
-      if (event.type == SDL_EVENT_USER) {
-        switch (event.user.code) {
-        case menu_close:
-          close_editor();
-          break;
-        case menu_quit:
-          request_quit();
-          break;
-        case menu_save:
-          save_editor();
-          break;
-        case menu_palette:
-          command_palette_open_ = true;
-          break;
-        case menu_sidebar:
-          shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
-          persist_shell_state();
-          break;
-        case menu_panel:
-          shell_state_.bottom_panel_visible =
-              !shell_state_.bottom_panel_visible;
-          persist_shell_state();
-          break;
-        case menu_split:
-          shell_state_.editor_split = !shell_state_.editor_split;
-          persist_shell_state();
-          break;
-        case menu_theme:
-          cycle_theme();
-          break;
-        case menu_contrast:
-          toggle_high_contrast();
-          break;
-        case menu_copy:
-          copy_editor_selection(false);
-          break;
-        case menu_cut:
-          copy_editor_selection(true);
-          break;
-        case menu_paste:
-          paste_editor_clipboard();
-          break;
-        case menu_definition:
-          request_definition();
-          break;
-        case menu_hover:
-          request_hover();
-          break;
-        case menu_build:
-          request_build();
-          break;
-        case menu_tests:
-          request_tests();
-          break;
-        case menu_push:
-          request_push();
-          break;
-        case menu_cut_change:
-          static_cast<void>(invoke_command("change.cut"));
-          break;
-        case menu_next_hunk:
-          navigate_hunk(true);
-          break;
-        case menu_previous_hunk:
-          navigate_hunk(false);
-          break;
-        case menu_next_comment:
-          navigate_comment();
-          break;
-        case menu_expand_selection:
-          expand_structural_selection();
-          break;
-        case menu_shrink_selection:
-          shrink_structural_selection();
-          break;
-        case menu_quick_open:
-          invoke_navigation_action(NavigationAction::quick_open);
-          break;
-        case menu_symbol_search:
-          invoke_navigation_action(NavigationAction::symbol_search);
-          break;
-        case menu_references:
-          invoke_navigation_action(NavigationAction::find_references);
-          break;
-        case menu_call_hierarchy:
-          invoke_navigation_action(NavigationAction::call_hierarchy);
-          break;
-        case menu_open_recent:
-          invoke_navigation_action(NavigationAction::open_recent);
-          break;
-        case menu_back:
-          invoke_navigation_action(NavigationAction::back);
-          break;
-        case menu_forward:
-          invoke_navigation_action(NavigationAction::forward);
-          break;
-        default:
-          break;
+      // A native menu item runs its registry command through the one dispatcher (liquify#34).
+      if (event.type == SDL_EVENT_USER &&
+          event.user.code >= native_menu_code_base) {
+        const auto index =
+            static_cast<std::size_t>(event.user.code - native_menu_code_base);
+        if (index < native_menu_commands_.size()) {
+          const auto command = native_menu_commands_[index];
+          static_cast<void>(invoke_command(command));
         }
       }
 #endif
@@ -9928,6 +10128,57 @@ void NativeAcceptance::source_tab(App &app) {
     throw std::runtime_error("source tab was not laid out");
   }
   click(app, found->second);
+}
+
+auto NativeAcceptance::menu_key(App &app, std::string_view command)
+    -> std::string {
+#if defined(__APPLE__) && defined(__OBJC__)
+  auto *item = native_menu_item(app.native_menu_commands_, command);
+  test::require_property(item != nil, "native menu item exists for command");
+  auto output = std::string{};
+  const auto flags = [item keyEquivalentModifierMask];
+  if ((flags & NSEventModifierFlagControl) != 0) {
+    output += "Ctrl+";
+  }
+  if ((flags & NSEventModifierFlagCommand) != 0) {
+    output += "Cmd+";
+  }
+  if ((flags & NSEventModifierFlagOption) != 0) {
+    output += "Option+";
+  }
+  if ((flags & NSEventModifierFlagShift) != 0) {
+    output += "Shift+";
+  }
+  auto *key = [item keyEquivalent];
+  if ([key length] == 1 && [key characterAtIndex:0] >= NSF1FunctionKey &&
+      [key characterAtIndex:0] <= NSF35FunctionKey) {
+    output += "F" + std::to_string([key characterAtIndex:0] - NSF1FunctionKey + 1);
+  } else {
+    output += [[key uppercaseString] UTF8String];
+  }
+  return output;
+#else
+  static_cast<void>(app);
+  static_cast<void>(command);
+  return {};
+#endif
+}
+
+bool NativeAcceptance::choose_menu(App &app, std::string_view command) {
+#if defined(__APPLE__) && defined(__OBJC__)
+  auto *item = native_menu_item(app.native_menu_commands_, command);
+  if (item == nil) {
+    return false;
+  }
+  // What AppKit does when the item is chosen: send its action to its target.
+  [NSApp sendAction:[item action] to:[item target] from:item];
+  pulse(app);
+  return true;
+#else
+  static_cast<void>(app);
+  static_cast<void>(command);
+  return false;
+#endif
 }
 
 // The display test stays here to preserve the single SDL/ImGui translation

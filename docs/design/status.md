@@ -67,7 +67,9 @@ command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.m
 [`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
 The shared command registry powers fuzzy palette search, recent commands, platform key bindings,
 keymap conflict reporting, native menus and headless `--command` invocation
-([`../ui/commands.md`](../ui/commands.md)). Cut Change (palette, Change menu, Primary+Shift+K)
+([`../ui/commands.md`](../ui/commands.md)). It is the only key path: window keys, palette rows and
+native menu items run one handler table, navigation actions are registry commands, and a rebind
+in Settings reaches keys, palette and menus at once (liquify#34). Cut Change (palette, Change menu, Primary+Shift+K)
 names the drips saved since the last change as one change through libliquid's cut API, after
 showing what it gathers ([`../editor/cut.md`](../editor/cut.md)). While a modal dialog is open,
 typed text reaches only the dialog, never the source behind it. F9 is Push: it pushes to the
