@@ -2,10 +2,10 @@
   "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
   "bomFormat": "CycloneDX",
   "specVersion": "1.7",
-  "serialNumber": "urn:uuid:65e84478-49f5-5f7c-ad84-734c0ed44b1f",
+  "serialNumber": "urn:uuid:d78ca19a-22db-59e9-bf6c-e89c734a545b",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-16T01:55:59Z",
+    "timestamp": "2026-11-16T02:40:34Z",
     "tools": {
       "components": [
         {
@@ -127,7 +127,7 @@
       "bom-ref": "DocumentRoot",
       "type": "library",
       "name": "liquify",
-      "version": "87606fdd2b86",
+      "version": "6c755474ae45",
       "licenses": [
         {
           "license": {
