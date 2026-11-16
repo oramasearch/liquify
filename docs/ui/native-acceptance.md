@@ -21,7 +21,7 @@ controls, editor bounds and source ink. The driver does not add fixed sample rec
 | `launch-2` | Native drawable density, launch coverage, repository open, uploaded fonts, editor ink, resize, modal routing | Passes on the attached Retina displays |
 | `edit` | Click repository row, focus and type into Quick Open, choose result, click editor, send UTF-8 text, save with Primary+S, compare persisted blob bytes through an independent handle | `WILL_FAIL`, liquify #39 |
 | `quick-open` | Primary+P, path text, Down, Enter; require the requested file and closed popup | `WILL_FAIL`, liquify #33 |
-| `palette` | Primary+Shift+P, query, Down, Enter; require the command's state change | `WILL_FAIL`, liquify #34 |
+| `palette` | Primary+Shift+P, query; require the first result selected, Down and Up to move the selection, and Enter to run it (the command's state change) | Expected to pass: the palette dispatches its selected row since liquify #34; checked by hand in the real window, the suite not yet run (tests run at release) |
 | `modal-input` | Focus source, open the palette, type a query, and verify only the query changes | Passes: text is not delivered to the editor while a modal is open (the modal half of liquify #39) |
 | `tabs` | Click every reported visible tab and require selected state plus visible content | Passes: Build, Diagnostics, Assistant, Plugins and Structural editing |
 | `build` | F7 and F9 through the real daemon path; require honest unavailable and offline state, each failure once in Build with no absolute path, and the status bar naming and opening Build; save light and dark framebuffers | Passes; successful sandboxed build execution is owed on a macFUSE-capable host |

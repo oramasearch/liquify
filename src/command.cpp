@@ -21,7 +21,7 @@
 namespace liquify {
 namespace {
 
-using DefinitionArray = std::array<CommandDefinition, 45>;
+using DefinitionArray = std::array<CommandDefinition, 43>;
 
 const DefinitionArray definitions{{
     {"file.close",
@@ -86,9 +86,7 @@ const DefinitionArray definitions{{
      "Cycle system, light, and dark theme preferences.",
      {"Primary+Shift+T"}},
     {"view.repository", "Show Repository", "View", "Open the Repository sidebar.", {}},
-    {"view.search", "Show Search", "View", "Open the Search sidebar.", {}},
     {"view.review", "Show Review", "View", "Open the Review sidebar.", {}},
-    {"view.build", "Show Build", "View", "Open the Build sidebar.", {}},
     {"view.multiplayer", "Show Multiplayer", "View", "Open the Multiplayer sidebar.", {}},
     {"panel.diagnostics", "Show Diagnostics Panel", "View", "Open the Diagnostics panel.", {}},
     {"panel.build", "Show Build Panel", "View", "Open the build, test, and push panel.", {}},
@@ -183,7 +181,7 @@ const DefinitionArray definitions{{
      {"Primary+Shift+L"}},
 }};
 
-const std::array<CommandDefinition, 27> trailing_definitions{{
+const std::array<CommandDefinition, 13> trailing_definitions{{
     {"edit.find",
      "Find",
      "Edit",
@@ -234,76 +232,6 @@ const std::array<CommandDefinition, 27> trailing_definitions{{
      "Preferences",
      "Open the live settings surface.",
      {"Primary+Comma"}},
-    {"build.start",
-     "Build",
-     "Build, test and push",
-     "Start the configured build from the build panel.",
-     {}},
-    {"build.test",
-     "Run All Tests",
-     "Build, test and push",
-     "Run all configured test actions from the build panel.",
-     {}},
-    {"build.push",
-     "Push",
-     "Build, test and push",
-     "Push changes from the build panel.",
-     {}},
-    {"assistant.explain",
-     "Explain Diagnostic",
-     "Assistant",
-     "Explain the active diagnostic from the assistant panel.",
-     {}},
-    {"assistant.propose",
-     "Propose Edit",
-     "Assistant",
-     "Request an edit preview from the assistant panel.",
-     {}},
-    {"assistant.accept",
-     "Accept Edit",
-     "Assistant",
-     "Accept the assistant edit preview from the assistant panel.",
-     {}},
-    {"assistant.reject",
-     "Reject Edit",
-     "Assistant",
-     "Reject the assistant edit preview from the assistant panel.",
-     {}},
-    {"assistant.context",
-     "Preview Assistant Context",
-     "Assistant",
-     "Show the assistant context from the assistant panel.",
-     {}},
-    {"structural.expand",
-     "Expand Syntax Selection",
-     "Structural editing",
-     "Expand selection from the structural editing panel.",
-     {}},
-    {"structural.shrink",
-     "Shrink Syntax Selection",
-     "Structural editing",
-     "Shrink selection from the structural editing panel.",
-     {}},
-    {"structural.definition",
-     "Select Enclosing Definition",
-     "Structural editing",
-     "Select the enclosing definition from the structural editing panel.",
-     {}},
-    {"structural.references",
-     "Select Symbol References",
-     "Structural editing",
-     "Find symbol references from the structural editing panel.",
-     {}},
-    {"structural.rename",
-     "Rename Symbol",
-     "Structural editing",
-     "Preview a symbol rename from the structural editing panel.",
-     {}},
-    {"structural.extract",
-     "Extract Function",
-     "Structural editing",
-     "Preview function extraction from the structural editing panel.",
-     {}},
     {"assistant.preview-context",
      "Preview Assistant Context",
      "Assistant",
@@ -321,6 +249,28 @@ const std::array<CommandDefinition, 27> trailing_definitions{{
      "Generate the command registry reference.",
      {},
      true},
+}};
+
+// Ids that once named a second, panel-scoped copy of a command. Each resolves to the one
+// command that performs the action, so a keymap, a script or `liquify --command` that names the
+// old id keeps working, while the palette and the reference list the action once (liquify#34).
+const std::array<CommandAlias, 16> alias_definitions{{
+    {"build.start", "run.build"},
+    {"build.test", "run.tests"},
+    {"build.push", "run.push"},
+    {"assistant.explain", "assistant.explain-diagnostic"},
+    {"assistant.propose", "assistant.propose-edit"},
+    {"assistant.accept", "assistant.accept-edit"},
+    {"assistant.reject", "assistant.reject-edit"},
+    {"assistant.context", "assistant.preview-context"},
+    {"structural.expand", "selection.expand"},
+    {"structural.shrink", "selection.shrink"},
+    {"structural.definition", "selection.enclosing-definition"},
+    {"structural.references", "selection.symbol-references"},
+    {"structural.rename", "refactor.rename"},
+    {"structural.extract", "refactor.extract-function"},
+    {"view.build", "panel.build"},
+    {"view.search", "edit.focus-search"},
 }};
 
 auto lowercase(std::string_view value) -> std::string {
@@ -547,11 +497,36 @@ auto CommandRegistry::add(CommandDefinition definition)
   return {};
 }
 
+auto CommandRegistry::add_alias(CommandAlias alias)
+    -> std::expected<void, std::string> {
+  if (alias.name.empty() || alias.target.empty()) {
+    return std::unexpected("alias name and target are required");
+  }
+  if (find(alias.name) != nullptr) {
+    return std::unexpected("alias names a registered command: " + alias.name);
+  }
+  const auto *target = find(alias.target);
+  if (target == nullptr) {
+    return std::unexpected("alias target is not registered: " + alias.target);
+  }
+  alias.target = target->name;
+  aliases_.push_back(std::move(alias));
+  return {};
+}
+
 auto CommandRegistry::find(std::string_view name) const
     -> const CommandDefinition * {
+  const auto alias = std::ranges::find(aliases_, name, &CommandAlias::name);
+  if (alias != aliases_.end()) {
+    name = alias->target;
+  }
   const auto found =
       std::ranges::find(commands_, name, &CommandDefinition::name);
   return found == commands_.end() ? nullptr : &*found;
+}
+
+auto CommandRegistry::aliases() const -> std::span<const CommandAlias> {
+  return aliases_;
 }
 
 auto CommandRegistry::commands() const -> std::span<const CommandDefinition> {
@@ -585,8 +560,7 @@ auto CommandRegistry::apply_overrides(std::span<const KeymapOverride> overrides)
     if (!valid) {
       continue;
     }
-    auto found =
-        std::ranges::find(bindings_, override.command, &BindingSet::name);
+    auto found = std::ranges::find(bindings_, command->name, &BindingSet::name);
     found->values = std::move(parsed);
   }
   rebuild_conflicts();
@@ -612,7 +586,12 @@ auto CommandRegistry::command_for(const KeyChord &chord) const
 
 auto CommandRegistry::bindings(std::string_view name) const
     -> std::span<const KeyChord> {
-  const auto found = std::ranges::find(bindings_, name, &BindingSet::name);
+  const auto *command = find(name);
+  if (command == nullptr) {
+    return {};
+  }
+  const auto found =
+      std::ranges::find(bindings_, command->name, &BindingSet::name);
   if (found == bindings_.end()) {
     return {};
   }
@@ -658,9 +637,11 @@ auto CommandRegistry::search(std::string_view query) const
 }
 
 void CommandRegistry::record_use(std::string_view name) {
-  if (find(name) == nullptr) {
+  const auto *command = find(name);
+  if (command == nullptr) {
     return;
   }
+  name = command->name;
   recent_.erase(std::remove(recent_.begin(), recent_.end(), name),
                 recent_.end());
   recent_.insert(recent_.begin(), std::string(name));
@@ -713,6 +694,26 @@ auto builtin_commands() -> std::span<const CommandDefinition> {
     return output;
   }();
   return all;
+}
+
+auto builtin_command_aliases() -> std::span<const CommandAlias> {
+  return alias_definitions;
+}
+
+auto add_builtin_commands(CommandRegistry &registry)
+    -> std::vector<std::string> {
+  auto errors = std::vector<std::string>{};
+  for (const auto &command : builtin_commands()) {
+    if (auto added = registry.add(command); !added) {
+      errors.push_back(std::move(added.error()));
+    }
+  }
+  for (const auto &alias : builtin_command_aliases()) {
+    if (auto added = registry.add_alias(alias); !added) {
+      errors.push_back(std::move(added.error()));
+    }
+  }
+  return errors;
 }
 
 auto parse_key_chord(std::string_view text, CommandPlatform platform)
@@ -925,6 +926,16 @@ auto generate_command_reference() -> std::string {
            << "` | `" << default_label(command, CommandPlatform::windows)
            << "` | `" << default_label(command, CommandPlatform::linux)
            << "` | " << markdown_escape(command.description) << " |\n";
+  }
+  output << "\n## Former names\n\n";
+  output << "Each row above is one action. A panel lists the same command the "
+            "palette lists, not a copy of it. These former panel-scoped names "
+            "resolve to that command, so keymaps, scripts and `liquify --command` "
+            "that use them keep working; the palette does not list them.\n\n";
+  output << "| Former name | Resolves to |\n";
+  output << "|---|---|\n";
+  for (const auto &alias : builtin_command_aliases()) {
+    output << "| `" << alias.name << "` | `" << alias.target << "` |\n";
   }
   output << "\nPlugin commands are appended at runtime under the Plugins "
             "group. Their ABI-declared "

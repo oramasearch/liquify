@@ -43,6 +43,13 @@ struct CommandDefinition {
   bool plugin{};
 };
 
+// A former id that resolves to the command that performs the same action. Aliases are found by
+// name, by keymap overrides and by `liquify --command`, but never listed or searched.
+struct CommandAlias {
+  std::string name;
+  std::string target;
+};
+
 struct CommandLocation {
   std::filesystem::path file;
   std::uint64_t line{1};
@@ -85,8 +92,12 @@ public:
 
   [[nodiscard]] auto add(CommandDefinition definition)
       -> std::expected<void, std::string>;
+  [[nodiscard]] auto add_alias(CommandAlias alias)
+      -> std::expected<void, std::string>;
+  // Resolves aliases: find("build.start") returns run.build.
   [[nodiscard]] auto find(std::string_view name) const
       -> const CommandDefinition *;
+  [[nodiscard]] auto aliases() const -> std::span<const CommandAlias>;
   [[nodiscard]] auto commands() const -> std::span<const CommandDefinition>;
   [[nodiscard]] auto apply_overrides(std::span<const KeymapOverride> overrides)
       -> std::vector<CommandDiagnostic>;
@@ -112,12 +123,17 @@ private:
 
   CommandPlatform platform_;
   std::vector<CommandDefinition> commands_;
+  std::vector<CommandAlias> aliases_;
   std::vector<BindingSet> bindings_;
   std::vector<std::string> recent_;
   std::vector<CommandConflict> conflicts_;
 };
 
 [[nodiscard]] auto builtin_commands() -> std::span<const CommandDefinition>;
+[[nodiscard]] auto builtin_command_aliases() -> std::span<const CommandAlias>;
+// Adds every built-in command and alias; returns the first registration error.
+[[nodiscard]] auto add_builtin_commands(CommandRegistry &registry)
+    -> std::vector<std::string>;
 [[nodiscard]] auto parse_key_chord(std::string_view text,
                                    CommandPlatform platform)
     -> std::expected<KeyChord, std::string>;

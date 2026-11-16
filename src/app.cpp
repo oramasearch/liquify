@@ -872,6 +872,26 @@ auto push_outcome_name(liquid::sync_ref_outcome_kind outcome)
   return "unknown";
 }
 
+// The panel a view.* or panel.* command opens.
+auto command_panel(std::string_view command) -> std::optional<PanelId> {
+  static constexpr auto panels = std::to_array<std::pair<std::string_view, PanelId>>({
+      {"view.repository", PanelId::repository},
+      {"edit.focus-search", PanelId::search},
+      {"view.review", PanelId::review},
+      {"view.multiplayer", PanelId::multiplayer},
+      {"panel.diagnostics", PanelId::diagnostics},
+      {"panel.build", PanelId::build},
+      {"panel.assistant", PanelId::assistant},
+      {"panel.plugins", PanelId::plugins},
+  });
+  for (const auto &[name, panel] : panels) {
+    if (name == command) {
+      return panel;
+    }
+  }
+  return std::nullopt;
+}
+
 // A table's header row in lake's style: muted ink on the surface role, with a hairline under
 // it. Records the row's rectangle for the contrast property test.
 void table_headers(const design::Palette &palette, UiFrameLayout &layout,
@@ -2028,11 +2048,8 @@ App::~App() {
 void App::configure_commands() {
   commands_ = std::make_unique<CommandRegistry>();
   command_diagnostics_.clear();
-  for (const auto &definition : builtin_commands()) {
-    auto added = commands_->add(definition);
-    if (!added) {
-      command_diagnostics_.push_back(added.error());
-    }
+  for (auto &error : add_builtin_commands(*commands_)) {
+    command_diagnostics_.push_back(std::move(error));
   }
   for (const auto &panel : standard_panel_descriptors()) {
     for (const auto &command : panel.commands) {
@@ -2087,6 +2104,8 @@ bool App::invoke_command(std::string_view name) {
   if (definition == nullptr) {
     return false;
   }
+  // A former panel-scoped id (build.start, structural.expand, ...) runs the command it names.
+  name = definition->name;
   commands_->record_use(name);
   if (definition->plugin) {
     invoke_plugin_command(name);
@@ -4873,40 +4892,80 @@ void App::execute_panel_command(std::string_view command) {
     if (review_) {
       review_->request_approve();
     }
-  } else if (command == "build.start") {
+  } else if (command == "run.build") {
     request_build();
-  } else if (command == "build.test") {
+  } else if (command == "run.tests") {
     request_tests();
-  } else if (command == "build.push") {
+  } else if (command == "run.push") {
     request_push();
   } else if (command == "assistant.ask") {
     request_assistant_context(AssistantAction::ask);
-  } else if (command == "assistant.explain") {
+  } else if (command == "assistant.explain-diagnostic") {
     request_assistant_context(AssistantAction::explain_diagnostic);
-  } else if (command == "assistant.propose") {
+  } else if (command == "assistant.propose-edit") {
     request_assistant_context(AssistantAction::propose_edit);
-  } else if (command == "assistant.accept") {
+  } else if (command == "assistant.accept-edit") {
     accept_assistant_edit();
-  } else if (command == "assistant.reject") {
+  } else if (command == "assistant.reject-edit") {
     if (assistant_) {
       assistant_->reject();
     }
   } else if (command == "assistant.toggle") {
     toggle_assistant();
-  } else if (command == "assistant.context") {
+  } else if (command == "assistant.preview-context") {
     request_assistant_context(std::nullopt);
-  } else if (command == "structural.expand") {
+  } else if (command == "selection.expand") {
     expand_structural_selection();
-  } else if (command == "structural.shrink") {
+  } else if (command == "selection.shrink") {
     shrink_structural_selection();
-  } else if (command == "structural.definition") {
+  } else if (command == "selection.enclosing-definition") {
     select_enclosing_definition();
-  } else if (command == "structural.references") {
+  } else if (command == "selection.symbol-references") {
     select_symbol_references();
-  } else if (command == "structural.rename") {
+  } else if (command == "refactor.rename") {
     open_rename();
-  } else if (command == "structural.extract") {
+  } else if (command == "refactor.extract-function") {
     open_extract_function();
+  } else if (command == "edit.find") {
+    if (editor_ != nullptr) {
+      find_open_ = true;
+      buffer_matches_ = editor_->find(find_query_, find_options_);
+    }
+  } else if (command == "edit.select-all") {
+    if (editor_ != nullptr) {
+      editor_->select_all();
+    }
+  } else if (command == "selection.line") {
+    if (editor_ != nullptr) {
+      editor_->select(SelectionKind::line);
+    }
+  } else if (command == "selection.add-cursor-up" ||
+             command == "selection.add-cursor-down") {
+    if (editor_ != nullptr) {
+      const auto cursor = editor_->cursor();
+      if (command == "selection.add-cursor-up" && cursor.line > 0) {
+        editor_->add_cursor({cursor.line - 1, cursor.byte});
+      } else if (command == "selection.add-cursor-down" &&
+                 cursor.line + 1 < editor_->line_count()) {
+        editor_->add_cursor({cursor.line + 1, cursor.byte});
+      }
+    }
+  } else if (command == "edit.toggle-input-mode") {
+    if (editor_ != nullptr) {
+      editor_->set_mode(editor_->mode() == EditingMode::standard
+                            ? EditingMode::modal_command
+                            : EditingMode::standard);
+    }
+  } else if (const auto panel = command_panel(command)) {
+    // The view.* and panel.* commands open their panel where it is docked.
+    panels_.focus(*panel);
+    const auto placement = panels_.layout(*panel).placement;
+    if (placement == PanelPlacement::sidebar) {
+      shell_state_.sidebar_visible = true;
+    } else if (placement == PanelPlacement::bottom) {
+      shell_state_.bottom_panel_visible = true;
+    }
+    persist_shell_state();
   }
 }
 
@@ -4915,18 +4974,25 @@ void App::draw_command_palette() {
   if (command_palette_open_) {
     ImGui::OpenPopup("Command Palette");
     command_palette_open_ = false;
+    command_palette_selection_ = 0;
   }
-  ImGui::SetNextWindowSize(ImVec2(760.0F, 520.0F), ImGuiCond_Appearing);
+  // lake's Go to (liquify#34): a titled dialog, a search field, then one compact list row per
+  // action with its group in secondary ink and its key as a small mono chip on the right. The
+  // selected row is on the selected role; Up and Down move it and Enter runs it.
+  ImGui::SetNextWindowSize(ImVec2(640.0F, 460.0F), ImGuiCond_Appearing);
   if (!begin_dialog("Command Palette", ImGuiWindowFlags_NoSavedSettings)) {
     return;
   }
   command_palette_visible_ = true;
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
   if (ImGui::IsWindowAppearing()) {
     ImGui::SetKeyboardFocusHere();
   }
   ImGui::SetNextItemWidth(-1.0F);
   ImGui::InputTextWithHint("##command-search", "Search commands",
                            &command_palette_query_);
+  frame_layout_.controls["palette/search"] = item_rectangle();
   if (command_palette_query_ != command_palette_previous_query_) {
     command_palette_previous_query_ = command_palette_query_;
     command_palette_selection_ = 0;
@@ -4936,49 +5002,161 @@ void App::draw_command_palette() {
     return;
   }
   const auto matches = commands_->search(command_palette_query_);
-  auto pending = std::optional<std::string>{};
-  if (ImGui::BeginTable("command-results", 3,
-                        ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
-                            ImGuiTableFlags_SizingStretchProp,
-                        ImVec2(0.0F, -1.0F))) {
-    ImGui::TableSetupColumn("Command", ImGuiTableColumnFlags_WidthStretch,
-                            0.60F);
-    ImGui::TableSetupColumn("Group", ImGuiTableColumnFlags_WidthStretch, 0.20F);
-    ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 0.20F);
-    table_headers(effective_palette(applied_dark_theme_, applied_high_contrast_),
-                  frame_layout_, "palette");
-    for (const auto &match : matches) {
-      const auto *definition = commands_->find(match.name);
-      if (definition == nullptr) {
-        continue;
-      }
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      const auto label = definition->title + "##" + definition->name;
-      if (ImGui::Selectable(label.c_str(), false,
-                            ImGuiSelectableFlags_SpanAllColumns)) {
-        pending = definition->name;
-      }
-      ImGui::TableSetColumnIndex(1);
-      ImGui::TextDisabled("%s", definition->group.c_str());
-      ImGui::TableSetColumnIndex(2);
-      const auto binding = commands_->binding_label(definition->name);
-      ImGui::TextDisabled("%s", binding.c_str());
+  auto moved = false;
+  if (!matches.empty()) {
+    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+      command_palette_selection_ =
+          (command_palette_selection_ + 1) % matches.size();
+      moved = true;
+    } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+      command_palette_selection_ =
+          (command_palette_selection_ + matches.size() - 1) % matches.size();
+      moved = true;
     }
-    ImGui::EndTable();
+    command_palette_selection_ =
+        std::min(command_palette_selection_, matches.size() - 1);
+  }
+  auto pending = std::optional<std::string>{};
+  if (!matches.empty() && (ImGui::IsKeyPressed(ImGuiKey_Enter) ||
+                           ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) {
+    pending = matches[command_palette_selection_].name;
+  }
+
+  // The list heading, as lake's palette groups its results: a label and the count.
+  ImGui::Dummy(ImVec2(0.0F, design::space1));
+  {
+    const auto top_left = ImGui::GetCursorScreenPos();
+    const auto width = ImGui::GetContentRegionAvail().x;
+    const auto heading = command_palette_query_.empty() &&
+                                 !commands_->recent().empty()
+                             ? std::string("Recent first")
+                             : std::string("Commands");
+    const auto count = std::to_string(matches.size());
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    ImGui::TextUnformatted(heading.c_str());
+    const auto count_width = ImGui::CalcTextSize(count.c_str()).x;
+    ImGui::SameLine(width - count_width);
+    ImGui::TextUnformatted(count.c_str());
+    ImGui::PopStyleColor();
+    const auto bottom = ImGui::GetItemRectMax().y + design::space1;
+    ImGui::GetWindowDrawList()->AddLine(
+        ImVec2(top_left.x, bottom), ImVec2(top_left.x + width, bottom),
+        packed_color(palette.border_subtle), design::border_width);
+    frame_layout_.controls["palette/header"] =
+        InputRectangle{top_left.x, top_left.y, width, bottom - top_left.y};
+    ImGui::Dummy(ImVec2(0.0F, design::space1));
+  }
+
+  const auto footer_height =
+      ImGui::GetTextLineHeightWithSpacing() *
+      static_cast<float>(1 + command_diagnostics_.size());
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+  ImGui::BeginChild("command-results", ImVec2(0.0F, -footer_height),
+                    ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
+  ImFont *chip_font = nullptr;
+  for (auto *font : ImGui::GetIO().Fonts->Fonts) {
+    if (font->ConfigData != nullptr &&
+        std::string_view(font->ConfigData->Name) == "IBM Plex Mono 12") {
+      chip_font = font;
+    }
+  }
+  const auto row_height =
+      ImGui::GetTextLineHeight() + design::space2 * 2.0F;
+  auto *draw = ImGui::GetWindowDrawList();
+  const auto mouse_moved = ImGui::GetIO().MouseDelta.x != 0.0F ||
+                           ImGui::GetIO().MouseDelta.y != 0.0F;
+  // Rows are not navigation targets: the search field keeps the keyboard, and Up/Down move the
+  // selection above instead of ImGui's focus.
+  ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+  ImGui::PushStyleColor(ImGuiCol_Header, imgui_color(palette.selected));
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                        imgui_color(palette.layer_hover));
+  ImGui::PushStyleColor(ImGuiCol_HeaderActive, imgui_color(palette.selected));
+  ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0F, 0.5F));
+  for (std::size_t index = 0; index < matches.size(); ++index) {
+    const auto *definition = commands_->find(matches[index].name);
+    if (definition == nullptr) {
+      continue;
+    }
+    const auto selected = index == command_palette_selection_;
+    const auto id = "##command-" + definition->name;
+    const auto origin = ImGui::GetCursorScreenPos();
+    const auto width = ImGui::GetContentRegionAvail().x;
+    if (selected) {
+      // The selected row keeps its role while the pointer hovers it.
+      ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                            imgui_color(palette.selected));
+    }
+    if (ImGui::Selectable(id.c_str(), selected, ImGuiSelectableFlags_None,
+                          ImVec2(width, row_height))) {
+      pending = definition->name;
+    }
+    if (selected) {
+      ImGui::PopStyleColor();
+      if (moved) {
+        ImGui::SetScrollHereY(0.5F);
+      }
+    }
+    if (ImGui::IsItemHovered() && mouse_moved) {
+      command_palette_selection_ = index;
+    }
+    frame_layout_.controls["palette/row/" + definition->name] =
+        item_rectangle();
+    const auto text_y = origin.y + design::space2;
+    const auto left = origin.x + design::space4;
+    draw->AddText(ImVec2(left, text_y), packed_color(palette.text_primary),
+                  definition->title.c_str());
+    const auto title_width = ImGui::CalcTextSize(definition->title.c_str()).x;
+    draw->AddText(ImVec2(left + title_width + design::space3, text_y),
+                  packed_color(palette.text_secondary),
+                  definition->group.c_str());
+    const auto binding = commands_->binding_label(definition->name);
+    if (!binding.empty()) {
+      auto *font = chip_font != nullptr ? chip_font : ImGui::GetFont();
+      const auto size = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0F,
+                                            binding.c_str());
+      const auto chip_padding = ImVec2(5.0F, 2.0F);
+      const auto chip_max =
+          ImVec2(origin.x + width - design::space4,
+                 origin.y + (row_height + size.y) * 0.5F + chip_padding.y);
+      const auto chip_min =
+          ImVec2(chip_max.x - size.x - chip_padding.x * 2.0F,
+                 chip_max.y - size.y - chip_padding.y * 2.0F);
+      draw->AddRectFilled(chip_min, chip_max, packed_color(palette.surface),
+                          design::panel_radius);
+      draw->AddRect(chip_min, chip_max, packed_color(palette.border_subtle),
+                    design::panel_radius, 0, design::border_width);
+      draw->AddText(font, font->FontSize,
+                    ImVec2(chip_min.x + chip_padding.x,
+                           chip_min.y + chip_padding.y),
+                    packed_color(palette.text_secondary), binding.c_str());
+    }
+  }
+  if (matches.empty()) {
+    ImGui::SetCursorPosX(design::space4);
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    ImGui::TextUnformatted("Nothing matches.");
+    ImGui::PopStyleColor();
+  }
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(3);
+  ImGui::PopItemFlag();
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+  ImGui::PopStyleVar();
+
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+  ImGui::TextUnformatted("Up and Down to move · Enter to run · Esc to close");
+  ImGui::PopStyleColor();
+  for (const auto &diagnostic : command_diagnostics_) {
+    ImGui::TextDisabled("%s", diagnostic.c_str());
   }
   if (pending) {
     invoke_command(*pending);
     ImGui::CloseCurrentPopup();
-  }
-  if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  } else if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     ImGui::CloseCurrentPopup();
-  }
-  if (command_palette_query_.empty()) {
-    ImGui::TextDisabled("Recent commands: %zu", commands_->recent().size());
-  }
-  for (const auto &diagnostic : command_diagnostics_) {
-    ImGui::TextDisabled("%s", diagnostic.c_str());
   }
   ImGui::EndPopup();
 }

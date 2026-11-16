@@ -5,7 +5,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <string>
+#include <vector>
 
 #include "liquify/command.hpp"
 
@@ -14,10 +16,8 @@ namespace {
 
 auto registry_for(CommandPlatform platform) -> CommandRegistry {
   auto registry = CommandRegistry(platform);
-  for (const auto &command : builtin_commands()) {
-    auto added = registry.add(command);
-    EXPECT_TRUE(added) << added.error();
-  }
+  const auto errors = add_builtin_commands(registry);
+  EXPECT_TRUE(errors.empty()) << errors.front();
   return registry;
 }
 
@@ -31,13 +31,52 @@ TEST(CommandRegistry, ContainsUniqueCommandsFromEverySurface) {
   EXPECT_NE(registry.find("go.definition"), nullptr);
   EXPECT_NE(registry.find("refactor.rename"), nullptr);
   EXPECT_NE(registry.find("run.build"), nullptr);
-  EXPECT_NE(registry.find("build.start"), nullptr);
   EXPECT_NE(registry.find("review.approve"), nullptr);
   EXPECT_NE(registry.find("assistant.ask"), nullptr);
-  EXPECT_NE(registry.find("assistant.explain"), nullptr);
-  EXPECT_NE(registry.find("structural.expand"), nullptr);
+  EXPECT_NE(registry.find("assistant.explain-diagnostic"), nullptr);
   EXPECT_NE(registry.find("help.version"), nullptr);
   EXPECT_TRUE(registry.conflicts().empty());
+}
+
+// liquify#34: one registry entry, and one palette row, per action.
+TEST(CommandRegistry, ListsEveryActionOnce) {
+  auto registry = registry_for(CommandPlatform::macos);
+  auto titles = std::set<std::string>{};
+  for (const auto &command : registry.commands()) {
+    EXPECT_TRUE(titles.insert(command.title).second)
+        << "two commands are titled " << command.title;
+  }
+  auto names = std::set<std::string>{};
+  for (const auto &match : registry.search("")) {
+    EXPECT_TRUE(names.insert(match.name).second) << match.name;
+  }
+  EXPECT_EQ(names.size(), registry.commands().size());
+}
+
+// The former panel-scoped ids resolve to the command that performs the action, for named
+// invocation and keymap overrides, and never appear in search.
+TEST(CommandRegistry, FormerPanelIdsResolveToTheirCommand) {
+  auto registry = registry_for(CommandPlatform::macos);
+  ASSERT_FALSE(registry.aliases().empty());
+  for (const auto &alias : builtin_command_aliases()) {
+    const auto *command = registry.find(alias.name);
+    ASSERT_NE(command, nullptr) << alias.name;
+    EXPECT_EQ(command->name, alias.target);
+  }
+  EXPECT_EQ(registry.find("build.push")->name, "run.push");
+  EXPECT_EQ(registry.find("structural.expand")->name, "selection.expand");
+  for (const auto &match : registry.search("push")) {
+    EXPECT_NE(match.name, "build.push");
+  }
+  const auto overrides = std::vector<KeymapOverride>{
+      {"build.start", {"F6"}, {"settings.liquid", 1, 1}}};
+  EXPECT_TRUE(registry.apply_overrides(overrides).empty());
+  EXPECT_EQ(registry.binding_label("run.build"), "F6");
+  EXPECT_EQ(registry.binding_label("build.start"), "F6");
+  registry.record_use("assistant.accept");
+  ASSERT_FALSE(registry.recent().empty());
+  EXPECT_EQ(registry.recent().front(), "assistant.accept-edit");
+  EXPECT_FALSE(registry.add({"build.start", "Build", "Run", "", {}}));
 }
 
 TEST(CommandRegistry, FuzzySearchAndRecencyUseStableNames) {
