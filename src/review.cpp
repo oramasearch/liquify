@@ -239,6 +239,36 @@ auto ReviewModel::reload_comments() -> liquid::runtime::task<void> {
     co_return liquid::result<void>{};
 }
 
+auto ReviewModel::request_review(std::vector<std::string> reviewers)
+    -> liquid::runtime::task<ReviewSnapshot> {
+    auto change = liquid::change_id{};
+    {
+        auto repository = co_await liquid::repository::open(repository_path_);
+        if (!repository) {
+            co_return std::unexpected(repository.error());
+        }
+        const auto status = repository->status();
+        if (!status) {
+            co_return std::unexpected(status.error());
+        }
+        if (!status->head) {
+            co_return std::unexpected(liquid::error{
+                liquid::errc::not_found, "repository has no change to review; cut one first",
+                "review"});
+        }
+        change = *status->head;
+    }
+    auto created = co_await forge_.create_review(change, std::move(reviewers));
+    if (!created) {
+        co_return std::unexpected(created.error());
+    }
+    auto listed = co_await forge_.list_reviews();
+    if (listed) {
+        current_.reviews = std::move(*listed);
+    }
+    co_return co_await open_review(created->id);
+}
+
 auto ReviewModel::open_review(std::string id) -> liquid::runtime::task<ReviewSnapshot> {
     const auto started = std::chrono::steady_clock::now();
     auto review = co_await forge_.get_review(std::move(id));
@@ -479,6 +509,30 @@ void ReviewController::request_comment(std::string body,
         [body = std::move(body), path = std::move(path), line, column](ReviewModel& model) mutable {
             return model.create_comment(std::move(body), std::move(path), line, column);
         });
+}
+
+void ReviewController::request_review(std::vector<std::string> reviewers) {
+    enqueue_review(state_, [reviewers = std::move(reviewers)](ReviewModel& model) mutable {
+        return model.request_review(std::move(reviewers));
+    });
+}
+
+auto parse_reviewers(std::string_view text) -> std::vector<std::string> {
+    auto output = std::vector<std::string>{};
+    while (!text.empty()) {
+        const auto comma = text.find(',');
+        auto item = text.substr(0, comma);
+        const auto first = item.find_first_not_of(" \t");
+        if (first != std::string_view::npos) {
+            const auto last = item.find_last_not_of(" \t");
+            output.emplace_back(item.substr(first, last - first + 1));
+        }
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        text.remove_prefix(comma + 1);
+    }
+    return output;
 }
 
 void ReviewController::request_approve() {

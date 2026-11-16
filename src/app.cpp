@@ -1663,19 +1663,95 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
   assistant_ = std::make_unique<Assistant>(config, key.configured, [secret] {
     return std::make_unique<AnthropicProvider>(secret);
   });
-  if (options_.lake_url) {
-    try {
-      const auto *token = std::getenv("LIQUID_TOKEN");
-      review_ = std::make_unique<ReviewController>(
-          *options_.repository_path, *options_.lake_url,
-          token == nullptr ? std::string{} : std::string{token});
-      review_->request_list();
-    } catch (const std::exception &error) {
-      editor_status_ = std::string{"review configuration: "} + error.what();
+  // Reviews live on the repository's lake: --lake when given, else the lake the repository
+  // was cloned from or that Set Lake recorded.
+  if (!options_.lake_url || lake_url_from_repository_) {
+    options_.lake_url.reset();
+    lake_url_from_repository_ = false;
+    // Read once with the repository at open: a second store handle opened here, while the
+    // tree and index load, is what liquify#97 / liquid#526 corrupt.
+    if (!repository_->lake_remote().empty()) {
+      options_.lake_url = std::string(repository_->lake_remote());
+      lake_url_from_repository_ = true;
     }
   }
+  review_.reset();
+  configure_review();
   configure_commands();
   return true;
+}
+
+void App::configure_review() {
+  if (!options_.lake_url || !options_.repository_path || review_) {
+    return;
+  }
+  try {
+    review_ = std::make_unique<ReviewController>(
+        *options_.repository_path, *options_.lake_url, lake_token());
+    review_->request_list();
+  } catch (const std::exception &error) {
+    editor_status_ = std::string{"review configuration: "} + error.what();
+  }
+}
+
+void App::open_request_review() {
+  if (!repository_) {
+    editor_status_ = "Open a repository to request a review";
+    return;
+  }
+  if (!review_) {
+    open_set_lake_dialog();
+    return;
+  }
+  request_review_requested_ = true;
+  request_review_reviewers_.clear();
+  panels_.focus(PanelId::review);
+  shell_state_.sidebar_visible = true;
+}
+
+void App::draw_request_review_dialog() {
+  if (request_review_requested_) {
+    ImGui::OpenPopup("Request Review");
+    request_review_requested_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(560.0F, 0.0F), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Request Review", nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::PushTextWrapPos(540.0F);
+  ImGui::TextUnformatted(
+      "Asks people on lake to read your current change before it lands. Push "
+      "the change first, so lake has it.");
+  ImGui::PopTextWrapPos();
+  if (repository_ && !repository_->current_change().empty()) {
+    ImGui::TextDisabled(
+        "Current change %s",
+        compact_identifiers(std::string(repository_->current_change())).c_str());
+  }
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Reviewers (optional)");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(540.0F);
+  ImGui::InputTextWithHint("##reviewers", "Names, separated by commas",
+                           &request_review_reviewers_);
+  frame_layout_.controls["request-review/reviewers"] = item_rectangle();
+  ImGui::Spacing();
+  if (ImGui::Button("Request review")) {
+    review_->request_review(parse_reviewers(request_review_reviewers_));
+    editor_status_ = "Requesting a review";
+    ImGui::CloseCurrentPopup();
+  }
+  frame_layout_.controls["request-review/submit"] = item_rectangle();
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
 }
 
 auto App::repository_summary() const -> RepositorySummary {
@@ -1973,6 +2049,8 @@ bool App::invoke_command(std::string_view name) {
     open_cut_composer();
   } else if (name == "run.set-lake") {
     open_set_lake_dialog();
+  } else if (name == "review.request") {
+    open_request_review();
   } else if (name == "assistant.toggle") {
     toggle_assistant();
   } else if (name == "panel.reset-layout") {
@@ -3160,7 +3238,8 @@ void App::request_tests(std::string filter) {
 
 void App::request_push() {
   if (editor_graph_) {
-    editor_graph_->request_push();
+    editor_graph_->request_push(
+        repository_ ? std::string(repository_->lake_remote()) : std::string{});
   }
 }
 
@@ -4148,15 +4227,25 @@ void App::draw_repository_tree() {
 
 void App::draw_review_panel() {
   ImGui::TextUnformatted("Reviews");
-  if (!options_.lake_url) {
-    ImGui::TextDisabled("Configure with --lake <repository-url>");
-    return;
-  }
   if (!review_) {
-    ImGui::TextWrapped("%s", editor_status_.c_str());
+    ImGui::PushTextWrapPos(0.0F);
+    ImGui::TextUnformatted(
+        "A review asks people to read a change on lake before it lands. "
+        "Reviews live on the lake this repository pushes to, and it has none "
+        "yet.");
+    ImGui::PopTextWrapPos();
+    if (repository_ && ImGui::Button("Set lake")) {
+      open_set_lake_dialog();
+    }
+    frame_layout_.controls["review/set-lake"] = item_rectangle();
     return;
   }
   const auto snapshot = review_->snapshot();
+  if (ImGui::SmallButton("Request review")) {
+    open_request_review();
+  }
+  frame_layout_.controls["review/request"] = item_rectangle();
+  ImGui::SameLine();
   if (ImGui::SmallButton("Refresh reviews")) {
     if (snapshot.review.selected) {
       review_->request_refresh();
@@ -4169,7 +4258,13 @@ void App::draw_review_panel() {
     ImGui::TextDisabled("loading...");
   }
   if (!snapshot.error.empty()) {
-    ImGui::TextWrapped("Could not load reviews: %s", snapshot.error.c_str());
+    draw_user_error(
+        {.kind = FailureKind::other,
+         .summary = "Lake did not complete the review request",
+         .next_step = "Reviews need the change on lake: push it, then refresh "
+                      "or request the review again.",
+         .details = without_absolute_paths(snapshot.error, repository_path())},
+        "review-failure");
   }
   for (const auto &item : snapshot.review.reviews) {
     const auto label =
@@ -4183,8 +4278,15 @@ void App::draw_review_panel() {
   if (!snapshot.review.selected) {
     if (!snapshot.busy && snapshot.error.empty() &&
         snapshot.review.reviews.empty()) {
-      ImGui::TextWrapped(
-          "%s", panels_.descriptor(PanelId::review).empty_state.data());
+      ImGui::PushTextWrapPos(0.0F);
+      ImGui::TextUnformatted(
+          "No reviews yet. A review asks people to read a change before it "
+          "lands: cut your work as a change, push it, then request a review.");
+      ImGui::PopTextWrapPos();
+      if (ImGui::Button("Request review")) {
+        open_request_review();
+      }
+      frame_layout_.controls["review/request-empty"] = item_rectangle();
     }
     return;
   }
@@ -6797,6 +6899,10 @@ void App::draw_set_lake_dialog() {
     set_lake_failure_ = record_lake_remote(repository_path(), set_lake_url_);
     if (set_lake_failure_.empty()) {
       options_.lake_url = set_lake_url_;
+      lake_url_from_repository_ = true;
+      repository_->set_lake_remote(set_lake_url_);
+      review_.reset();
+      configure_review();
       editor_status_ = "Pushes to " + lake_host(set_lake_url_);
       ImGui::CloseCurrentPopup();
     }
@@ -7584,6 +7690,7 @@ void App::frame(bool present) {
   draw_command_palette();
   draw_cut_composer();
   draw_set_lake_dialog();
+  draw_request_review_dialog();
   draw_navigation_popups();
   draw_repository_action_popup();
   draw_navigation_results();

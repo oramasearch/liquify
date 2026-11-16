@@ -155,3 +155,50 @@ TEST(ReviewModel, refresh_maps_shifted_and_deleted_comments_and_updates_state) {
     ASSERT_TRUE(requested) << requested.error().message;
     EXPECT_EQ(requested->selected->state, liquid::forge_review_state::open);
 }
+
+#include "liquid/drive.hpp"
+#include "liquid/sync.hpp"
+
+namespace {
+
+TEST(ReviewModel, requests_a_review_of_the_pushed_current_change) {
+    auto server = liquid::test::forge_double{};
+    ASSERT_TRUE(server.advance_head("src/file.cpp", "one\n"));
+    TemporaryRepository local;
+    {
+        auto client = liquid::runtime::block_on(liquid::drive_client::open(local.path(), server.url()));
+        ASSERT_TRUE(client) << client.error().message;
+        ASSERT_TRUE(liquid::runtime::block_on(client->pin("")));
+        ASSERT_TRUE(liquid::runtime::block_on(client->sync()));
+    }
+    auto head = liquid::change_id{};
+    {
+        auto repository = liquid::runtime::block_on(liquid::repository::open(local.path()));
+        ASSERT_TRUE(repository);
+        const auto text = std::string_view{"one\ntwo\n"};
+        const auto bytes = std::as_bytes(std::span(text));
+        ASSERT_TRUE(liquid::runtime::block_on(
+            repository->write("src/file.cpp", {bytes.begin(), bytes.end()})));
+        auto cut = liquid::runtime::block_on(repository->cut("Add two"));
+        ASSERT_TRUE(cut) << cut.error().message;
+        head = *cut;
+        auto endpoint = liquid::sync_endpoint{server.url()};
+        auto pushed = liquid::runtime::block_on(endpoint.push(*repository));
+        ASSERT_TRUE(pushed) << pushed.error().message;
+    }
+    auto model = liquify::ReviewModel{local.path(), server.url()};
+    auto requested = liquid::runtime::block_on(model.request_review({"ana", "bo"}));
+    ASSERT_TRUE(requested) << requested.error().message;
+    ASSERT_TRUE(requested->selected);
+    EXPECT_EQ(liquid::to_string(requested->selected->change.value), liquid::to_string(head.value));
+    EXPECT_EQ(requested->selected->reviewers, (std::vector<std::string>{"ana", "bo"}));
+    EXPECT_EQ(requested->reviews.size(), 1U);
+}
+
+TEST(ReviewModel, parses_optional_reviewers) {
+    EXPECT_EQ(liquify::parse_reviewers(" ana, bo ,, cy "),
+              (std::vector<std::string>{"ana", "bo", "cy"}));
+    EXPECT_TRUE(liquify::parse_reviewers("  ").empty());
+}
+
+} // namespace

@@ -75,7 +75,8 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
   target_link_libraries(liquify-native-acceptance PRIVATE liquify-app liquid_forge_double)
   foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette modal-input tabs build
       front-door-clone-failures cut
-      front-door-clone-push set-lake-push opened-clone-push)
+      front-door-clone-push set-lake-push opened-clone-push
+      request-review)
     add_test(NAME liquify-native-acceptance-${scenario}
       COMMAND liquify-native-acceptance ${scenario}
         ${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario})
@@ -89,9 +90,11 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
   set_tests_properties(liquify-native-acceptance-quick-open PROPERTIES WILL_FAIL TRUE)
   # #34 remains open: palette keyboard selection does not dispatch a command.
   set_tests_properties(liquify-native-acceptance-palette PROPERTIES WILL_FAIL TRUE)
-  # #97 / liquid#526 remain open: a freshly cloned store loses an index run when liquify's
-  # handles write to it, so the first save after a clone fails before the push.
-  set_tests_properties(liquify-native-acceptance-front-door-clone-push PROPERTIES WILL_FAIL TRUE)
+  # #97 / liquid#526 remain open: a store liquify just cloned usually loses an index run when
+  # liquify's handles write to it, so the first save fails before the push; now and then it
+  # does not. Neither WILL_FAIL nor a pass is stable, so the scenario is run by hand until
+  # liquid#526 lands (see native-acceptance.md).
+  set_tests_properties(liquify-native-acceptance-front-door-clone-push PROPERTIES DISABLED TRUE)
   set_tests_properties(liquify-native-acceptance-launch-1 PROPERTIES SKIP_RETURN_CODE 77)
   add_executable(liquify-native-window-test test_native_window.cpp)
   target_link_libraries(liquify-native-window-test PRIVATE liquify-app)

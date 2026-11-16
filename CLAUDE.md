@@ -72,7 +72,7 @@ Syntax-node selection,
 cross-file rename and C/C++ extract-function are serialized on the editor worker and applied as
 fingerprinted node edits with one drip per changed file and one liquid operation for the complete
 multi-file application. The headless `--apply-edits` command uses the same canonical CBOR records
-as the editor and applies them through liquid's public edit API. The `--lake` review panel pulls
+as the editor and applies them through liquid's public edit API. The review panel (the repository's lake, or `--lake`) requests reviews of the current change, pulls
 changes through liquid, renders retained inline text hunks and conflict values, creates
 cursor-anchored comments, advances them across revised heads, and updates review state. The
 default-off assistant

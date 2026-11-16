@@ -447,6 +447,14 @@ auto RepositoryView::offline_reason() const -> std::string_view {
 
 auto RepositoryView::offline() const -> bool { return offline_; }
 
+auto RepositoryView::lake_remote() const -> std::string_view {
+  return lake_remote_;
+}
+
+void RepositoryView::set_lake_remote(std::string remote) {
+  lake_remote_ = std::move(remote);
+}
+
 auto RepositoryView::clone_failure() const -> const UserError & {
   return clone_failure_;
 }
@@ -627,6 +635,7 @@ RepositoryView RepositoryView::load(std::filesystem::path path) {
       view.pending_uploads_ = drive_status->pending_uploads;
       view.offline_reason_ = drive_status->offline_reason;
       view.offline_ = !view.offline_reason_.empty();
+      view.lake_remote_ = drive_status->remote;
     }
   }
   view.open_time_ = std::chrono::steady_clock::now() - started;

@@ -51,7 +51,7 @@ constexpr auto descriptors = std::to_array<PanelDescriptor>({
     {PanelId::search, "Search", "S", PanelPlacement::sidebar, search_commands,
      "Open a repository to search its files."},
     {PanelId::review, "Review", "V", PanelPlacement::sidebar, review_commands,
-     "No reviews are available."},
+     "No reviews yet. Push a change, then request a review."},
     {PanelId::build, "Build, test and push", "B", PanelPlacement::bottom,
      build_commands, "No build, test, or push activity yet."},
     {PanelId::multiplayer, "Multiplayer", "M", PanelPlacement::sidebar,
