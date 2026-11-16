@@ -43,13 +43,18 @@ the theme and high-contrast preferences.
 ## Status, empty states, and errors
 
 The registry is the single state and notification API for built-in panels. Every panel has an
-empty sentence that says what is absent or what action enables it. Repository, review,
-diagnostics, build, plugin, assistant, and structural failures are introduced with direct text such
-as “Could not load reviews” or “Could not complete the operation”; controller error detail follows
-that sentence.
+empty sentence that says what is absent or what action enables it. Repository, index, folder,
+diagnostics, build and push failures use the one error component of [errors.md](errors.md): a
+sentence in the product's words, the next step, the action that fixes it where liquify offers one,
+and liquid's message behind Details. Each failure is shown once, in the panel that owns it: build and
+push failures in Build, code-analysis failures in Diagnostics, index and folder failures in the
+repository sidebar. Review, plugin, assistant and structural failures still use direct text such as
+“Could not load reviews”, followed by the controller's detail.
 
 One status-bar channel reports progress and completion for builds, saved-drip sync, repository
-folder hydration, and assistant streaming. Selecting the message focuses its source panel.
+folder hydration, and assistant streaming. Selecting the message focuses its source panel. A failure
+is named in the status bar by its sentence and the panel that holds it ("This repository has no
+build set up yet · Open Build, test and deploy"); selecting it opens that panel.
 Determinate work includes a progress bar. The channel offers Cancel only when the controller can
 honour it: assistant streaming currently can; the pinned libliquid build handle, sync endpoint, and
 repository directory future do not expose cancellation.

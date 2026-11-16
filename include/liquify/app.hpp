@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <map>
 #include <memory>
@@ -93,7 +94,17 @@ private:
   void draw_line_attribution(std::size_t line);
   void draw_status_bar();
   void draw_welcome();
-  void draw_user_error(const UserError &failure, std::string_view id);
+  struct StatusFailure {
+    std::string summary;
+    PanelId panel;
+  };
+  [[nodiscard]] auto repository_path() const -> std::filesystem::path;
+  [[nodiscard]] auto status_failure(const EditorGraphSnapshot &graph) const
+      -> std::optional<StatusFailure>;
+  [[nodiscard]] auto error_action_available(ErrorAction action) const -> bool;
+  void run_error_action(ErrorAction action);
+  void draw_user_error(const UserError &failure, std::string_view id,
+                       const std::function<void()> &retry = {});
   void draw_clone_dialog();
   void draw_split_editor();
   void draw_repository_tree();

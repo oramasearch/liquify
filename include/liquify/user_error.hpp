@@ -25,6 +25,14 @@ enum class FailureKind : std::uint8_t {
     other,
 };
 
+// The action that fixes a failure, drawn as a button beside the sentence when liquify offers it.
+enum class ErrorAction : std::uint8_t {
+    none,
+    set_sync_remote, // choose the lake and repository this one pushes to
+    set_up_build,    // record the build command
+    retry,
+};
+
 // One failure as the window shows it: a sentence in the product's words, the step that fixes
 // it, and liquid's own message for the Details control. No field carries an absolute path
 // the person did not type.
@@ -33,6 +41,8 @@ struct UserError {
     std::string summary;
     std::string next_step;
     std::string details;
+    ErrorAction action{ErrorAction::none};
+    std::string action_label;
 
     [[nodiscard]] auto empty() const noexcept -> bool { return summary.empty(); }
     // Only an unreachable lake is "offline"; every other failure means the lake answered.
@@ -60,6 +70,21 @@ struct UserError {
 // A clone the lake refused for one reference.
 [[nodiscard]] auto describe_clone_refusal(std::string_view reference, std::string_view reason,
                                           std::string_view remote) -> UserError;
+
+// A failed build or test run (F7, F8). A repository with no recorded build offers Set up build.
+[[nodiscard]] auto describe_build_failure(const liquid::error& error,
+                                          const std::filesystem::path& repository) -> UserError;
+// A failed push to lake (F9). A repository with no sync remote offers Set lake.
+[[nodiscard]] auto describe_push_failure(const liquid::error& error, std::string_view remote,
+                                         const std::filesystem::path& repository) -> UserError;
+// A failed editor query (diagnostics, hover, definition, completion).
+[[nodiscard]] auto describe_query_failure(const liquid::error& error,
+                                          const std::filesystem::path& repository) -> UserError;
+// A failed read of the repository's path and symbol index, or of one folder.
+[[nodiscard]] auto describe_index_failure(std::string_view message,
+                                          const std::filesystem::path& repository) -> UserError;
+[[nodiscard]] auto describe_folder_failure(std::string_view folder, std::string_view message,
+                                           const std::filesystem::path& repository) -> UserError;
 
 // liquid's raw message for Details: "context: message", with `repository` shown relative to
 // the repository and any other absolute path reduced to its file name.

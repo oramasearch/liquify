@@ -114,3 +114,56 @@ TEST(UserError, RemovesAbsolutePathsFromDetails) {
 }
 
 } // namespace
+
+namespace {
+
+TEST(UserError, ABuildWithNoRecordedCommandOffersSetUpBuild) {
+    const auto repository = std::filesystem::path{"/Users/ora/projects/sample"};
+    const auto failure = liquify::describe_build_failure(
+        {liquid::errc::not_configured,
+         "repository has no recorded build configuration; run liquid wrap <command> first",
+         "/Users/ora/projects/sample/.liquid-build/configuration"},
+        repository);
+    EXPECT_EQ(failure.summary, "This repository has no build set up yet");
+    EXPECT_EQ(failure.action, liquify::ErrorAction::set_up_build);
+    EXPECT_EQ(failure.details.find("/Users/"), std::string::npos);
+    EXPECT_NE(failure.details.find(".liquid-build/configuration"), std::string::npos);
+}
+
+TEST(UserError, APushWithNoSyncRemoteOffersSetLake) {
+    const auto failure = liquify::describe_push_failure(
+        {liquid::errc::not_configured, "repository has no configured sync remote", ""}, "",
+        "/Users/ora/projects/sample");
+    EXPECT_EQ(failure.summary, "This repository has no lake to push to");
+    EXPECT_EQ(failure.action, liquify::ErrorAction::set_sync_remote);
+    EXPECT_FALSE(failure.offline());
+}
+
+TEST(UserError, APushToAnUnreachableLakeIsOfflineAndRetryable) {
+    const auto failure = liquify::describe_push_failure(
+        {liquid::errc::unavailable, "Connection refused", "sync endpoint"},
+        "https://lake.example/v1/repositories/abc", {});
+    EXPECT_TRUE(failure.offline());
+    EXPECT_EQ(failure.action, liquify::ErrorAction::retry);
+    EXPECT_EQ(failure.summary, "Could not reach lake.example");
+}
+
+TEST(UserError, NoComponentTextCarriesTheRepositoryPath) {
+    const auto repository = std::filesystem::path{"/private/var/folders/x/sample"};
+    for (const auto& failure :
+         {liquify::describe_query_failure(
+              {liquid::errc::io, "cannot read", "/private/var/folders/x/sample/src/a.cpp"},
+              repository),
+          liquify::describe_index_failure(
+              "filesystem error: in rename: No such file or directory "
+              "[/var/folders/x/sample/.liquid/index/run-179.idx.backend-tmp]",
+              repository),
+          liquify::describe_folder_failure("src", "/private/var/folders/x/sample/src: denied",
+                                           repository)}) {
+        EXPECT_EQ(failure.summary.find("/var/"), std::string::npos) << failure.summary;
+        EXPECT_EQ(failure.details.find("/var/"), std::string::npos) << failure.details;
+        EXPECT_FALSE(failure.next_step.empty());
+    }
+}
+
+} // namespace
