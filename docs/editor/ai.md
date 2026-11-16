@@ -1,16 +1,19 @@
 # Assistant surface
 
-**Decision.** AI is a first-class editor surface and is disabled by default. The repository
-document key `config.liquify.ai.enabled` overrides the same key in the global configuration file.
-The status-line `AI: off` / `AI: on` button and the Assistant: Toggle palette command write the
-repository key. Global configuration uses `key=value` lines at the platform configuration path:
+**Decision.** AI is a first-class editor surface and is disabled by default. **It is turned on per
+user and per repository, never by a settings file** (liquify#75): the status-line `AI: off` /
+`AI: on` button, the Assistant: Toggle palette command and the settings checkbox add or remove the
+open repository's canonical path in `ai-repositories`, beside the user's settings file. A repository
+cannot turn it on for itself, and turning it on for one repository does not turn it on for others
+([settings](../ui/settings.md)). Global configuration uses `key=value` lines at the platform
+configuration path:
 
 - macOS: `~/Library/Application Support/liquify/config`
 - Windows: `%APPDATA%/liquify/config`
 - Linux: `$XDG_CONFIG_HOME/liquify/config`, or `~/.config/liquify/config`
 
-The supported keys are `config.liquify.ai.enabled`, `config.liquify.ai.context_bytes`,
-`config.liquify.ai.model`, and `config.liquify.ai.max_tokens`. Defaults are off, 65,536 context
+The supported keys are `config.liquify.ai.context_bytes`, `config.liquify.ai.model`, and
+`config.liquify.ai.max_tokens`. Defaults are off, 65,536 context
 bytes, `claude-opus-5`, and 4,096 output tokens.
 
 ## Off means offline

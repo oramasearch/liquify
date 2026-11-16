@@ -31,10 +31,12 @@
 #include "../src/editor_buffer.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
+#include "liquify/ai_config.hpp"
 #include "liquify/ai_provider.hpp"
 #include "liquify/assistant.hpp"
 #include "liquify/context_builder.hpp"
 #include "liquify/interactive_analysis.hpp"
+#include "liquify/settings.hpp"
 
 namespace {
 
@@ -363,21 +365,32 @@ TEST(AiConfig, DefaultsOffAndRepositoryOverridesGlobalSetting) {
     EXPECT_FALSE(defaults->enabled);
     const auto global_path = location.path() / "global-config";
     {
+        // liquify#75: a settings file cannot turn AI on, the user's or the repository's.
         auto output = std::ofstream(global_path);
         output << "liquify settings {\n";
-        output << "  ai { enabled: false model: \"test-model\" }\n";
+        output << "  ai { enabled: true model: \"test-model\" }\n";
         output << "}\n";
+        auto shipped = std::ofstream(liquify::repository_settings_path(location.path()));
+        shipped << "liquify settings { ai { enabled: true } }\n";
     }
     const auto initial = liquify::load_ai_config(location.path(), global_path);
     ASSERT_TRUE(initial) << initial.error().message;
     EXPECT_FALSE(initial->enabled);
     EXPECT_EQ(initial->model, "test-model");
 
-    ASSERT_TRUE(liquify::set_repository_ai_enabled(location.path(), true));
+    // The user turns it on for this repository: kept outside the repository, per user.
+    ASSERT_TRUE(liquify::set_repository_ai_enabled(location.path(), true, global_path));
     const auto overridden = liquify::load_ai_config(location.path(), global_path);
     ASSERT_TRUE(overridden) << overridden.error().message;
     EXPECT_TRUE(overridden->enabled);
     EXPECT_EQ(overridden->model, "test-model");
+    EXPECT_TRUE(std::filesystem::exists(liquify::ai_repositories_path(global_path)));
+    const auto other = TemporaryDirectory("liquify-ai-config-other");
+    EXPECT_FALSE(liquify::repository_ai_enabled(other.path(), global_path))
+        << "enabled for one repository is not enabled for every repository";
+
+    ASSERT_TRUE(liquify::set_repository_ai_enabled(location.path(), false, global_path));
+    EXPECT_FALSE(liquify::repository_ai_enabled(location.path(), global_path));
 }
 
 TEST(ContextBuilder, UsesInteractiveGraphFactsAndReportsOmissions) {

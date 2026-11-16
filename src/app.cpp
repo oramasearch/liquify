@@ -1450,7 +1450,11 @@ App::App(AppOptions options) : options_(std::move(options)) {
   if (requested_screenshot == nullptr) {
     auto loaded_settings = load_settings(options_.repository_path);
     settings_ = std::move(loaded_settings.settings);
+    settings_user_ = std::move(loaded_settings.user);
     settings_diagnostics_ = std::move(loaded_settings.diagnostics);
+    // AI is on only where this user turned it on for this repository (liquify#75).
+    settings_.ai.enabled = options_.repository_path &&
+                           repository_ai_enabled(*options_.repository_path);
   }
   settings_scope_ = options_.repository_path ? SettingsScope::repository
                                              : SettingsScope::user;
@@ -1655,7 +1659,9 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
   if (!screenshot_mode()) {
     auto loaded_settings = load_settings(options_.repository_path);
     settings_ = std::move(loaded_settings.settings);
+    settings_user_ = std::move(loaded_settings.user);
     settings_diagnostics_ = std::move(loaded_settings.diagnostics);
+    settings_.ai.enabled = repository_ai_enabled(*options_.repository_path);
   }
   settings_scope_ = SettingsScope::repository;
 
@@ -2477,7 +2483,10 @@ void App::persist_settings() {
       options_.repository_path) {
     path = repository_settings_path(*options_.repository_path);
   }
-  const auto saved = save_settings(path, settings_);
+  const auto scope = settings_scope_ == SettingsScope::repository && options_.repository_path
+                         ? SettingsScope::repository
+                         : SettingsScope::user;
+  const auto saved = save_settings(path, settings_, scope, settings_user_);
   if (!saved) {
     editor_status_ = saved.error().message;
     settings_diagnostics_ = {
@@ -2485,6 +2494,9 @@ void App::persist_settings() {
     return;
   }
   settings_diagnostics_.clear();
+  if (scope == SettingsScope::user) {
+    settings_user_ = settings_;
+  }
   editor_status_ = "settings applied";
 }
 
@@ -5083,10 +5095,21 @@ void App::draw_settings() {
   end_group();
 
   if (begin_group(SettingsGroup::ai)) {
-    if (checkbox("Enable AI surface", &settings_.ai.enabled)) {
-      apply_settings_live();
-      persist_settings();
+    // Per user and per repository, never a settings file (liquify#75): with no repository open
+    // there is nothing to turn it on for.
+    ImGui::BeginDisabled(!options_.repository_path.has_value());
+    if (checkbox("Enable AI for this repository", &settings_.ai.enabled) &&
+        options_.repository_path) {
+      if (const auto saved =
+              set_repository_ai_enabled(*options_.repository_path, settings_.ai.enabled);
+          !saved) {
+        settings_.ai.enabled = !settings_.ai.enabled;
+        editor_status_ = saved.error().message;
+      } else {
+        apply_settings_live();
+      }
     }
+    ImGui::EndDisabled();
     ImGui::Text("Provider: %s", settings_.ai.provider.c_str());
     if (text_field("Model", &settings_.ai.model)) {
       apply_settings_live();
