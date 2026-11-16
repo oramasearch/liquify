@@ -170,6 +170,10 @@ try {
     New-Item -ItemType Directory -Path $layoutDirectory, $assetsDirectory, $resolvedOutput -Force |
         Out-Null
     Copy-Item -Path $resolvedBinary -Destination (Join-Path $layoutDirectory 'liquify.exe')
+    # Every dynamic plugin runs in this separate, confined process (liquify#82).
+    Copy-Item `
+        -Path (Join-Path (Split-Path -Parent $resolvedBinary) 'liquify-plugin-host.exe') `
+        -Destination (Join-Path $layoutDirectory 'liquify-plugin-host.exe')
     Copy-Item `
         -Path (Join-Path (Split-Path -Parent $resolvedBinary) 'frontends') `
         -Destination (Join-Path $layoutDirectory 'frontends') `
@@ -183,6 +187,10 @@ try {
     $dependencySearchDirectories += $env:PATH -split ';'
     Copy-RuntimeDependencies `
         (Join-Path $layoutDirectory 'liquify.exe') `
+        $objdump `
+        $dependencySearchDirectories
+    Copy-RuntimeDependencies `
+        (Join-Path $layoutDirectory 'liquify-plugin-host.exe') `
         $objdump `
         $dependencySearchDirectories
     Get-ChildItem (Join-Path $layoutDirectory 'frontends') -Filter '*.dll' | ForEach-Object {

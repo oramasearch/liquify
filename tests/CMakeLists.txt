@@ -36,6 +36,15 @@ target_link_libraries(liquify-tests PRIVATE
   Boost::json
   GTest::gtest_main)
 add_dependencies(liquify-tests liquify-sample-plugin)
+# A plugin that crashes, hangs and tries to escape its sandbox (liquify#82).
+add_library(liquify-fault-plugin MODULE fault_plugin.cpp)
+set_target_properties(liquify-fault-plugin PROPERTIES
+  PREFIX ""
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON)
+target_include_directories(liquify-fault-plugin PRIVATE "${LIQUIFY_LIQUID_SOURCE_DIR}/include")
+add_dependencies(liquify-tests liquify-fault-plugin liquify-plugin-host)
+target_include_directories(liquify-tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(liquify-tests PRIVATE LIQUIFY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_LIQUID_DIR="${LIQUIFY_LIQUID_SOURCE_DIR}")
@@ -43,6 +52,7 @@ target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_SAMPLE_PLUGIN="$<TARGET_FILE:liquify-sample-plugin>"
+  LIQUIFY_FAULT_PLUGIN="$<TARGET_FILE:liquify-fault-plugin>"
   LIQUIFY_TREE_SITTER_FRONTEND="$<TARGET_FILE:liquid-frontend-tree-sitter>"
   LIQUIFY_C_COMPILER="${CMAKE_C_COMPILER}"
   LIQUIFY_EXECUTABLE="$<TARGET_FILE:liquify>"

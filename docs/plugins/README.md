@@ -32,8 +32,10 @@ receive an ImGui context.
 
 ## Loading and failures
 
-`PluginHost::add` is the static registration path. `PluginHost::load` opens a module by path and
-requires its `liquify_plugin_get_v1` export. Both paths run the same descriptor checks: ABI version,
+`PluginHost::add` is the static registration path. `PluginHost::load` starts a
+`liquify-plugin-host` process that opens the module by path and requires its
+`liquify_plugin_get_v1` export ([Process isolation](#process-isolation)). Both paths run the same
+descriptor checks: ABI version,
 descriptor size, plugin and registration names, operations, duplicate names within a registration
 kind, command schemas, inputs, results, and owned-buffer release callbacks. A wrong version is
 refused before any registration becomes visible.
@@ -83,8 +85,64 @@ view model below the analysis results; the plugin never receives UI objects.
 
 Each panel operation is invoked independently. A returned error, exception, malformed owned value,
 non-canonical CBOR value, or unsupported view model becomes that panel's error snapshot and
-does not prevent another panel from updating. Native process faults remain process faults; plugins
-that require stronger isolation belong behind a separate process protocol rather than this ABI.
+does not prevent another panel from updating. A crash or hang in a dynamic plugin is the same kind
+of error: it happens in the plugin's own process (below), never in the IDE.
+
+## Process isolation
+
+**What.** Every plugin loaded from a file (global or trusted repository plugin) runs in its own
+`liquify-plugin-host` process ([liquify#82](https://github.com/oramasearch/liquify/issues/82)).
+`PluginHost::load` starts the host; the host maps the library, and **the IDE never maps a plugin
+library into its own address space**. Plugins are unchanged: the same ABI v1 descriptor and entry
+point, and only the canonical-CBOR values above cross between the processes. `PluginHost::add`
+(a plugin compiled into liquify, such as the static sample in the tests) still runs in process.
+
+**Why.** A trusted plugin used to run with the IDE's files, network, environment (API keys) and
+signing identity, and its crash was the IDE's crash
+([Y-01](https://github.com/oramasearch/liquid-bridge/blob/main/docs/security/review-2026-10.md#y-01)).
+
+**The protocol.** `src/plugin_protocol.hpp`, our own, no dependency. Each frame is a 4-byte
+big-endian length (at most 64 MiB) followed by one CBOR array:
+
+| Message | From | Shape |
+|---|---|---|
+| Manifest | host, once, after mapping the plugin | `[1, name, [query], [[command, binding, schema]], [panel], [event]]`, or `[0, error]` |
+| Request | IDE | `[kind, name, input]`; kind 0 query, 1 command, 2 panel, 3 event |
+| Response | host | `[status, result, message]`; status is a `LIQUID_FRONTEND_STATUS_*` value |
+
+The IDE repeats every descriptor check on the manifest (names, duplicates, canonical schemas,
+event names) and validates every result as canonical CBOR, so the host is not trusted either.
+Graph query kinds are still registered by name in the in-process graph; their `compute` is a
+request to the host. Commands, panels and the presence, lease and attribution events are requests
+the same way. The channel is a socketpair on file descriptor 3 (POSIX) or two inherited pipe
+handles (Windows); one call at a time per plugin.
+
+**Lifecycle.** The host starts with standard input and output on the null device, only the channel
+inherited, and a scrubbed environment (`PATH`, `HOME`, `TZ`, the locale variables and
+`LD_LIBRARY_PATH` only; no API keys or tokens). Queries and commands have 10 seconds, panels and
+events 2 seconds. A call that misses its deadline, a host that exits, and a malformed frame end
+the host and become that call's error: a panel's error snapshot, the editor status for a command, a
+failed graph query. The next call starts the host again and must see the same manifest. After
+three restarts the plugin stays disabled with its last error, until the repository is reopened.
+The host exits when its channel closes and watches its parent (and on Linux gets `SIGKILL` when
+the parent dies, and on Windows is killed with its job), so it never outlives the IDE.
+
+**The sandbox**, applied by the host before it maps the plugin, so the plugin's initialisers are
+confined too:
+
+| Platform | Mechanism | Denied |
+|---|---|---|
+| macOS | `sandbox_init` profile | IP networking (connect, accept, bind), every file write except `/dev/null`, `exec`, `fork`, the keychain services |
+| Linux | `no_new_privs`, Landlock, seccomp | Landlock: every filesystem write and `exec` right; TCP bind and connect on Landlock ABI 4+; abstract Unix sockets and signals outside the process on ABI 6+. seccomp (x86_64, aarch64): every socket family but `AF_UNIX`, `execve`, `execveat`, `ptrace`, `process_vm_*`, `io_uring` |
+| Windows | low-integrity token, job object | Writes to the user's files and registry (no write up), child processes, clipboard and desktop access; the job is killed when liquify closes it |
+
+**Limits.** Reads are not denied: a plugin can read the user's files, but it has no channel to send
+them anywhere except its results to the IDE. Windows does not deny network access; that needs an
+AppContainer and is not built. A Linux kernel without Landlock confines the host with seccomp
+alone. Panels refresh and commands run on the UI thread, so a hanging plugin stalls the UI for up
+to its deadline per attempt, at most four times, before it is disabled. The progress and
+cancellation callbacks stay empty, as before. A plugin needing more than data-only CBOR (files,
+network) has no path; that would be a separate decision.
 
 ## Versioning
 
@@ -106,4 +164,9 @@ available. The `PluginTrust` tests prove that repository metadata naming a plugi
 that a trust store or settings file inside the repository is ignored, that a trusted digest loads
 from the per-user cache, that changed bytes are refused, that global plugins keep loading beside
 an untrusted repository, and that `liquify plugin trust` names the plugin and its origin and
-records nothing without confirmation.
+records nothing without confirmation. The `PluginProcess` tests use `tests/fault_plugin.cpp`, a
+plugin that misbehaves on purpose: the IDE does not map a loaded plugin, a crashing command fails
+that call and the next call restarts the host, a hanging panel becomes that panel's error while
+another panel renders, a plugin is disabled after its restart budget, and the plugin cannot write
+a file, open a network connection (not on Windows) or see the IDE's environment. `PluginProtocol`
+round-trips every message and refuses truncated, trailing and unknown frames.

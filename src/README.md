@@ -13,6 +13,13 @@ unrelated errors. `version.cpp` reports the configured IDE and library revisions
 [what the window shows](../docs/ui/what-the-window-shows.md) and
 [store compatibility](../docs/build/store-compatibility.md) for the UI and proof contracts.
 
+`plugin_host_main.cpp` is the `liquify-plugin-host` executable: it applies the platform sandbox,
+maps one plugin library and answers requests. `plugin_process.cpp` starts and supervises it from
+the IDE (deadlines, restarts, the Windows token and job), and `plugin_protocol.cpp` is the framed
+message format both link. `plugin.cpp` routes a loaded plugin's queries, commands, panels and
+events through that process; it no longer maps plugin libraries. See
+[process isolation](../docs/plugins/README.md#process-isolation).
+
 `app.cpp` replaces its plain C++ frame layout report each frame, including submitted text bounds
 and all panel placements. Native rendering properties are described in
 [layout properties](../docs/ui/property-tests.md).

@@ -147,8 +147,11 @@ appear in the palette and data-only panels render below analysis results. The sa
 proves all three registrations; load and panel failures remain local to their source
 ([`../plugins/README.md`](../plugins/README.md)). Plugins named by repository metadata load only
 when the user has trusted their SHA-256 digest with `liquify plugin trust`, from a per-user trust
-store outside every repository; otherwise they are listed as not trusted and never loaded.
-Plugins still run in-process.
+store outside every repository; otherwise they are listed as not trusted and never loaded. Every
+dynamic plugin runs in its own sandboxed `liquify-plugin-host` process and the IDE never maps its
+library; a crash or hang fails only the call that met it, and a plugin is disabled after three
+restarts. Limits: reads are not denied, Windows has no network sandbox, and panels and commands
+still wait on the UI thread for up to their deadline.
 
 ## Build, test and push
 

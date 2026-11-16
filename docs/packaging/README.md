@@ -9,7 +9,10 @@ projection and platform signing.
 The scripts under [`packaging/`](../../packaging/) are shared by pull-request CI and the tag release
 workflow, so a published installer has already followed the same build and verification path.
 Each artifact carries the adjacent `frontends/liquid-frontend-tree-sitter` module used by the
-editor; platform dependency collection and signing treat it as executable code.
+editor, and `liquify-plugin-host` beside the `liquify` executable, the process every dynamic plugin
+runs in ([`../plugins/README.md`](../plugins/README.md#process-isolation)); platform dependency
+collection and signing treat both as executable code. On macOS the host is signed with the same
+hardened runtime and entitlements as the application.
 The macOS dependency policy, bundle audit, and relocation test are documented in
 [`macos.md`](macos.md).
 

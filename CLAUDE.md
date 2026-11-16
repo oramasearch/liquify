@@ -81,7 +81,7 @@ and previews edits until the user accepts one normal drip. When off it construct
 opens no connection. Native plugins use liquid's versioned frontend C boundary to register graph
 queries, commands, and canonical-CBOR panels through checked static or configured dynamic loading;
 a plugin named by repository metadata loads only once the user has trusted its SHA-256 digest with
-`liquify plugin trust` (per-user trust store, never the repository); their commands and data-only panels appear in the editor surface. F7 plans and starts a configured
+`liquify plugin trust` (per-user trust store, never the repository); every dynamic plugin runs in its own sandboxed `liquify-plugin-host` process, which the IDE reaches only through framed canonical-CBOR requests, so a crash or hang fails one call, never the IDE; their commands and data-only panels appear in the editor surface. F7 plans and starts a configured
 build (and, with none recorded, offers Set up build, which records a proposed command through
 libliquid's wrap API) through the attached daemon and renders its action stream, critical path and scheduling
 choice. F8 lists and runs test actions; F9 pushes saved drips to the configured sync remote and
