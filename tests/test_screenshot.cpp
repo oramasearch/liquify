@@ -1,4 +1,8 @@
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -160,6 +164,73 @@ TEST(Screenshot, AccessibilityStateShowsHighContrastFocusInBothThemes) {
                                           {15, 98, 254, 255}, 1, 1'000));
   EXPECT_TRUE(test::region_contains_color(dark, {320, 100, 950, 660},
                                           {107, 152, 255, 255}, 1, 1'000));
+}
+
+} // namespace
+} // namespace liquify
+
+namespace liquify {
+namespace {
+
+auto relative_luminance(std::uint8_t r, std::uint8_t g, std::uint8_t b) -> double {
+  const auto channel = [](std::uint8_t value) {
+    const auto c = value / 255.0;
+    return c <= 0.03928 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+auto contrast(double a, double b) -> double {
+  return (std::max(a, b) + 0.05) / (std::min(a, b) + 0.05);
+}
+
+// The header row's background is its most common colour; its ink is the pixel that differs from
+// it most. Rendered labels must read at WCAG AA (4.5:1) against the header (liquify#109).
+auto header_contrast(const ScreenshotImage &image, const InputRectangle &rect) -> double {
+  auto counts = std::map<std::uint32_t, int>{};
+  const auto x0 = static_cast<int>(std::max(rect.x, 0.0F));
+  const auto y0 = static_cast<int>(std::max(rect.y, 0.0F));
+  const auto x1 = std::min(static_cast<int>(rect.x + rect.width), static_cast<int>(image.width));
+  const auto y1 = std::min(static_cast<int>(rect.y + rect.height), static_cast<int>(image.height));
+  const auto pixel = [&](int x, int y) {
+    const auto *p = &image.rgba[(static_cast<std::size_t>(y) * image.width + x) * 4];
+    return std::array<std::uint8_t, 3>{p[0], p[1], p[2]};
+  };
+  for (int y = y0; y < y1 - 1; ++y) {
+    for (int x = x0; x < x1; ++x) {
+      const auto [r, g, b] = pixel(x, y);
+      ++counts[(static_cast<std::uint32_t>(r) << 16) | (g << 8) | b];
+    }
+  }
+  if (counts.empty()) {
+    return 0.0;
+  }
+  const auto background = std::ranges::max_element(counts, {}, [](const auto &entry) {
+                            return entry.second;
+                          })->first;
+  const auto background_luminance =
+      relative_luminance(background >> 16, (background >> 8) & 0xff, background & 0xff);
+  auto best = 1.0;
+  for (int y = y0; y < y1 - 1; ++y) {
+    for (int x = x0; x < x1; ++x) {
+      const auto [r, g, b] = pixel(x, y);
+      best = std::max(best, contrast(relative_luminance(r, g, b), background_luminance));
+    }
+  }
+  return best;
+}
+
+TEST(Screenshot, TableHeadersReadAtAAContrastInBothThemes) {
+  for (const auto &[state, control] :
+       {std::pair{"command-palette-light", "palette/header"},
+        std::pair{"command-palette-dark", "palette/header"},
+        std::pair{"welcome-light", "recent-repositories/header"},
+        std::pair{"welcome-dark", "recent-repositories/header"}}) {
+    const auto rendered = render_diagnostics(state);
+    ASSERT_TRUE(rendered.layout.controls.contains(control)) << state;
+    const auto ratio = header_contrast(rendered.image, rendered.layout.controls.at(control));
+    EXPECT_GE(ratio, 4.5) << state << " " << control;
+  }
 }
 
 } // namespace

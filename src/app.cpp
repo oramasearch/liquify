@@ -815,6 +815,24 @@ auto push_outcome_name(liquid::sync_ref_outcome_kind outcome)
   return "unknown";
 }
 
+// A table's header row in lake's style: muted ink on the surface role, with a hairline under
+// it. Records the row's rectangle for the contrast property test.
+void table_headers(const design::Palette &palette, UiFrameLayout &layout,
+                   std::string_view id) {
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::TableHeadersRow();
+  ImGui::PopStyleColor();
+  const auto top_left = ImGui::GetItemRectMin();
+  const auto bottom = ImGui::GetItemRectMax().y;
+  auto *table = ImGui::GetCurrentTable();
+  const auto left = table != nullptr ? table->OuterRect.Min.x : top_left.x;
+  const auto right = table != nullptr ? table->OuterRect.Max.x : ImGui::GetItemRectMax().x;
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(left, bottom), ImVec2(right, bottom),
+                                      packed_color(palette.border_subtle), 1.0F);
+  layout.controls[std::string(id) + "/header"] =
+      InputRectangle{left, top_left.y, right - left, bottom - top_left.y};
+}
+
 auto graph_query_failure(const EditorGraphSnapshot &snapshot) -> liquid::error {
   return snapshot.query_failure.value_or(
       liquid::error{liquid::errc::internal, snapshot.query_error, ""});
@@ -2330,6 +2348,13 @@ void App::apply_theme() {
   colors[ImGuiCol_ChildBg] = imgui_color(palette.surface);
   colors[ImGuiCol_PopupBg] = imgui_color(palette.overlay);
   colors[ImGuiCol_Border] = imgui_color(palette.border_subtle);
+  // Compact tables with sticky headers, as lake's kit draws them: the header sits on the
+  // surface role, its labels in the muted ink role, with a hairline under it (liquify#109).
+  colors[ImGuiCol_TableHeaderBg] = imgui_color(palette.surface);
+  colors[ImGuiCol_TableBorderStrong] = imgui_color(palette.border_subtle);
+  colors[ImGuiCol_TableBorderLight] = imgui_color(palette.border_subtle);
+  colors[ImGuiCol_TableRowBg] = ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
+  colors[ImGuiCol_TableRowBgAlt] = imgui_color(palette.layer);
   colors[ImGuiCol_BorderShadow] = {0.0F, 0.0F, 0.0F, 0.0F};
   colors[ImGuiCol_FrameBg] = imgui_color(palette.layer);
   colors[ImGuiCol_FrameBgHovered] = imgui_color(palette.layer_hover);
@@ -4843,7 +4868,8 @@ void App::draw_command_palette() {
                             0.60F);
     ImGui::TableSetupColumn("Group", ImGuiTableColumnFlags_WidthStretch, 0.20F);
     ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 0.20F);
-    ImGui::TableHeadersRow();
+    table_headers(effective_palette(applied_dark_theme_, applied_high_contrast_),
+                  frame_layout_, "palette");
     for (const auto &match : matches) {
       const auto *definition = commands_->find(match.name);
       if (definition == nullptr) {
@@ -7483,7 +7509,8 @@ void App::draw_welcome() {
                             2.2F);
     ImGui::TableSetupColumn("Branch", ImGuiTableColumnFlags_WidthStretch, 1.0F);
     ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 86.0F);
-    ImGui::TableHeadersRow();
+    table_headers(effective_palette(applied_dark_theme_, applied_high_contrast_),
+                  frame_layout_, "recent-repositories");
     for (const auto &recent : first_run_.recent()) {
       ImGui::PushID(recent.path.string().c_str());
       ImGui::TableNextRow();

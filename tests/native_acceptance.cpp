@@ -902,6 +902,23 @@ void NativeAcceptance::set_up_build(const std::filesystem::path &output) {
   capture_themes(app, output, "set-up-build-done");
 }
 
+// The command palette and the front door's Recent repositories, whose headers liquify#109
+// fixed, in the real window and both themes.
+void NativeAcceptance::table_headers(App &app, const std::filesystem::path &output) {
+  open_file(app);
+  key(app, "p", true, true);
+  require(popup("Command palette"), "palette opened");
+  require(app.frame_layout().controls.contains("palette/header"),
+          "#109: the palette draws its header row");
+  capture_themes(app, output, "palette-header");
+  key(app, "Escape");
+  app.first_run_.return_to_welcome();
+  pulse(app);
+  require(app.frame_layout().controls.contains("recent-repositories/header"),
+          "#109: the front door draws Recent repositories with its header row");
+  capture_themes(app, output, "recent-header");
+}
+
 void NativeAcceptance::wait_for_repository_operation(App &app) {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -1080,6 +1097,8 @@ int NativeAcceptance::run(std::string_view scenario,
     tabs(app);
   } else if (scenario == "build") {
     build(app, output);
+  } else if (scenario == "table-headers") {
+    table_headers(app, output);
   } else if (scenario == "cut") {
     cut(app, output);
   } else if (scenario == "set-lake-push") {
