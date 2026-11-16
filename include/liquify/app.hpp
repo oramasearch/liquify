@@ -384,6 +384,9 @@ private:
   std::optional<TextPosition> column_selection_anchor_;
   std::string quick_open_query_;
   std::string symbol_search_query_;
+  // The keyboard-selected result row of Quick Open and Symbol Search (liquify#33).
+  std::size_t quick_open_selection_{};
+  std::size_t symbol_search_selection_{};
   std::string repository_selection_;
   std::string repository_selection_blob_;
   std::string repository_action_source_;

@@ -3413,6 +3413,8 @@ void App::open_editor(std::string path, std::string blob_id,
   if (found != open_buffers_.end() && found->second.buffer.get() == editor_) {
     repository_focused_ = false;
     editor_focused_ = true;
+    // The requested source is shown, not a panel sharing the editor area (liquify#33).
+    editor_area_panel_.reset();
     return;
   }
   if (found == open_buffers_.end()) {
@@ -4280,12 +4282,19 @@ void App::poll_editor_graph() {
         structural_accepted_files_.push_back(path);
       }
     }
-    structural_preview_open_ = true;
-    panels_.focus(PanelId::structural_editing);
-    persist_shell_state();
-    editor_status_ = structural_preview_.empty()
-                         ? "structural preview has diagnostics"
-                         : "structural preview ready";
+    // Opening a buffer also advances the generation, to drop a preview of the previous file.
+    // That carries no preview and must not take the editor area from the opened source with an
+    // empty Structural editing panel (liquify#33).
+    if (snapshot.rename_preview || snapshot.extract_preview) {
+      structural_preview_open_ = true;
+      panels_.focus(PanelId::structural_editing);
+      persist_shell_state();
+      editor_status_ = structural_preview_.empty()
+                           ? "structural preview has diagnostics"
+                           : "structural preview ready";
+    } else {
+      structural_preview_open_ = false;
+    }
   }
   if (snapshot.structural_result_generation != structural_result_generation_) {
     structural_result_generation_ = snapshot.structural_result_generation;
@@ -4543,6 +4552,12 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
   if (dispatch_key_command(key, modifiers)) {
     return;
   }
+  // A modal dialog owns Enter, Escape and the arrows: Quick Open's Down and Enter move and accept
+  // its result, never the source behind it (liquify#33, liquify#39). Commands scoped to the
+  // editor or the repository tree are already inactive under a modal (command_scope_active).
+  if (ImGui::GetCurrentContext() != nullptr && ImGui::GetTopMostPopupModal() != nullptr) {
+    return;
+  }
   if (!editor_) {
     return;
   }
@@ -4682,6 +4697,17 @@ void App::position_cursor(float x, float y, bool extend_selection) {
 void App::update_text_input_area() {
   if (!editor_ || !editor_visible_) {
     return;
+  }
+  // The retained editor and ImGui's fields share one SDL text-input session (liquify#39). The
+  // ImGui SDL backend stops it when one of its fields loses focus, so the focused editor takes it
+  // back here; while a dialog or an ImGui field owns the keyboard, the editor leaves it, and the
+  // IME rectangle, to them.
+  if (!editor_focused_ || ImGui::GetTopMostPopupModal() != nullptr ||
+      ImGui::GetIO().WantTextInput) {
+    return;
+  }
+  if (!SDL_TextInputActive(window_)) {
+    SDL_StartTextInput(window_);
   }
   const auto cursor = editor_->cursor();
   const auto row = cursor.line >= scroll_line_ ? cursor.line - scroll_line_ : 0;
@@ -5017,6 +5043,24 @@ void App::draw_repository_entries(std::string_view directory) {
   }
 }
 
+// Up and Down move a search dialog's selected result while its query field keeps the keyboard
+// (liquify#33). Returns true when Enter accepts the selected result.
+static auto move_result_selection(std::size_t &selection, std::size_t count)
+    -> bool {
+  if (count == 0) {
+    selection = 0;
+    return false;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+    selection = (selection + 1) % count;
+  } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+    selection = (selection + count - 1) % count;
+  }
+  selection = std::min(selection, count - 1);
+  return ImGui::IsKeyPressed(ImGuiKey_Enter) ||
+         ImGui::IsKeyPressed(ImGuiKey_KeypadEnter);
+}
+
 void App::draw_navigation_popups() {
   const auto *screenshot =
       options_.screenshot_state
@@ -5027,16 +5071,28 @@ void App::draw_navigation_popups() {
   if (quick_open_open_) {
     ImGui::OpenPopup("Quick Open");
     quick_open_open_ = false;
+    quick_open_selection_ = 0;
   }
+  // Quick Open and Symbol Search are keyboard-first (liquify#33): the query field takes focus
+  // when the dialog appears, Up and Down move the selected result while the field keeps the
+  // keyboard, Enter opens it and Escape closes. Result rows and Close are not navigation
+  // targets, so the arrows never move ImGui's focus out of the field.
   if (begin_dialog("Quick Open", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
+    if (ImGui::IsWindowAppearing() && !navigation_screenshot) {
+      ImGui::SetKeyboardFocusHere();
+    }
     ImGui::SetNextItemWidth(620.0F);
     const auto quick_open_flags = navigation_screenshot
                                       ? ImGuiInputTextFlags_ReadOnly
                                       : ImGuiInputTextFlags_None;
-    ImGui::InputTextWithHint("##quick-open", "Type a path", &quick_open_query_,
-                             quick_open_flags);
+    if (ImGui::InputTextWithHint("##quick-open", "Type a path",
+                                 &quick_open_query_, quick_open_flags)) {
+      quick_open_selection_ = 0;
+    }
     frame_layout_.controls["quick-open/query"] = item_rectangle();
+    auto close = false;
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
     if (navigation_screenshot) {
       file_item("src/app.cpp", NavigationFileKind::cpp_source, true);
       file_item("src/app_state.cpp", NavigationFileKind::cpp_source);
@@ -5047,15 +5103,22 @@ void App::draw_navigation_popups() {
     } else if (repository_->navigation_loading()) {
       ImGui::TextDisabled("Indexing repository paths...");
     } else {
-      for (const auto &match :
-           rank_paths(repository_->navigation_paths(), quick_open_query_)) {
+      const auto matches =
+          rank_paths(repository_->navigation_paths(), quick_open_query_);
+      const auto accept =
+          move_result_selection(quick_open_selection_, matches.size());
+      for (std::size_t row = 0; row < matches.size(); ++row) {
+        const auto &match = matches[row];
         const auto &path = repository_->navigation_paths()[match.index];
         const auto label = icon_label(path.path.generic_string(), 0.0F) +
                            "##quick-" + std::to_string(match.index);
-        if (ImGui::Selectable(label.c_str())) {
+        const auto selected = row == quick_open_selection_;
+        if ((ImGui::Selectable(label.c_str(), selected) ||
+             (accept && selected)) &&
+            !close) {
           open_editor(path.path.generic_string(), path.blob_id);
           quick_open_query_.clear();
-          ImGui::CloseCurrentPopup();
+          close = true;
         }
         frame_layout_.controls["quick-open/" + path.path.generic_string()] =
             item_rectangle();
@@ -5064,42 +5127,66 @@ void App::draw_navigation_popups() {
       }
     }
     if (kit_button("Close", ButtonKind::secondary)) {
-      ImGui::CloseCurrentPopup();
+      close = true;
     }
     frame_layout_.controls["quick-open/close"] = item_rectangle();
+    ImGui::PopItemFlag();
+    if (close || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+      ImGui::CloseCurrentPopup();
+    }
     ImGui::EndPopup();
   }
 
   if (symbol_search_open_) {
     ImGui::OpenPopup("Symbol Search");
     symbol_search_open_ = false;
+    symbol_search_selection_ = 0;
   }
   if (begin_dialog("Symbol Search", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
+    if (ImGui::IsWindowAppearing()) {
+      ImGui::SetKeyboardFocusHere();
+    }
     ImGui::SetNextItemWidth(620.0F);
-    ImGui::InputTextWithHint("##symbol-search", "Type a symbol",
-                             &symbol_search_query_);
+    if (ImGui::InputTextWithHint("##symbol-search", "Type a symbol",
+                                 &symbol_search_query_)) {
+      symbol_search_selection_ = 0;
+    }
+    frame_layout_.controls["symbol-search/query"] = item_rectangle();
+    auto close = false;
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
     if (!repository_) {
       ImGui::TextDisabled(
           "Open a repository to search libliquid symbol records.");
     } else if (repository_->navigation_loading()) {
       ImGui::TextDisabled("Indexing symbol records...");
     } else {
-      for (const auto &match : rank_symbols(repository_->navigation_symbols(),
-                                            symbol_search_query_)) {
-        const auto &symbol = repository_->navigation_symbols()[match.index];
+      const auto matches = rank_symbols(repository_->navigation_symbols(),
+                                        symbol_search_query_);
+      const auto accept =
+          move_result_selection(symbol_search_selection_, matches.size());
+      for (std::size_t row = 0; row < matches.size(); ++row) {
+        const auto &symbol =
+            repository_->navigation_symbols()[matches[row].index];
         const auto label = symbol.name + " — " + symbol.path.generic_string() +
                            ":" + std::to_string(symbol.range.start_line + 1) +
-                           "##symbol-" + std::to_string(match.index);
-        if (ImGui::Selectable(label.c_str())) {
+                           "##symbol-" + std::to_string(matches[row].index);
+        const auto selected = row == symbol_search_selection_;
+        if ((ImGui::Selectable(label.c_str(), selected) ||
+             (accept && selected)) &&
+            !close) {
           open_navigation_location({symbol.path, symbol.range.start_line,
                                     symbol.range.start_column});
           symbol_search_query_.clear();
-          ImGui::CloseCurrentPopup();
+          close = true;
         }
       }
     }
     if (kit_button("Close", ButtonKind::secondary)) {
+      close = true;
+    }
+    ImGui::PopItemFlag();
+    if (close || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
