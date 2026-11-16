@@ -1716,7 +1716,7 @@ App::App(AppOptions options) : options_(std::move(options)) {
       settings_.editor.wrap = true;
       settings_.keymap["build.run"] = "F7";
       settings_.lake_accounts.push_back(
-          {"orama", "https://api.oramasearch.com/liquid"});
+          {"team", "https://lake.example.com"});
     }
   }
 }
