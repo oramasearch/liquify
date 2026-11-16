@@ -17,8 +17,8 @@ Switching preserves text, selections and local undo; native Save / Discard / Can
 close, repository replacement and quit (see `docs/ui/buffers.md`). Save calls libliquid and produces
 a drip; Cut Change (Primary+Shift+K) names the saved drips as one change through libliquid's cut
 API (`docs/editor/cut.md`). Quick Open, Symbol Search, definitions, references, call hierarchy,
-breadcrumbs, recent locations, and back/forward share one navigation action registry with default
-bindings; repository rows expose open, rename, move, new-file, and reveal actions.
+breadcrumbs, recent locations, and back/forward are commands in the one command registry, with
+rebindable bindings; repository rows expose open, rename, move, new-file, and reveal actions.
 The standard input mode is non-modal and a modal command/insert mode is available. Multi-cursor
 and column edits, repository indentation, liquid syntax/folds, collaboration gutters,
 search/replace, local edit history and operation-log history are part of the editor view. Unreadable
@@ -54,8 +54,10 @@ focus, macOS accessibility labels, high contrast and the OS reduced-motion prefe
 shell. The status bar reports actionable build, sync, hydration and failure state, and names the panel
 that holds a failure; one error component (sentence, next step, Details, no absolute paths) shows
 each failure once (`docs/ui/errors.md`); collaboration,
-identity, change and validation details open only through their explicit affordances. macOS exposes
-the command groups and Cmd bindings through the native menu bar. The same registry provides a fuzzy palette with recent commands and resolved
+identity, change and validation details open only through their explicit affordances. Window
+keys, the palette and the macOS native menu bar all dispatch through the command registry's
+resolved bindings (one handler table in `src/app.cpp`, scope per command, conflicts disabled and
+reported); the menus are built from the registry and rebuilt on every rebind. The same registry provides a fuzzy palette with recent commands and resolved
 bindings, typed `.liquid` keymap overrides with conflict reporting, plugin commands, and headless
 `--command` invocation. The searchable settings surface reads user and repository `.liquid` files,
 applies appearance, editor, keymap, AI and lake changes live, keeps telemetry off by default, and

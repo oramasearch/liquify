@@ -171,6 +171,37 @@ TEST(Settings, SaveRoundTripsWithoutCredentialMaterial) {
     EXPECT_EQ(*reparsed, settings);
 }
 
+// liquify#34: the command keymap's top-level `keymap { bind ... }` records share the settings
+// file. The settings parser leaves them to the command registry, and a save keeps them.
+TEST(Settings, KeepsTheCommandKeymapThatSharesTheFile) {
+    auto directory = TemporaryDirectory("liquify-settings-keymap");
+    const auto path = directory.path() / "settings.liquid";
+    {
+        auto output = std::ofstream(path, std::ios::binary);
+        output << "liquify settings {\n  theme { mode: light }\n}\n"
+                  "# kept\n"
+                  "keymap {\n    bind \"edit.command-palette\" {\n"
+                  "        # {not a brace}\n"
+                  "        keys: [\"Primary+K\", \"F6\"]\n    }\n}\n";
+    }
+    const auto loaded = load_settings(std::nullopt, path);
+    EXPECT_TRUE(loaded.diagnostics.empty());
+    EXPECT_EQ(loaded.settings.theme, ThemePreference::light);
+
+    auto settings = loaded.settings;
+    settings.theme = ThemePreference::dark;
+    settings.keymap["run.build"] = "F6";
+    const auto saved = save_settings(path, settings);
+    ASSERT_TRUE(saved) << saved.error().message;
+    const auto text = read_text(path);
+    EXPECT_NE(text.find("bind \"edit.command-palette\""), std::string::npos) << text;
+    EXPECT_NE(text.find("\"Primary+K\", \"F6\""), std::string::npos) << text;
+    const auto reparsed = parse_settings(text, path);
+    ASSERT_TRUE(reparsed) << reparsed.error().message;
+    EXPECT_EQ(reparsed->theme, ThemePreference::dark);
+    EXPECT_EQ(reparsed->keymap.at("run.build"), "F6");
+}
+
 // liquify#76: a repository-scope save writes only what the repository overrides, never the user's
 // Lake accounts, model or AI switch.
 TEST(Settings, RepositoryScopeSaveWritesOnlyOverridesAndNoAccounts) {

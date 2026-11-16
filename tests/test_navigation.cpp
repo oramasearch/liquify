@@ -7,6 +7,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
+#include "liquify/command.hpp"
 #include "liquify/navigation.hpp"
 
 namespace liquify {
@@ -200,16 +203,26 @@ TEST(Navigation, BreadcrumbsIncludeFoldersFileAndSymbol) {
     EXPECT_EQ(values[3].label, "draw_sidebar");
 }
 
-TEST(Navigation, EveryNavigationActionHasAUniqueDefaultBinding) {
+// liquify#34: navigation actions are registry commands, found, bound and searched like any other.
+TEST(Navigation, EveryNavigationActionIsARegistryCommandWithAUniqueBinding) {
+    auto registry = CommandRegistry(CommandPlatform::macos);
+    ASSERT_TRUE(add_builtin_commands(registry).empty());
     const auto commands = navigation_commands();
     EXPECT_EQ(commands.size(), 14U);
-    for (std::size_t index = 0; index < commands.size(); ++index) {
-        EXPECT_FALSE(commands[index].name.empty());
-        EXPECT_FALSE(commands[index].default_binding.empty());
-        for (std::size_t other = index + 1; other < commands.size(); ++other) {
-            EXPECT_NE(commands[index].default_binding, commands[other].default_binding);
-        }
+    auto chords = std::vector<KeyChord>{};
+    for (const auto& command : commands) {
+        const auto* definition = registry.find(command.name);
+        ASSERT_NE(definition, nullptr) << command.name;
+        const auto bindings = registry.bindings(command.name);
+        ASSERT_FALSE(bindings.empty()) << command.name;
+        EXPECT_EQ(registry.command_for(bindings.front()), definition) << command.name;
+        EXPECT_EQ(std::ranges::find(chords, bindings.front()), chords.end()) << command.name;
+        chords.push_back(bindings.front());
+        const auto found = registry.search(definition->title);
+        ASSERT_FALSE(found.empty()) << command.name;
+        EXPECT_EQ(found.front().name, definition->name);
     }
+    EXPECT_EQ(registry.find("repository.open")->scope, CommandScope::repository);
 }
 
 } // namespace

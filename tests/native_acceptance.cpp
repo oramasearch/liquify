@@ -10,6 +10,7 @@
 #include "liquid/identity.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
+#include "liquify/command.hpp"
 #include "liquify/editor_graph.hpp"
 #include "liquify/lake_remote.hpp"
 #include "ui_property_assert.hpp"
@@ -32,6 +33,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -284,6 +286,122 @@ void NativeAcceptance::palette(App &app) {
   require(!popup("Command Palette") &&
               app.shell_state_.bottom_panel_visible != before,
           "#34: Enter runs the selected palette result");
+}
+
+// liquify#34: one source of truth for bindings. A rebind made through the settings surface's
+// Keymap field reaches the window's keys, the palette and the native menus at once; the old
+// chord cannot bypass it, and a chord two commands claim runs neither and says why.
+void NativeAcceptance::rebind(App &app) {
+  open_file(app);
+  const auto editor = app.frame_layout().editor;
+  click(app, editor);
+  require(app.editor_focused_, "a click focuses the editor");
+  const auto collapse = [&] {
+    app.editor_->set_cursor({});
+    require(!app.editor_->selection().has_value(), "the selection is collapsed");
+  };
+  const auto whole_buffer = [&app] {
+    const auto selection = app.editor_->selection();
+    const auto last = app.editor_->line_count() - 1;
+    return selection.has_value() && selection->begin == TextPosition{} &&
+           selection->end == TextPosition{last, app.editor_->line(last).size()};
+  };
+
+  collapse();
+  key(app, "a", true);
+  require(whole_buffer(), "#34: default Primary+A selects the buffer through the registry");
+
+  collapse();
+  require(app.set_keymap_binding("edit.select-all", "F6"),
+          "#34: the Keymap field accepts F6 for Select All");
+  require(app.commands_->binding_label("edit.select-all") == "F6",
+          "#34: the registry resolves the rebind");
+  key(app, "F6");
+  require(whole_buffer(), "#34: the rebound key selects the buffer");
+
+  collapse();
+  key(app, "a", true);
+  std::printf("rebind: old chord selection=%d\n", app.editor_->selection().has_value());
+  require(!app.editor_->selection().has_value(),
+          "#34: the old hard-coded chord no longer bypasses the rebind");
+
+  collapse();
+  key(app, "p", true, true);
+  require(popup("Command Palette"), "palette opened");
+  text(app, "Select All");
+  const auto matches = app.commands_->search(app.command_palette_query_);
+  require(!matches.empty() && matches.front().name == "edit.select-all" &&
+              app.commands_->binding_label(matches.front().name) == "F6",
+          "#34: the palette's first row is Select All, labelled F6");
+  key(app, "Enter");
+  require(!popup("Command Palette") && whole_buffer(),
+          "#34: Enter on the palette row selects the buffer");
+  // Back to the editor, away from the first click so it is not read as a double click.
+  click(app, {editor.x, editor.y, editor.width / 2.0F, editor.height / 2.0F});
+  require(app.editor_focused_, "a click focuses the editor again");
+
+#if defined(__APPLE__)
+  const auto menu = menu_key(app, "edit.select-all");
+  std::printf("rebind: native menu key equivalent=%s\n", menu.c_str());
+  require(menu == "F6", "#34: the native Edit menu shows the rebound key");
+  require(menu_key(app, "edit.command-palette") == "Cmd+Shift+P",
+          "#34: the native menu shows resolved default bindings");
+  collapse();
+  require(choose_menu(app, "edit.select-all") && whole_buffer(),
+          "#34: choosing the native menu item runs the registry command");
+#else
+  std::printf("rebind: native menus are macOS only; menu checks skipped\n");
+#endif
+
+  collapse();
+  require(app.set_keymap_binding("edit.select-all", "Primary+L"),
+          "#34: the Keymap field accepts Primary+L");
+  require(!app.commands_->conflicts().empty(),
+          "#34: Primary+L conflicts with Select Line and is reported");
+  key(app, "l", true);
+  std::printf("rebind: conflict status='%s'\n", app.editor_status_.c_str());
+  require(!app.editor_->selection().has_value() &&
+              app.editor_status_.find("is bound to") != std::string::npos,
+          "#34: a conflicting chord runs neither command and says why");
+
+  require(app.set_keymap_binding("edit.select-all", "Primary+A"),
+          "#34: the Keymap field restores Primary+A");
+  require(app.commands_->conflicts().empty(), "#34: the conflict is gone");
+  collapse();
+  key(app, "a", true);
+  require(whole_buffer(), "#34: the restored binding works again");
+}
+
+// liquify#34: every built-in command, run through the one dispatcher with a file open, either
+// acts or puts the reason it could not in the status bar; none is a silent no-op.
+void NativeAcceptance::commands(App &app) {
+  open_file(app);
+  click(app, app.frame_layout().editor);
+  // Not run here: Quit and Close File (a dirty buffer asks in a native dialog) and Reveal (it
+  // opens the system file manager). Their handlers are still required below.
+  const auto skipped = std::array<std::string_view, 3>{"app.quit", "file.close",
+                                                       "repository.reveal"};
+  auto names = std::vector<std::string>{};
+  for (const auto &command : builtin_commands()) {
+    require(App::handles_command(command.name), command.name + " has an implementation");
+    if (std::ranges::find(skipped, command.name) == skipped.end()) {
+      names.push_back(command.name);
+    }
+  }
+  for (const auto &name : names) {
+    const auto *definition = app.commands_->find(name);
+    app.editor_status_.clear();
+    const auto acted = app.invoke_command(name);
+    std::printf("command: %s acted=%d status='%s'\n", name.c_str(), acted,
+                app.editor_status_.c_str());
+    require(acted || app.editor_status_.starts_with(definition->title + ":"),
+            name + " acted or said why not");
+    pulse(app);
+  }
+  const auto before = app.shell_state_.sidebar_visible;
+  require(app.invoke_command("view.toggle-sidebar") &&
+              app.shell_state_.sidebar_visible != before,
+          "#34: view.toggle-sidebar changes the shell state");
 }
 
 void NativeAcceptance::tabs(App &app) {
@@ -1152,6 +1270,10 @@ int NativeAcceptance::run(std::string_view scenario,
     modal_input(app);
   } else if (scenario == "palette") {
     palette(app);
+  } else if (scenario == "rebind") {
+    rebind(app);
+  } else if (scenario == "commands") {
+    commands(app);
   } else if (scenario == "tabs") {
     tabs(app);
   } else if (scenario == "build") {

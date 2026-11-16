@@ -36,7 +36,8 @@ What is built today, with its limit where there is one:
   liquid's sandbox uses. [Docs](docs/editor/build.md)
 - **Shell**: one panel system (dock, float, tabs), a command palette with one row per action and
   rebindable keys, searchable `.liquid` settings, light and dark themes, accessibility labels,
-  high contrast and reduced motion. Native menus do not yet follow rebound keys.
+  high contrast and reduced motion. Keys, the palette and the native macOS menus all run through
+  one command registry, so a rebind in settings reaches all three at once.
   [Docs](docs/ui/README.md)
 - **Plugins**: native plugins, each run in its own sandboxed host process; a plugin a repository
   names loads only once you trust its digest. Reads are not sandboxed, and Windows has no network

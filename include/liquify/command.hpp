@@ -33,6 +33,15 @@ struct KeyChord {
   auto operator==(const KeyChord &) const -> bool = default;
 };
 
+// Where a command's key binding is live. A chord whose command is out of scope is not consumed:
+// the key reaches the focused surface instead (Enter types a newline unless the repository tree
+// has focus). Named invocation, the palette and the native menus run a command in any scope.
+enum class CommandScope : std::uint8_t {
+  global,
+  editor,
+  repository,
+};
+
 struct CommandDefinition {
   std::string name;
   std::string title;
@@ -41,6 +50,7 @@ struct CommandDefinition {
   std::vector<std::string> default_bindings;
   bool headless{};
   bool plugin{};
+  CommandScope scope{CommandScope::global};
 };
 
 // A former id that resolves to the command that performs the same action. Aliases are found by
@@ -101,8 +111,14 @@ public:
   [[nodiscard]] auto commands() const -> std::span<const CommandDefinition>;
   [[nodiscard]] auto apply_overrides(std::span<const KeymapOverride> overrides)
       -> std::vector<CommandDiagnostic>;
+  // Restores every command's default bindings, so overrides can be applied again from scratch
+  // after a keymap changes (a live rebind in settings).
+  void reset_bindings();
   [[nodiscard]] auto command_for(const KeyChord &chord) const
       -> const CommandDefinition *;
+  // The conflict that disables `chord`, when two or more commands claim it.
+  [[nodiscard]] auto conflict_for(const KeyChord &chord) const
+      -> const CommandConflict *;
   [[nodiscard]] auto bindings(std::string_view name) const
       -> std::span<const KeyChord>;
   [[nodiscard]] auto binding_label(std::string_view name) const -> std::string;
@@ -119,6 +135,7 @@ private:
   struct BindingSet {
     std::string name;
     std::vector<KeyChord> values;
+    std::vector<KeyChord> defaults;
   };
 
   CommandPlatform platform_;
@@ -139,6 +156,17 @@ private:
     -> std::expected<KeyChord, std::string>;
 [[nodiscard]] auto display_key_chord(const KeyChord &chord,
                                      CommandPlatform platform) -> std::string;
+// The chord a window key event names: `key_name` is the platform's name for the unmodified key
+// ("A", "F7", "Return", "Left", "\\", ","). `primary` is Command on macOS and Control elsewhere;
+// `control` is the macOS Control key and is ignored on other platforms. Returns nothing for a
+// key no binding can name.
+[[nodiscard]] auto key_chord_from_event(std::string_view key_name, bool primary,
+                                        bool control, bool alt, bool shift,
+                                        CommandPlatform platform)
+    -> std::optional<KeyChord>;
+// Splits a settings-surface binding ("Cmd+K, F6") into the chords it lists.
+[[nodiscard]] auto split_binding_list(std::string_view text)
+    -> std::vector<std::string>;
 [[nodiscard]] auto parse_keymap(std::string_view text,
                                 const std::filesystem::path &origin)
     -> KeymapParseResult;

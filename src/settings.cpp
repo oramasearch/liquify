@@ -564,6 +564,11 @@ auto parse_settings(std::string_view text,
         return std::unexpected(parsed.error());
     }
     for (const auto& record : parsed->records) {
+        // Top-level `keymap { bind ... }` records share the file and belong to the command
+        // registry's keymap parser (command.hpp, liquify#34).
+        if (record.kind == "keymap") {
+            continue;
+        }
         if (record.kind != "liquify" || record.name != "settings") {
             return std::unexpected(settings_error(record.location,
                                                   "liquify settings record",
@@ -613,11 +618,65 @@ auto load_settings(const std::optional<std::filesystem::path>& repository,
     return output;
 }
 
+// The file's top-level `keymap { bind ... }` records, as written, so that saving the settings
+// surface's groups never drops the command keymap that shares the file (liquify#34).
+static auto keymap_records_text(const std::filesystem::path& path) -> std::string {
+    if (!std::filesystem::exists(path)) {
+        return {};
+    }
+    auto text = read_file(path);
+    if (!text) {
+        return {};
+    }
+    auto parsed = liquid::parse_configuration(*text, path);
+    if (!parsed) {
+        return {};
+    }
+    auto output = std::string{};
+    for (const auto& record : parsed->records) {
+        if (record.kind != "keymap") {
+            continue;
+        }
+        auto offset = std::size_t{};
+        for (auto line = std::uint64_t{1}; line < record.location.line && offset < text->size();
+             ++line) {
+            offset = text->find('\n', offset);
+            offset = offset == std::string::npos ? text->size() : offset + 1;
+        }
+        offset = std::min<std::size_t>(offset + record.location.column - 1, text->size());
+        auto depth = 0;
+        auto quoted = false;
+        auto end = offset;
+        for (; end < text->size(); ++end) {
+            const auto character = (*text)[end];
+            if (quoted) {
+                if (character == '\\') {
+                    ++end;
+                } else if (character == '"') {
+                    quoted = false;
+                }
+            } else if (character == '"') {
+                quoted = true;
+            } else if (character == '#') {
+                end = std::min(text->find('\n', end), text->size()) - 1;
+            } else if (character == '{') {
+                ++depth;
+            } else if (character == '}' && --depth == 0) {
+                ++end;
+                break;
+            }
+        }
+        output += "\n" + text->substr(offset, end - offset) + "\n";
+    }
+    return output;
+}
+
 auto save_settings(const std::filesystem::path& path,
                    const Settings& settings,
                    SettingsScope scope,
                    const Settings& user) -> liquid::result<void> {
-    const auto serialized = serialize_settings(settings, scope, user);
+    const auto serialized =
+        serialize_settings(settings, scope, user) + keymap_records_text(path);
     auto validated = parse_settings(serialized, path, user, scope);
     if (!validated) {
         return std::unexpected(validated.error());

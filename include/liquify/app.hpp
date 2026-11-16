@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -83,8 +84,19 @@ public:
   int run();
   [[nodiscard]] auto diagnostics_viewport() const -> InputRectangle;
   [[nodiscard]] auto frame_layout() const -> const UiFrameLayout &;
+  // Whether the window has an implementation for a registry command name (liquify#34).
+  [[nodiscard]] static auto handles_command(std::string_view name) -> bool;
 
 private:
+  // Nothing when a command acted, or the reason it could not.
+  using CommandResult = std::optional<std::string>;
+  struct CommandHandler {
+    std::string_view name;
+    CommandResult (*run)(App &);
+  };
+  [[nodiscard]] static auto command_handlers()
+      -> std::span<const CommandHandler>;
+
   friend class NativeBufferRegression;
   friend class NativeWindowTest;
   friend class NativeAcceptance;
@@ -225,11 +237,16 @@ private:
   void draw_command_palette();
   void draw_settings();
   void configure_commands();
+  void apply_command_bindings();
+  void refresh_native_menu();
+  bool set_keymap_binding(std::string_view command, std::string text);
   bool invoke_command(std::string_view name);
+  [[nodiscard]] auto command_scope_active(CommandScope scope) const -> bool;
+  bool dispatch_key_command(std::uint32_t key, std::uint16_t modifiers);
+  void open_command_panel(std::string_view command);
   void draw_plugin_panels();
   void draw_structural_panel();
   void invoke_plugin_command(std::string_view name);
-  void execute_panel_command(std::string_view command);
   void poll_plugins();
   void sync_panel_system();
   void reset_panel_layout();
@@ -386,6 +403,9 @@ private:
   std::vector<UntrustedPlugin> plugin_untrusted_;
   std::vector<PluginPanelSnapshot> plugin_panels_;
   std::vector<std::string> command_diagnostics_;
+  std::vector<std::string> command_registration_diagnostics_;
+  std::vector<KeymapOverride> keymap_file_overrides_;
+  // The registry command each native menu item runs, indexed by the item's tag.
   std::vector<std::string> native_menu_commands_;
   std::vector<NavigationSymbol> navigation_results_;
   CallHierarchy navigation_hierarchy_;

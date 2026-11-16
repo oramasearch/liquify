@@ -63,15 +63,23 @@ liquify settings {
 ```
 
 Theme modes are `system`, `light`, and `dark`. The embedded font families are IBM Plex Sans and IBM
-Plex Mono; the UI exposes their supported logical sizes. Keymap values are command-palette command
-names mapped to readable chords. `Primary` means Cmd on macOS and Ctrl elsewhere; `Cmd` and `Ctrl`
-are accepted as aliases.
+Plex Mono; the UI exposes their supported logical sizes. Keymap values map registry command ids
+([`commands.md`](commands.md)) to readable chords; several chords are separated by `, `
+(`"F6, Cmd+K"`). `Primary` means Cmd on macOS and Ctrl elsewhere; `Cmd` and `Ctrl` are accepted as
+aliases. The older ids `build.run`, `tests.run`, `push.run` and `palette.open` still resolve to
+`run.build`, `run.tests`, `run.push` and `edit.command-palette`. The same file may also hold
+top-level `keymap { bind ... }` records ([`commands.md`](commands.md)); the settings parser leaves
+them to the command registry, and saving from the settings surface keeps them.
 
 ## Live behavior and validation
 
 Theme and font changes rebuild the current presentation, wrap changes the open buffer, and
-whitespace markers appear or disappear without reopening the repository. Keymap overrides are read
-by the same command dispatch used by the palette leaf commands. AI changes rebuild the optional
+whitespace markers appear or disappear without reopening the repository. The Keymap group's
+fields show each command's resolved binding and rebind it as you type: the registry's bindings are
+resolved again (defaults, the `keymap` records, then these fields), so window keys, the palette's
+key labels and the native macOS menus change at once, and the old chord stops working. A chord two
+commands claim runs neither and is reported in the palette and the status bar until one is
+rebound. A field that does not parse yet keeps the previous binding and is not saved. AI changes rebuild the optional
 assistant boundary; when AI is off, no provider is constructed. Format on save applies liquid's
 formatter to `.liquid` buffers and leaves a buffer unsaved with the parser message visible when it
 is invalid.

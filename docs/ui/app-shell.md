@@ -124,13 +124,15 @@ relocation record, and live-window acceptance are in
 ## macOS conventions
 
 On macOS, CMake compiles `src/app.cpp` as Objective-C++ so it remains the only SDL/ImGui
-translation unit while installing an AppKit menu bar. File, Edit, Selection, View, Go, Run, and
-Review are native top-level groups. The command registry supplies the fuzzy palette, resolved
-platform bindings, recent-command ordering, typed `.liquid` overrides, and plugin commands;
-[`commands.md`](commands.md) is its generated reference. Cmd-S saves, Cmd-Shift-P opens the
-palette, Cmd-B toggles the sidebar, Cmd-J toggles the bottom panel, Cmd-backslash toggles the
-editor split, Cmd-Shift-T cycles the theme, Cmd-P opens paths, Cmd-T opens symbols, and Cmd-R
-opens recent locations.
+translation unit while installing an AppKit menu bar. The menu bar is built from the command
+registry: one menu per registry group (File, Edit, Selection, View, Go, Repository, Refactor, Run,
+Change, Review, Assistant, Preferences, Help, Plugins), one item per command, each showing its
+resolved key equivalent, rebuilt whenever a binding changes. Choosing an item runs the registry
+command. The menus never take the key press themselves: keys reach the window, where the
+registry's dispatcher applies each command's scope and its conflicts, so a menu shortcut cannot
+run outside its scope or around a rebind. The registry also supplies the fuzzy palette,
+recent-command ordering, typed `.liquid` overrides, and plugin commands;
+[`commands.md`](commands.md) is its generated reference with every default key.
 
 The native window title is `<repository> — <current change> — liquify`; an open review replaces
 `Working change` with its change identifier.
