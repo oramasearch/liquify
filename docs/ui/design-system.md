@@ -87,14 +87,41 @@ palette, Settings, the editor and the front door in the real window.
 
 ## Controls
 
-liquify's controls mirror lake's kit (liquify#101), in `src/app.cpp`:
+liquify's controls mirror lake's kit (liquify#101), in `src/app.cpp`.
+
+**Every button is `kit_button`.** No screen calls `ImGui::Button` or `ImGui::SmallButton` directly:
+`SmallButton` drops the vertical padding (its label touched its border), and plain buttons took
+ImGui's defaults and fixed widths. The two exceptions draw their own frame on purpose: the
+activity bar's square icon buttons (lake's navigation look: no frame, `layer_hover` on hover,
+`selected` with a 2-pixel `action` bar on the left for the current panel) and the click-to-copy
+identifiers in details, which are compact quiet buttons outside `App`.
+
+Sizes, from lake's control tokens:
+
+| Size | Height | Horizontal padding | Where |
+|---|---|---|---|
+| `ButtonSize::regular` | `control_sm` (32) | `space3` (12) | Dialogs, the front door, the editor toolbar, panel actions |
+| `ButtonSize::compact` | `space6` (24) | `space2` (8) | Inside table rows and inline lines: Recent repositories, review and assistant actions, details, breadcrumbs, the status bar |
+
+The vertical padding is worked out from the font (`(height - font size) / 2`), so a label stays
+centred at every UI size, and a button is as wide as its label plus its padding unless a width is
+given. Kinds:
 
 | Control | Helper | Look |
 |---|---|---|
-| Primary button | `kit_button(label, ButtonKind::primary)` | Filled with `action`, white label. One per surface: Open folder on the front door, Save in the editor toolbar, the confirm button of each dialog (Clone, Create repository, Cut change, Set lake, Request review, Record and build), Find in Search |
-| Secondary button | `kit_button(label, ButtonKind::secondary)`, and every plain `ImGui::Button` | `surface` with a `border_strong` hairline |
-| Quiet button | `ButtonKind::quiet` | No fill or border until hovered: the toolbar's view toggles |
-| Destructive button | `ButtonKind::destructive` | `danger` label and hairline |
+| Primary button | `kit_button(label, ButtonKind::primary)` | Filled with `action`, white label. One per surface: Open folder on the front door, Save in the editor toolbar, the confirm button of each dialog (Clone, Create repository, Cut change, Set lake, Request review, Record and build, Post comment, Apply, Create, Store token, Add, Preview), Find in Search, Ask and Accept edit in the assistant |
+| Secondary button | `kit_button(label, ButtonKind::secondary)` | lake's default button: `action` label on a `border_interactive` hairline, no fill; on hover it fills with `action_hover` and the label turns white |
+| Quiet button | `ButtonKind::quiet` | No fill or border, `text_secondary` label; `layer_hover` on hover. The toolbar's view toggles and editing modes, breadcrumbs, the status bar, settings Reset, `...` menus |
+| Toggle | `ButtonKind::toggle` | A mode that is on: `action_soft` fill, `border_interactive` hairline, `action` label. AI on in the toolbar (AI off is quiet) |
+| Destructive button | `ButtonKind::destructive` | Filled with `danger`, white label |
+
+Bottom panel tabs follow lake's tabs: the label centred on the 32-pixel row beside its icon,
+`text_secondary` until selected, and the selected tab marked by a 2-pixel `action` underline
+instead of a filled box. Settings section headers sit on the neutral `layer` role, keeping the
+selected blue for selection.
+
+| Control | Helper | Look |
+|---|---|---|
 | Checkbox | `checkbox(label, &value)` | A compact box with a `border_strong` outline; checked is filled with `action` and a white mark. Every checkbox has a label |
 | Field | `text_field(label, &value, hint)` | Label above, full width of its panel, `surface` with a hairline |
 | Slider | `slider_int(label, &value, min, max)` | Label above, full width, one handle shape whatever the range |
