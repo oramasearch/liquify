@@ -1,132 +1,97 @@
+<div align="center">
+
 # liquify
 
-> **Status: experimental.** liquify is under active development and not ready for daily work.
-> Expect missing features, rough edges, changes to its settings and keymaps without notice, and
-> bugs that can lose unsaved work. The first release, v0.1.0, is an early preview. Use it to try
-> liquid's editing model, not on code you cannot afford to redo.
+### The IDE for liquid
 
-**The IDE, built on liquid's incremental graph. First release: v0.1.0.**
+**A native editor where every save is a signed drip, and the code intelligence<br>
+comes from the same graph that builds your repository.**
 
-liquify is a native, cross-platform editor for repositories kept in [liquid](https://github.com/oramasearch/liquid).
-Everything it knows about files, changes, builds, analysis and search comes from libliquid, so a
-save is a signed drip, a build runs through liquid's daemon, and code intelligence comes from the
-same graph liquid uses. It is one binary: SDL3 and Dear ImGui for the shell, and a retained GPU text
-layer for the buffer.
+[**Quickstart**](#quickstart) · [What it does](#what-it-does) · [How it fits](#how-it-fits) · [Known limits](#known-limits) · [Docs](docs/README.md) · [Contributing](#contributing)
 
-Part of [Orama Lake](https://github.com/oramasearch/lake-platform), the sovereign AI stack.
-MIT-licensed.
+`v0.1.0` · experimental · MIT
+
+</div>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/ui/screenshots/editor-view-dark.png">
+  <img src="docs/ui/screenshots/editor-view-light.png" alt="liquify: the search sidebar, a C++ file with a diagnostic, and the Diagnostics panel">
+</picture>
+
+> [!WARNING]
+> **Experimental.** v0.1.0 is an early preview, not a tool for daily work. Expect rough edges,
+> settings and keymaps that change without notice, and bugs that can lose unsaved work.
 
 ## What it does
 
-What is built today. What is partial is listed once, under [Known limits](#known-limits).
+liquify edits repositories kept in [liquid](https://github.com/oramasearch/liquid). Everything it
+knows about files, changes, builds and search comes from libliquid, in one native binary.
 
-- **Front door**: open a folder, create a repository, clone one from lake, reopen a recent one,
-  your local signing identity, more windows. [Docs](docs/ui/first-run.md)
-- **Editor**: GPU text buffers with multi-cursor and column editing, search and replace, folds,
-  liquid syntax and per-buffer undo; Save writes a drip and Cut Change names the saved drips as a
-  change. [Docs](docs/ui/editor.md), [cut](docs/editor/cut.md)
-- **Navigation and C/C++ analysis**: Quick Open, symbol search, definitions, references,
-  breadcrumbs and history; diagnostics, completion and structural edits (rename, extract
-  function) for C and C++. Quick Open and Symbol Search work from the keyboard.
-  [Docs](docs/ui/navigation.md), [analysis](docs/editor/interactive-analysis.md)
-- **Lake**: push to the lake a repository came from, list, open and request reviews, comment at
-  the cursor and approve. [Docs](docs/editor/review.md)
-- **Build and test**: F7 builds and F8 runs tests through liquid's daemon; with no recorded build,
-  F7 proposes a command and records it. [Docs](docs/editor/build.md)
-- **Shell**: one panel system (dock, float, tabs), a command palette with one row per action and
-  rebindable keys, searchable `.liquid` settings, light and dark themes, accessibility labels,
-  high contrast and reduced motion. Keys, the palette and the native macOS menus all run through
-  one command registry, so a rebind in settings reaches all three at once.
-  [Docs](docs/ui/README.md)
-- **Plugins**: native plugins, each run in its own sandboxed host process; a plugin a repository
-  names loads only once you trust its digest. Plugin calls run off the UI thread, so a slow or
-  hung plugin does not stall the window. [Docs](docs/plugins/README.md)
-- **Optional**: multiplayer presence and attribution, and an AI assistant that is off by default
-  and opens no connection while off. [Docs](docs/multiplayer.md), [assistant](docs/editor/ai.md)
+| | |
+|---|---|
+| **Edit** | GPU-drawn text with multi-cursor and column edits, folds, search and replace, and undo per file. Save writes a signed drip; Cut Change names your saved drips as one change. |
+| **Navigate** | Quick Open, symbol search, definitions, references, breadcrumbs, back and forward, all from the keyboard. |
+| **Understand C and C++** | Diagnostics inline, hover, completion, and structural edits (rename across files, extract function) previewed before they apply. |
+| **Build and test** | F7 builds and F8 runs tests through liquid's daemon, with failures shown on the lines they point at. |
+| **Work with lake** | Push (F9), request a review, and review in place: inline hunks, comments at the cursor, approve. |
+| **Make it yours** | Every key rebindable from one command palette, light and dark themes, searchable settings, native plugins in sandboxed processes. |
+| **Optional** | Multiplayer presence and attribution, and an AI assistant that is off by default and opens no connection while off. |
 
-The full list, area by area, is in [the implementation status](docs/design/status.md).
+The full list, area by area: [implementation status](docs/design/status.md) ·
+[every command and key](docs/ui/commands.md) · [release notes](docs/releases/v0.1.0.md).
 
 ## Quickstart
 
-v0.1.0 ships no signed installer, so liquify is built from source.
-
-### Build from source
-
-On macOS: CMake 3.28 or newer, Ninja, Clang 17 or newer (Homebrew LLVM), Node.js, OpenSSL and zlib
-(`brew install llvm cmake ninja node openssl@3`). liquid is not a submodule: clone it next to
-liquify, where the build looks for it (`../liquid`), or pass its path with
-`-DLIQUIFY_LIQUID_SOURCE_DIR`. SDL3, Dear ImGui and GoogleTest are fetched by CMake.
+liquify is built from source. On macOS:
 
 ```sh
+brew install llvm cmake ninja node openssl@3
+
 git clone --recurse-submodules https://github.com/oramasearch/liquid.git
+git -C liquid checkout 27d56ba3726f19834dce23125e0e15299f889ba7
 git clone --recurse-submodules https://github.com/oramasearch/liquify.git
+
 cd liquify
 cmake -S . -B build -G Ninja
 cmake --build build
 ./build/liquify
 ```
 
-You should see the front door: open a folder that holds a liquid repository, or create one. Run
-the tests with `ctest --test-dir build --output-on-failure`; the native window tests need a
-logged-in desktop. Linux requirements and the rest of the build options are in
-[`docs/build/local.md`](docs/build/local.md) and [`docs/build/ci.md`](docs/build/ci.md).
+liquid is a sibling checkout, found at `../liquid` (or pass `-DLIQUIFY_LIQUID_SOURCE_DIR`). The
+commit above is the one v0.1.0 builds against ([compatibility](docs/build/store-compatibility.md)).
+Linux and the other build options: [`docs/build/local.md`](docs/build/local.md).
 
-liquid and liquify are not yet paired by version tags: build liquid at the commit
-[`docs/build/store-compatibility.md`](docs/build/store-compatibility.md) records for this release.
-`liquify version` names the IDE and library revisions, and that page also has the store
-compatibility rule.
+You land on the front door: open a folder that holds a liquid repository, create one, or clone one
+from a lake.
 
-## How it fits the stack
+## How it fits
 
 liquify talks only to liquid: libliquid in process for repositories, analysis and edits, and
-liquid's daemon for builds and sync. Through liquid it pushes to, pulls from and reviews on a lake.
-It never depends on lake or zetta directly.
-
-| Piece | What it does | Relation to liquify |
-|---|---|---|
-| [liquid](https://github.com/oramasearch/liquid) | Version control, builds, packages, deploys | liquify links libliquid and drives its daemon |
-| [lake](https://github.com/oramasearch/lake) | The AI workspace, and where liquid repositories collect | liquify pushes, pulls and reviews on it through liquid |
+liquid's daemon for builds and sync. Through liquid it pushes to, pulls from and reviews on a
+[lake](https://github.com/oramasearch/lake). It is part of
+[Orama Lake](https://github.com/oramasearch/lake-platform), the sovereign AI stack.
 
 ## Known limits
 
-- No signed installer: build from source.
-- Quick Open can come up empty now and then, when liquid's store index fails to load; it is fixed
-  in liquid and reaches liquify with the next liquid update.
-- One lake per repository: the lake a repository was cloned from, or one you set.
-- Accepted assistant edits are signed as you, not as the assistant acting for you; agent
-  attribution waits on liquid.
+- No signed installer yet: build from source.
+- Accepted assistant edits are signed as you, not as the assistant acting for you
+  ([#74](https://github.com/oramasearch/liquify/issues/74)).
 - Plugin sandboxes do not deny reads, and Windows has no network sandbox.
-- Recording a build on macOS may need a filesystem extension liquid's sandbox uses.
-- A few toolbar labels and tooltips show a key's default binding after you rebind it.
-- The Linux and Windows builds are exercised less often than macOS.
-
-## Documentation
-
-[`docs/README.md`](docs/README.md) indexes one folder per topic. Start with
-[`docs/design/overview.md`](docs/design/overview.md) (what liquify is),
-[`docs/design/status.md`](docs/design/status.md) (what works, by area),
-[`docs/ui/design-system.md`](docs/ui/design-system.md) (the look),
-[`docs/ui/commands.md`](docs/ui/commands.md) (every command and key, generated from the code) and
-[`docs/build/layout.md`](docs/build/layout.md) (the source tree).
-
-## Community
-
-- Bugs and requests: [issues](https://github.com/oramasearch/liquify/issues)
-- Security reports: privately, per [SECURITY.md](SECURITY.md). Please don't open a public issue.
+- Quick Open can come up empty now and then, when liquid's index fails to load; fixed in liquid,
+  arriving with the next liquid update ([#97](https://github.com/oramasearch/liquify/issues/97)).
+- One lake per repository.
+- Linux and Windows are exercised less than macOS.
 
 ## Contributing
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and open a
-pull request (against `dev`). Every contributor signs the
-[Contributor License Agreement](CLA.md) once, before their first pull request is merged.
-[`CLAUDE.md`](CLAUDE.md) and [`AGENTS.md`](AGENTS.md) carry the repository's rules for people and
-agents alike.
-
-Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md) and open pull requests against
+`dev`. Every contributor signs the [CLA](CLA.md) once. Everyone follows the
+[code of conduct](CODE_OF_CONDUCT.md). Bugs and requests go in
+[issues](https://github.com/oramasearch/liquify/issues); security reports go privately, per
+[SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [COPYRIGHT](COPYRIGHT). Third-party components keep their own
-licenses, listed in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES).
-
-"Orama Lake", "liquid", "lake", "liquify" and their logos are trademarks of OramaSearch, Inc.
+MIT. See [LICENSE](LICENSE) and [COPYRIGHT](COPYRIGHT); third-party components keep their own
+licenses ([THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES)). "Orama Lake", "liquid", "lake",
+"liquify" and their logos are trademarks of OramaSearch, Inc.
