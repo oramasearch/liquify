@@ -80,7 +80,10 @@ instead of waiting for it. Results carry monotonically increasing request genera
 answer cannot replace a newer hover, completion, definition or diagnostic result. The render
 thread copies one `EditorGraphSnapshot` containing those answers, graph statistics and daemon
 status. The normal reading path exposes only actionable graph state. Repository drip counters and
-the measured edit-to-diagnostic duration are available through Diagnostics details.
+the measured edit-to-diagnostic duration are available through Diagnostics details. Each concurrent demand runs on
+its own thread, which is joined, never detached (liquify#80): the worker joins finished ones as new
+work arrives, and `EditorGraph`'s destructor joins every remaining one after the worker has stopped,
+so no task can outlive the graph it uses.
 
 `publish_build_diagnostics` is the producer boundary for the build path: it writes the
 translation-unit diagnostic input before requesting the editor diagnostic query. Inline build

@@ -1,6 +1,7 @@
 #include "liquify/editor_graph.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
@@ -368,6 +369,28 @@ struct EditorGraph::Impl {
     }
     ready.notify_all();
     worker.join();
+    // Every concurrent task's thread is joined before any member it uses is destroyed
+    // (liquify#80): a detached thread could still be destroying its task after the idle count
+    // reached zero.
+    for (auto &running : concurrent) {
+      running.thread.join();
+    }
+  }
+
+  struct ConcurrentTask {
+    std::thread thread;
+    std::shared_ptr<std::atomic<bool>> done;
+  };
+
+  // Joins the concurrent threads that have finished; only the worker thread calls this.
+  void reap_concurrent() {
+    std::erase_if(concurrent, [](ConcurrentTask &running) {
+      if (!running.done->load()) {
+        return false;
+      }
+      running.thread.join();
+      return true;
+    });
   }
 
   void run() {
@@ -384,10 +407,16 @@ struct EditorGraph::Impl {
         tasks.pop_front();
       }
       if (task.concurrent) {
-        std::thread([this, task = std::move(task)]() mutable {
-          task.run();
-          finish_task();
-        }).detach();
+        reap_concurrent();
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        concurrent.push_back(
+            {std::thread([this, done, task = std::move(task)]() mutable {
+               task.run();
+               task = Task{};  // its captures are released before the task is reported finished
+               finish_task();
+               done->store(true);
+             }),
+             done});
       } else {
         task.run();
         finish_task();
@@ -1028,6 +1057,9 @@ struct EditorGraph::Impl {
   EditorGraphSnapshot current;
   std::filesystem::path active_buffer_path;
   std::thread worker;
+  // Threads of concurrent tasks, joined (never detached): touched only by the worker thread, and by
+  // the destructor after the worker has stopped.
+  std::vector<ConcurrentTask> concurrent;
   std::uint64_t pending_tasks{};
   std::uint64_t diagnostics_request{};
   std::uint64_t hover_request{};
