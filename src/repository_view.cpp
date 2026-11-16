@@ -284,10 +284,6 @@ void clean_failed_clone(const std::filesystem::path &target, bool existed) {
   }
 }
 
-auto is_offline_error(liquid::errc code) -> bool {
-  return code == liquid::errc::io || code == liquid::errc::unavailable;
-}
-
 auto display_date(std::chrono::sys_seconds at) -> std::string {
   return std::format("{:%Y-%m-%d}", std::chrono::floor<std::chrono::days>(at));
 }
@@ -450,6 +446,10 @@ auto RepositoryView::offline_reason() const -> std::string_view {
 }
 
 auto RepositoryView::offline() const -> bool { return offline_; }
+
+auto RepositoryView::clone_failure() const -> const UserError & {
+  return clone_failure_;
+}
 
 auto RepositoryView::remote_bytes() const -> std::uint64_t {
   return remote_bytes_;
@@ -642,35 +642,36 @@ RepositoryView RepositoryView::clone_impl(std::filesystem::path path,
   const auto valid = validate_clone_target(path);
   if (!valid) {
     view.error_ = error_message(valid.error());
+    view.clone_failure_ = describe_clone_target_failure(valid.error(), path);
     return view;
   }
+  const auto fail = [&](const liquid::error &error) {
+    view.error_ = error_message(error);
+    view.clone_failure_ = describe_clone_failure(error, remote);
+    view.offline_ = view.clone_failure_.offline();
+    clean_failed_clone(path, *valid);
+  };
 
   auto options = liquid::drive_options{};
   options.bearer_token = std::move(bearer_token);
   auto client = liquid::runtime::block_on(
-      liquid::drive_client::open(path, std::move(remote), std::move(options)));
+      liquid::drive_client::open(path, remote, std::move(options)));
   if (!client) {
-    view.error_ = error_message(client.error());
-    view.offline_ = is_offline_error(client.error().code);
-    clean_failed_clone(path, *valid);
+    fail(client.error());
     return view;
   }
   auto pinned = liquid::runtime::block_on(client->pin(""));
   if (!pinned) {
     const auto error = pinned.error();
     client = liquid::drive_client{};
-    view.error_ = error_message(error);
-    view.offline_ = is_offline_error(error.code);
-    clean_failed_clone(path, *valid);
+    fail(error);
     return view;
   }
   auto report = liquid::runtime::block_on(client->sync());
   if (!report) {
     const auto error = report.error();
     client = liquid::drive_client{};
-    view.error_ = error_message(error);
-    view.offline_ = is_offline_error(error.code);
-    clean_failed_clone(path, *valid);
+    fail(error);
     return view;
   }
   for (const auto &reference : report->status.references) {
@@ -679,6 +680,8 @@ RepositoryView RepositoryView::clone_impl(std::filesystem::path path,
     }
     client = liquid::drive_client{};
     view.error_ = reference.name + ": " + reference.reason;
+    view.clone_failure_ =
+        describe_clone_refusal(reference.name, reference.reason, remote);
     clean_failed_clone(path, *valid);
     return view;
   }

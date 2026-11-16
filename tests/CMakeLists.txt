@@ -20,6 +20,7 @@ add_executable(liquify-tests
   test_screenshot.cpp
   test_structural_edit.cpp
   test_text_layout.cpp
+  test_user_error.cpp
   test_stub_tree.cpp
   test_version.cpp)
 target_link_libraries(liquify-tests PRIVATE
@@ -71,7 +72,8 @@ set_tests_properties(liquify-independent-cli-compat PROPERTIES RUN_SERIAL TRUE)
 if(LIQUIFY_NATIVE_WINDOW_TESTS)
   add_executable(liquify-native-acceptance native_acceptance.cpp)
   target_link_libraries(liquify-native-acceptance PRIVATE liquify-app)
-  foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette modal-input tabs build)
+  foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette modal-input tabs build
+      front-door-clone-failures)
     add_test(NAME liquify-native-acceptance-${scenario}
       COMMAND liquify-native-acceptance ${scenario}
         ${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario})

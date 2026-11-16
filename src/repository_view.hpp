@@ -12,6 +12,7 @@
 
 #include "liquid/object.hpp"
 #include "liquify/navigation.hpp"
+#include "liquify/user_error.hpp"
 
 namespace liquify {
 
@@ -63,6 +64,8 @@ public:
   [[nodiscard]] auto last_changed_at() const -> std::string_view;
   [[nodiscard]] auto offline_reason() const -> std::string_view;
   [[nodiscard]] auto offline() const -> bool;
+  // Why a clone failed, in the product's words; empty after a successful clone or an open.
+  [[nodiscard]] auto clone_failure() const -> const UserError &;
   [[nodiscard]] auto remote_bytes() const -> std::uint64_t;
   [[nodiscard]] auto hydration_debt() const -> std::uint64_t;
   [[nodiscard]] auto pending_uploads() const -> std::uint64_t;
@@ -138,6 +141,7 @@ private:
   std::string last_changed_at_;
   std::string offline_reason_;
   bool offline_{};
+  UserError clone_failure_;
   std::uint64_t remote_bytes_{};
   std::uint64_t hydration_debt_{};
   std::uint64_t pending_uploads_{};

@@ -24,7 +24,8 @@ and column edits, repository indentation, liquid syntax/folds, collaboration gut
 search/replace, local edit history and operation-log history are part of the editor view. Unreadable
 repositories retain liquid's error, with upgrade guidance for unsupported store formats, and `liquify --smoke` scrolls and edits a 50,000-line buffer,
 reports frame and typing latency, and exits 0. Unreadable local repositories and unreachable lake
-clones have distinct retry states. `liquify --screenshot` renders fixed welcome, recovery,
+clones have distinct retry states; a clone failure is classified from liquid's error code, and only
+an unreachable lake is called offline (`docs/ui/errors.md`). `liquify --screenshot` renders fixed welcome, recovery,
 repository, navigation, settings, C++ editor, complete editor view and panel registry states in
 light and dark through a headless software renderer, with committed PNG proof and pixel-region
 tests. liquid is consumed as a sibling module (`LIQUIFY_LIQUID_SOURCE_DIR`, default `../liquid`)

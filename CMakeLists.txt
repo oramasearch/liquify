@@ -180,6 +180,7 @@ add_library(liquify-core STATIC
   src/screenshot.cpp
   src/structural_edit.cpp
   src/text_layout.cpp
+  src/user_error.cpp
   src/stub_tree.cpp
   src/version.cpp)
 target_compile_definitions(liquify-core PRIVATE

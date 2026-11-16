@@ -10,6 +10,8 @@
 #include <string_view>
 #include <vector>
 
+#include "liquify/user_error.hpp"
+
 namespace liquify {
 
 enum class RepositoryLifecyclePhase : std::uint8_t {
@@ -59,7 +61,7 @@ public:
                       std::chrono::sys_seconds opened_at = std::chrono::floor<std::chrono::seconds>(
                           std::chrono::system_clock::now()));
     void open_failed(std::filesystem::path path, std::string error);
-    void clone_failed(std::string error, bool offline);
+    void clone_failed(UserError failure);
     void return_to_welcome();
     void sign_in(IdentitySession session);
     void sign_out();
@@ -70,6 +72,8 @@ public:
     [[nodiscard]] auto pending_path() const -> const std::filesystem::path&;
     [[nodiscard]] auto clone_remote() const -> const std::string&;
     [[nodiscard]] auto error() const -> const std::string&;
+    // Why the last clone failed; set in the offline and failed phases.
+    [[nodiscard]] auto clone_failure() const -> const UserError&;
     [[nodiscard]] auto recent() const -> std::span<const RecentRepository>;
     [[nodiscard]] auto session() const -> const std::optional<IdentitySession>&;
 
@@ -81,6 +85,7 @@ private:
     std::filesystem::path pending_path_;
     std::string clone_remote_;
     std::string error_;
+    UserError clone_failure_;
     std::vector<RecentRepository> recent_;
     std::optional<IdentitySession> session_;
 };
