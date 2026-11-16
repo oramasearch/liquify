@@ -10,8 +10,8 @@
   `CMAKE_CXX_COMPILER` overrides that.
 - OpenSSL (Corosio's TLS) and zlib (automerge-cpp's compression). Linux also needs pkg-config and
   the FUSE3 development files for liquid's VFS.
-- Submodules, plus liquid. liquid is **not** a submodule here: it is a sibling module of
-  `liquid-bridge`, resolved by `LIQUIFY_LIQUID_SOURCE_DIR` (default `../liquid`). It is built
+- Submodules, plus liquid. liquid is **not** a submodule here: it is a sibling checkout,
+  resolved by `LIQUIFY_LIQUID_SOURCE_DIR` (default `../liquid`). It is built
   in-tree, library-only, and linked as
   `liquid::liquid`; it carries nested Capy, Corosio and automerge-cpp submodules. Corosio and
   Boost.HTTP at `modules/corosio` and `modules/http` are the separately pinned assistant transport.
@@ -28,9 +28,9 @@ under `bench/`), `LIQUIFY_USE_SYSTEM_COMPILER` (off). The configure step exports
 ## Build
 
 ```sh
-git clone --recurse-submodules git@github.com:oramasearch/liquify.git
+git clone --recurse-submodules https://github.com/oramasearch/liquid.git
+git clone --recurse-submodules https://github.com/oramasearch/liquify.git
 cd liquify
-git submodule update --init --recursive
 cmake -S . -B build -G Ninja
 cmake --build build -j 6
 ```

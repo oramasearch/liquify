@@ -61,7 +61,7 @@ thread never waits for a liquid operation.
 
 ## Measurement record
 
-Linux proof deferred (decision 33). The macOS smoke measurement in
+Linux proof deferred: the Linux measurement has not been run yet. The macOS smoke measurement in
 [`README.md`](README.md#smoke-measurement) is the current editor measurement. It records retained
 rendering and edit-to-present latency, including the display refresh constraint. The build, test,
 and push panels remain covered by the editor graph test named below.

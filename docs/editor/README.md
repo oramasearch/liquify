@@ -15,8 +15,7 @@ libliquid's cut API.
 [`structural-editing.md`](structural-editing.md) records syntax-node selection, canonical edit
 records, rename and extract-function previews, the headless agent surface and their limits.
 
-**Decision.** The editor buffer is a retained GPU text layer inside Dear ImGui (bridge decision
-15). ImGui owns the window, repository panel and controls. `src/app.cpp` uses the SDL renderer
+**Decision.** The editor buffer is a retained GPU text layer inside Dear ImGui. ImGui owns the window, repository panel and controls. `src/app.cpp` uses the SDL renderer
 directly for buffer text, selection and cursor; no other translation unit includes SDL or ImGui.
 
 ## Buffer and liquid
@@ -132,7 +131,7 @@ recorded in [`../app-shell/README.md`](../app-shell/README.md).
 
 ## Build measurement
 
-Linux proof deferred (decision 33). The current macOS measurement is the display-backed smoke run
+Linux proof deferred: the Linux measurement has not been run yet. The current macOS measurement is the display-backed smoke run
 recorded above. It measures the editor's retained rendering and edit-to-present path while the
 build, test, and push controller is verified by
 `EditorGraph.PresentsBuildEventsTestsAndRefusedReferences`.

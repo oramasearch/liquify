@@ -3,7 +3,7 @@
 liquify is the editor built on libliquid's graph: the IDE for liquid, native and cross-platform,
 one binary. SDL3 and Dear ImGui are the shell, the buffer is a retained GPU text layer, and
 everything liquify knows about repositories, drips, builds, analysis and search comes through
-libliquid, pinned as a submodule and linked as a library. It never depends on Zetta or on lake.
+libliquid, built from a liquid checkout beside this one and linked as a library. It never depends on Zetta or on lake.
 liquid is the tool, lake is where it collects, liquify is where you work. The longer statement,
 and why it is a native editor rather than an extension, is in
 [`docs/design/overview.md`](docs/design/overview.md).
@@ -47,14 +47,15 @@ apply across the shell.
 ## Build and run
 
 Requirements on macOS: CMake 3.28 or newer, Ninja, Homebrew LLVM (Clang 17 or newer), Node.js,
-OpenSSL and zlib (`brew install llvm cmake ninja node openssl@3`). liquid, the assistant transport
-and tree-sitter are submodules; SDL3, Dear ImGui and GoogleTest are fetched by CMake, and SDL is
-linked static so the result is one binary.
+OpenSSL and zlib (`brew install llvm cmake ninja node openssl@3`). liquid is **not** a submodule:
+clone it next to liquify, where the build looks for it (`../liquid`), or pass its path with
+`-DLIQUIFY_LIQUID_SOURCE_DIR`. The assistant transport and tree-sitter are submodules; SDL3, Dear
+ImGui and GoogleTest are fetched by CMake, and SDL is linked static so the result is one binary.
 
 ```sh
-git clone --recurse-submodules git@github.com:oramasearch/liquify.git
+git clone --recurse-submodules https://github.com/oramasearch/liquid.git
+git clone --recurse-submodules https://github.com/oramasearch/liquify.git
 cd liquify
-git submodule update --init --recursive
 cmake -S . -B build -G Ninja
 cmake --build build -j 6
 ctest --test-dir build --output-on-failure
@@ -71,14 +72,9 @@ opens a liquid repository; `--print-tree`, `--apply-edits` and `--lake` are list
 of the build in [`docs/build/local.md`](docs/build/local.md). Linux requirements and the CI
 toolchains are in [`docs/build/ci.md`](docs/build/ci.md).
 
-Until versioned releases identify compatible builds, use these artifact combinations:
-
-| Artifact | Supported revision |
-|---|---|
-| Separately built liquid CLI and liquify's pinned libliquid | `7ff6ed82f93b916ef206c5776e2761b19536d8f3` |
-| Native lake service used for clone verification | `620c249c3e03c455b1392d4691488e7639d01ff6` |
-
-`liquify version` identifies the IDE and library revisions. The store compatibility rule,
+There are no versioned releases yet, so liquid and liquify are not yet paired by version: build
+from both repositories' default branches. `liquify version` identifies the IDE and library
+revisions. The store compatibility rule,
 upgrade diagnostics, and independent CLI → IDE → CLI integration check are in
 [`docs/build/store-compatibility.md`](docs/build/store-compatibility.md).
 
@@ -108,7 +104,7 @@ upgrade diagnostics, and independent CLI → IDE → CLI integration check are i
 | `packaging/` | hand-built macOS, Windows, AppImage, and Flatpak release inputs used until liquid's projection targets land |
 | `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `plugin trust`/`plugin list`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest; `ctest --test-dir build` |
-| `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* module of `liquid-bridge`, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
+| `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* checkout, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 | `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |
 | `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |
 
@@ -145,19 +141,15 @@ its page there in the same change; this file is only the front door. The most us
 - [`docs/build/layout.md`](docs/build/layout.md): the source tree.
 - [`docs/packaging/README.md`](docs/packaging/README.md): installers, signing and verification.
 
-liquify is part of the liquid project;
-[`oramasearch/liquid-bridge`](https://github.com/oramasearch/liquid-bridge) holds the
-cross-module map and the action plan.
+liquify is part of the liquid project.
 
 ## Repository rules
 
 [`CLAUDE.md`](CLAUDE.md) is the instruction file for every contributor and agent: the recorded
 decisions, the one-translation-unit rule for SDL and ImGui, the liquid pin, what never changes,
 and the full local proof to run before finishing a change. [`AGENTS.md`](AGENTS.md) restates the
-non-negotiables for Codex.
+non-negotiables for other agents.
 
 ## Licence
 
-No licence file is declared. The repository is private for now and open source eventually, like
-liquid; the licence decision is tracked in
-[oramasearch/liquid-bridge#2](https://github.com/oramasearch/liquid-bridge/issues/2).
+liquify is released under the MIT licence; see `LICENSE`.
