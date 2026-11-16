@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <thread>
 #include <algorithm>
@@ -945,6 +946,21 @@ void NativeAcceptance::look(App &app, const std::filesystem::path &output) {
   require(app.frame_layout().controls.contains("search/query"),
           "#101: the Search panel shows its labelled fields");
   capture_themes(app, output, "look-search");
+  // #102: the whole window, and a dialog open over it in dark.
+  app.shell_state_.bottom_panel_visible = true;
+  pulse(app);
+  const auto &layout = app.frame_layout().controls;
+  require(layout.contains("region/sidebar") && layout.contains("region/editor-area") &&
+              std::abs(layout.at("region/sidebar").x + layout.at("region/sidebar").width -
+                       layout.at("region/editor-area").x) < 0.5F,
+          "#102: the sidebar and editor share an edge");
+  capture_themes(app, output, "look-window");
+  key(app, "p", true, true);
+  app.options_.forced_theme = ThemePreference::dark;
+  pulse(app);
+  save_image(output / "look-dialog-dark.png", capture(app));
+  app.options_.forced_theme.reset();
+  key(app, "Escape");
   app.first_run_.return_to_welcome();
   pulse(app);
   require(app.frame_layout().controls.at("welcome/title").height >=

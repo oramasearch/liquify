@@ -43,7 +43,8 @@ The stamped Orama token and IBM Plex snapshot (Sans Regular and SemiBold, Mono) 
 generate committed native constants, and a title / heading / body / caption type scale is applied
 to the front door, dialogs, panel headers and the empty editor; controls follow lake's kit (one primary action
 per surface, secondary and quiet buttons, labelled checkboxes that show their state, labels above
-full-width fields, one slider shape);
+full-width fields, one slider shape); shell regions are flat and share edges separated by hairlines, with
+a compact status bar and a translucent canvas scrim behind dialogs;
 its gate verifies source hashes and rejects stale generated output. Those roles drive the system,
 light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom
 panel, floating panels and status bar. One frame-level drawable scale applies to shell and
