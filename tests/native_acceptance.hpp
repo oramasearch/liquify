@@ -34,6 +34,7 @@ private:
   static void modal_input(App &app);
   static void tabs(App &app);
   static void build(App &app, const std::filesystem::path &output);
+  static void cut(App &app, const std::filesystem::path &output);
   static void wait_for_repository_operation(App &app);
   static void capture_themes(App &app, const std::filesystem::path &output,
                              std::string_view name);

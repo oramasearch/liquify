@@ -19,7 +19,7 @@
 namespace liquify {
 namespace {
 
-using DefinitionArray = std::array<CommandDefinition, 41>;
+using DefinitionArray = std::array<CommandDefinition, 42>;
 
 const DefinitionArray definitions{{
     {"file.close",
@@ -112,6 +112,11 @@ const DefinitionArray definitions{{
     {"run.build", "Build", "Run", "Plan and start the configured build.", {"F7"}},
     {"run.tests", "Run All Tests", "Run", "List and run all configured test actions.", {"F8"}},
     {"run.deploy", "Deploy", "Run", "Push saved drips to the configured sync remote.", {"F9"}},
+    {"change.cut",
+     "Cut Change",
+     "Change",
+     "Name the drips saved since the last change as one change.",
+     {"Primary+Shift+K"}},
     {"review.next-hunk", "Next Hunk", "Review", "Move to the next review hunk.", {"Alt+Down"}},
     {"review.previous-hunk",
      "Previous Hunk",

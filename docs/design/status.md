@@ -59,7 +59,10 @@ command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.m
 [`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
 The shared command registry powers fuzzy palette search, recent commands, platform key bindings,
 keymap conflict reporting, native menus and headless `--command` invocation
-([`../ui/commands.md`](../ui/commands.md)).
+([`../ui/commands.md`](../ui/commands.md)). Cut Change (palette, Change menu, Primary+Shift+K)
+names the drips saved since the last change as one change through libliquid's cut API, after
+showing what it gathers ([`../editor/cut.md`](../editor/cut.md)). While a modal dialog is open,
+typed text reaches only the dialog, never the source behind it.
 The searchable settings surface reads a user `.liquid` file plus repository overrides and applies
 theme, fonts, editor behavior, keymaps, optional AI, lake accounts and default-off telemetry live.
 Parser and typed validation errors remain inline, group reset is local, and credential values never

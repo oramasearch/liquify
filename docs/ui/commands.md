@@ -34,6 +34,7 @@ Generated from the built-in command registry by `liquify docs commands`. Do not 
 | Run | Build | `run.build` | `F7` | `F7` | `F7` | Plan and start the configured build. |
 | Run | Run All Tests | `run.tests` | `F8` | `F8` | `F8` | List and run all configured test actions. |
 | Run | Deploy | `run.deploy` | `F9` | `F9` | `F9` | Push saved drips to the configured sync remote. |
+| Change | Cut Change | `change.cut` | `Cmd+Shift+K` | `Ctrl+Shift+K` | `Ctrl+Shift+K` | Name the drips saved since the last change as one change. |
 | Review | Next Hunk | `review.next-hunk` | `Option+Down` | `Alt+Down` | `Alt+Down` | Move to the next review hunk. |
 | Review | Previous Hunk | `review.previous-hunk` | `Option+Up` | `Alt+Up` | `Alt+Up` | Move to the previous review hunk. |
 | Review | Next Comment | `review.next-comment` | `Option+C` | `Alt+C` | `Alt+C` | Move to the next review comment. |

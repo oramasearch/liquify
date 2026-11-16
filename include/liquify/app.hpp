@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "liquify/app_state.hpp"
+#include "liquify/change_cut.hpp"
 #include "liquify/command.hpp"
 #include "liquify/editor_model.hpp"
 #include "liquify/first_run.hpp"
@@ -106,6 +107,9 @@ private:
   void draw_user_error(const UserError &failure, std::string_view id,
                        const std::function<void()> &retry = {});
   void draw_clone_dialog();
+  void open_cut_composer();
+  void poll_cut_composer();
+  void draw_cut_composer();
   void draw_split_editor();
   void draw_repository_tree();
   void draw_repository_entries(std::string_view directory);
@@ -399,6 +403,16 @@ private:
   bool assistant_was_running_{};
   // Which error components show liquid's raw message, by component id.
   std::map<std::string, bool, std::less<>> error_details_open_;
+  // Cut Change composer.
+  bool cut_composer_requested_{};
+  bool cut_close_requested_{};
+  bool cut_restore_editor_focus_{};
+  std::string cut_message_;
+  std::optional<std::future<PendingChange>> cut_preview_;
+  std::optional<PendingChange> cut_pending_;
+  std::optional<std::future<CutResult>> cut_operation_;
+  std::optional<std::string> cut_result_;
+  UserError cut_failure_;
   bool clone_dialog_open_{};
   bool folder_dialog_open_{};
   bool repository_operation_is_clone_{};

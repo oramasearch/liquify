@@ -2,6 +2,7 @@
 
 #include "../src/editor_buffer.hpp"
 #include "../src/repository_view.hpp"
+#include "liquid/identity.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
 #include "liquify/editor_graph.hpp"
@@ -366,6 +367,83 @@ void NativeAcceptance::build(App &app, const std::filesystem::path &output) {
   capture_themes(app, output, "push-failure");
 }
 
+void NativeAcceptance::cut(App &app, const std::filesystem::path &output) {
+  open_file(app);
+  click(app, app.frame_layout().editor);
+  const auto marker = std::string("/* cut from the native window */");
+  text(app, marker);
+  require(app.editor_->dirty(), "typed text reached the retained editor");
+  key(app, "s", true);
+  require(!app.editor_->dirty(), "Primary+S saved the edit as a drip");
+  key(app, "k", true, true);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while ((!popup("Cut Change") || !app.cut_pending_) &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  require(popup("Cut Change"), "Primary+Shift+K opened the Cut Change composer");
+  std::printf("composer: drips=%zu files=%zu base='%s'\n",
+              app.cut_pending_ ? app.cut_pending_->drips.size() : 0,
+              app.cut_pending_ ? app.cut_pending_->paths.size() : 0,
+              app.cut_pending_ ? app.cut_pending_->base.c_str() : "");
+  // The repository's two seeded writes and the typed save: three drips, no change yet.
+  require(app.cut_pending_ && app.cut_pending_->failure.empty() &&
+              app.cut_pending_->drips.size() == 3 &&
+              app.cut_pending_->paths ==
+                  std::vector<std::string>{"main.cpp", "other.cpp"},
+          "composer lists the saved drips and the files they touch");
+  capture_themes(app, output, "cut-composer-empty");
+  click(app, app.frame_layout().controls.at("cut/message"));
+  const auto message = std::string("Explain the answer");
+  text(app, message);
+  require(app.cut_message_ == message, "message typed into the composer");
+  require(!app.editor_->dirty() &&
+              !std::string(app.editor_->text()).contains(message),
+          "#39: the composer's text does not reach the source it covers");
+  capture_themes(app, output, "cut-composer");
+  click(app, app.frame_layout().controls.at("cut/submit"));
+  const auto started = std::chrono::steady_clock::now();
+  while ((app.cut_operation_ || popup("Cut Change")) &&
+         std::chrono::steady_clock::now() < started + std::chrono::seconds(60)) {
+    pulse(app);
+  }
+  std::printf("cut: waited_ms=%lld operation=%d popup=%d failure='%s' details='%s'\n",
+              static_cast<long long>(
+                  std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - started)
+                      .count()),
+              app.cut_operation_.has_value(), popup("Cut Change"),
+              app.cut_failure_.summary.c_str(), app.cut_failure_.details.c_str());
+  require(!popup("Cut Change") && app.cut_result_.has_value(),
+          "Cut change closed the composer with a new change");
+  auto repository = liquid::runtime::block_on(
+      liquid::repository::open(app.repository_->path()));
+  require(repository.has_value(), "repository reopened independently");
+  const auto log = liquid::runtime::block_on(repository->log());
+  require(log.has_value() && !log->empty(), "liquid log lists the change");
+  const auto &change = log->front();
+  auto signer =
+      liquid::runtime::block_on(liquid::identity_detail::local_signer());
+  require(signer.has_value(), "local identity available");
+  std::printf("cut: change=%s message='%s' author=%.*s status='%s'\n",
+              liquid::to_string(change.id.value).c_str(),
+              change.message.c_str(),
+              static_cast<int>(change.author.identifier().size()),
+              change.author.identifier().data(), app.editor_status_.c_str());
+  require(liquid::to_string(change.id.value) == *app.cut_result_ &&
+              change.message == message,
+          "the change in liquid's log carries the message");
+  require(change.author.identifier() == signer->identity().identifier(),
+          "the change is signed by this computer's identity");
+  const auto bytes =
+      liquid::runtime::block_on(repository->at(change.id));
+  require(bytes.has_value(), "the change's snapshot reads back");
+  const auto saved = read_back(app.repository_->path());
+  require(saved.contains(marker), "the cut change holds the typed edit");
+  capture_themes(app, output, "cut-done");
+}
+
 void NativeAcceptance::wait_for_repository_operation(App &app) {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -523,6 +601,8 @@ int NativeAcceptance::run(std::string_view scenario,
     tabs(app);
   } else if (scenario == "build") {
     build(app, output);
+  } else if (scenario == "cut") {
+    cut(app, output);
   } else {
     throw std::runtime_error("unknown native acceptance scenario");
   }

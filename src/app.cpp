@@ -83,6 +83,7 @@ enum NativeMenuCommand : std::int32_t {
   menu_open_recent,
   menu_back,
   menu_forward,
+  menu_cut_change,
 };
 
 @interface LiquifyMenuTarget : NSObject
@@ -181,6 +182,8 @@ static void install_native_menu() {
                    {@"Back", @"", 0, menu_back},
                    {@"Forward", @"", 0, menu_forward},
                    {@"Show Hover", @"", 0, menu_hover}});
+  add_native_menu(main_menu, @"Change",
+                  {{@"Cut Change…", @"k", command_shift, menu_cut_change}});
   add_native_menu(main_menu, @"Run",
                   {{@"Build", @"", 0, menu_build},
                    {@"Test", @"", 0, menu_tests},
@@ -1966,6 +1969,8 @@ bool App::invoke_command(std::string_view name) {
     request_tests();
   } else if (name == "run.deploy") {
     request_deploy();
+  } else if (name == "change.cut") {
+    open_cut_composer();
   } else if (name == "assistant.toggle") {
     toggle_assistant();
   } else if (name == "panel.reset-layout") {
@@ -3525,6 +3530,12 @@ void App::handle_text(std::string_view text) {
       editor_->mode() == EditingMode::modal_command) {
     return;
   }
+  // A modal dialog owns the keyboard: its fields receive the text through ImGui, and the
+  // source it covers must not (liquify#39).
+  if (ImGui::GetCurrentContext() != nullptr &&
+      ImGui::GetTopMostPopupModal() != nullptr) {
+    return;
+  }
   if (!editor_mutation_allowed()) {
     return;
   }
@@ -3756,6 +3767,11 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
   }
   if (command_matches(settings_, "deploy.run", "F9", key, modifiers)) {
     request_deploy();
+    return;
+  }
+  if (command_matches(settings_, "change.cut", "Primary+Shift+K", key,
+                      modifiers)) {
+    static_cast<void>(invoke_command("change.cut"));
     return;
   }
   if (!editor_) {
@@ -6778,6 +6794,159 @@ void App::draw_user_error(const UserError &failure, std::string_view id,
   ImGui::PopID();
 }
 
+void App::open_cut_composer() {
+  if (!repository_) {
+    editor_status_ = "Open a repository to cut a change";
+    return;
+  }
+  cut_composer_requested_ = true;
+  cut_restore_editor_focus_ = editor_focused_;
+  editor_focused_ = false;
+  cut_message_.clear();
+  cut_result_.reset();
+  cut_failure_ = {};
+  cut_pending_.reset();
+  cut_preview_.emplace(std::async(
+      std::launch::async,
+      [path = repository_->path()] { return load_pending_change(path); }));
+  request_repaint();
+}
+
+void App::poll_cut_composer() {
+  if (cut_preview_ &&
+      cut_preview_->wait_for(std::chrono::milliseconds::zero()) ==
+          std::future_status::ready) {
+    cut_pending_ = cut_preview_->get();
+    cut_preview_.reset();
+  }
+  if (cut_operation_ &&
+      cut_operation_->wait_for(std::chrono::milliseconds::zero()) ==
+          std::future_status::ready) {
+    auto result = cut_operation_->get();
+    cut_operation_.reset();
+    if (!result.failure.empty()) {
+      cut_failure_ = std::move(result.failure);
+      return;
+    }
+    cut_result_ = result.change;
+    const auto summary = cut_message_summary(cut_message_);
+    editor_status_ = "Cut change: " + summary;
+    cut_close_requested_ = true;
+    if (editor_graph_) {
+      editor_graph_->refresh_status();
+    }
+  }
+}
+
+void App::draw_cut_composer() {
+  poll_cut_composer();
+  if (cut_composer_requested_) {
+    ImGui::OpenPopup("Cut Change");
+    cut_composer_requested_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(620.0F, 0.0F), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Cut Change", nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  if (cut_close_requested_) {
+    cut_close_requested_ = false;
+    editor_focused_ = cut_restore_editor_focus_;
+    ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return;
+  }
+  ImGui::PushTextWrapPos(600.0F);
+  ImGui::TextUnformatted(
+      "A change names the drips you saved since the last change. Push sends "
+      "changes to lake, where they can be reviewed.");
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  if (!cut_pending_) {
+    ImGui::TextDisabled("Reading saved drips...");
+  } else if (!cut_pending_->failure.empty()) {
+    draw_user_error(cut_pending_->failure, "cut-pending-failure");
+  } else {
+    if (cut_pending_->base.empty()) {
+      ImGui::TextDisabled("This will be the repository's first change.");
+    } else {
+      ImGui::TextDisabled("Builds on change %s", cut_pending_->base.c_str());
+    }
+    if (cut_pending_->drips.empty()) {
+      ImGui::TextUnformatted(
+          "Nothing to cut yet. Each save is a drip; save an edit first.");
+    } else {
+      ImGui::Text("Gathers %zu %s touching %zu %s:", cut_pending_->drips.size(),
+                  cut_pending_->drips.size() == 1 ? "drip" : "drips",
+                  cut_pending_->paths.size(),
+                  cut_pending_->paths.size() == 1 ? "file" : "files");
+      for (const auto &path : cut_pending_->paths) {
+        ImGui::BulletText("%s", path.c_str());
+      }
+      if (ImGui::TreeNode("Drips")) {
+        for (const auto &drip : cut_pending_->drips) {
+          auto files = std::string{};
+          for (const auto &path : drip.paths) {
+            files += (files.empty() ? "" : ", ") + path;
+          }
+          ImGui::TextDisabled("%s · %s · %s", drip.id.c_str(),
+                              std::format("{:%Y-%m-%d %H:%M}", drip.at).c_str(),
+                              files.c_str());
+        }
+        ImGui::TreePop();
+      }
+    }
+  }
+  if (editor_ && editor_->dirty()) {
+    ImGui::TextColored(
+        imgui_color(effective_palette(applied_dark_theme_,
+                                      applied_high_contrast_)
+                        .warning),
+        "%s has unsaved edits, which are not in this change. Save first to "
+        "include them.",
+        std::string(editor_->display_path()).c_str());
+  }
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Message");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::InputTextMultiline("##cut-message", &cut_message_,
+                            ImVec2(600.0F, ImGui::GetTextLineHeight() * 4.0F));
+  frame_layout_.controls["cut/message"] = item_rectangle();
+  ImGui::TextDisabled("The first line is the change's title.");
+  if (!cut_failure_.empty()) {
+    draw_user_error(cut_failure_, "cut-failure");
+  }
+  ImGui::Spacing();
+  const auto ready = cut_pending_ && cut_pending_->failure.empty() &&
+                     !cut_pending_->drips.empty() &&
+                     !cut_message_summary(cut_message_).empty() &&
+                     !cut_operation_;
+  ImGui::BeginDisabled(!ready);
+  if (ImGui::Button(cut_operation_ ? "Cutting..." : "Cut change")) {
+    cut_failure_ = {};
+    cut_operation_.emplace(std::async(
+        std::launch::async,
+        [path = repository_path(), message = cut_message_,
+         session = multiplayer_session_]() mutable {
+          return cut_change(path, std::move(message), session);
+        }));
+    request_repaint();
+  }
+  frame_layout_.controls["cut/submit"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    editor_focused_ = cut_restore_editor_focus_;
+    ImGui::CloseCurrentPopup();
+  }
+  frame_layout_.controls["cut/cancel"] = item_rectangle();
+  ImGui::EndPopup();
+}
+
 void App::draw_clone_dialog() {
   if (clone_dialog_open_) {
     ImGui::OpenPopup("Clone from lake");
@@ -7348,6 +7517,7 @@ void App::frame(bool present) {
   ImGui::End();
   draw_floating_panels();
   draw_command_palette();
+  draw_cut_composer();
   draw_navigation_popups();
   draw_repository_action_popup();
   draw_navigation_results();
@@ -7458,6 +7628,8 @@ auto App::async_work_in_flight() const -> bool {
   // keeps frame cadence so the result is noticed as promptly as before.
   return (repository_operation_ && repository_operation_->valid()) ||
          (identity_operation_ && identity_operation_->valid()) ||
+         (cut_preview_ && cut_preview_->valid()) ||
+         (cut_operation_ && cut_operation_->valid()) ||
          multiplayer_refresh_.valid();
 }
 
@@ -7615,6 +7787,9 @@ int App::run() {
           break;
         case menu_deploy:
           request_deploy();
+          break;
+        case menu_cut_change:
+          static_cast<void>(invoke_command("change.cut"));
           break;
         case menu_next_hunk:
           navigate_hunk(true);

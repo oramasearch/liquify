@@ -2,6 +2,7 @@ add_executable(liquify-tests
   test_ai.cpp
   test_redraw.cpp
   test_app_state.cpp
+  test_change_cut.cpp
   test_command.cpp
   test_editor_buffer.cpp
   test_editor_model.cpp
@@ -73,7 +74,7 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
   add_executable(liquify-native-acceptance native_acceptance.cpp)
   target_link_libraries(liquify-native-acceptance PRIVATE liquify-app)
   foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette modal-input tabs build
-      front-door-clone-failures)
+      front-door-clone-failures cut)
     add_test(NAME liquify-native-acceptance-${scenario}
       COMMAND liquify-native-acceptance ${scenario}
         ${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario})
@@ -87,8 +88,6 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
   set_tests_properties(liquify-native-acceptance-quick-open PROPERTIES WILL_FAIL TRUE)
   # #34 remains open: palette keyboard selection does not dispatch a command.
   set_tests_properties(liquify-native-acceptance-palette PROPERTIES WILL_FAIL TRUE)
-  # #39 remains open: modal ImGui text can also reach the obscured retained editor.
-  set_tests_properties(liquify-native-acceptance-modal-input PROPERTIES WILL_FAIL TRUE)
   set_tests_properties(liquify-native-acceptance-launch-1 PROPERTIES SKIP_RETURN_CODE 77)
   add_executable(liquify-native-window-test test_native_window.cpp)
   target_link_libraries(liquify-native-window-test PRIVATE liquify-app)
