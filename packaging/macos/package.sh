@@ -232,6 +232,11 @@ sign_frameworks() {
 
 mkdir -p "$app_path/Contents/MacOS/frontends" "$frameworks_path"
 install -m 755 "$binary_path" "$app_path/Contents/MacOS/liquify"
+# Every dynamic plugin runs in this separate, sandboxed process (liquify#82).
+install -m 755 "$(dirname "$binary_path")/liquify-plugin-host" \
+    "$app_path/Contents/MacOS/liquify-plugin-host"
+bundle_dependencies "$app_path/Contents/MacOS/liquify-plugin-host" \
+    "$(dirname "$binary_path")/liquify-plugin-host"
 frontend_path="$(find "$(dirname "$binary_path")/frontends" -type f | head -n 1)"
 install -m 755 "$frontend_path" "$app_path/Contents/MacOS/frontends/$(basename "$frontend_path")"
 install -m 644 "$script_directory/Info.plist" "$app_path/Contents/Info.plist"
@@ -272,10 +277,24 @@ if [[ -n "$application_identity" ]]; then
         --timestamp \
         --entitlements "$script_directory/entitlements.plist" \
         --sign "$application_identity" \
+        "$app_path/Contents/MacOS/liquify-plugin-host"
+    codesign \
+        --force \
+        --options runtime \
+        --timestamp \
+        --entitlements "$script_directory/entitlements.plist" \
+        --sign "$application_identity" \
         "$app_path"
     signing_kind="Developer ID"
 else
     sign_frameworks - --timestamp=none
+    codesign \
+        --force \
+        --options runtime \
+        --timestamp=none \
+        --entitlements "$script_directory/entitlements-ci.plist" \
+        --sign - \
+        "$app_path/Contents/MacOS/liquify-plugin-host"
     codesign \
         --force \
         --options runtime \

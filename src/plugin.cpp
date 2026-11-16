@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -20,12 +21,6 @@
 #include <string_view>
 #include <utility>
 
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
-
 #include "encoding/cbor.hpp"
 #include "liquid/graph.hpp"
 #include "liquid/hash.hpp"
@@ -33,6 +28,7 @@
 #include "liquid/runtime.hpp"
 #include "liquify/ai_config.hpp"
 #include "liquify/settings.hpp"
+#include "plugin_process.hpp"
 
 namespace liquify {
 namespace {
@@ -402,10 +398,20 @@ private:
   liquid_frontend_owned_bytes_v1 value_;
 };
 
+namespace protocol = plugin_protocol;
+
+// How long one call may take before its host is ended and the call fails (liquify#82). Panels
+// and events are asked for on the UI thread, so they get the shorter deadline.
+constexpr auto operation_deadline = std::chrono::milliseconds(10'000);
+constexpr auto view_deadline = std::chrono::milliseconds(2'000);
+
 struct Operation {
   std::string plugin;
   std::string name;
   liquify_plugin_operation_v1 invoke{};
+  // Set for a dynamic plugin: the operation is a request to its `liquify-plugin-host`.
+  std::shared_ptr<detail::PluginProcess> process;
+  protocol::Kind kind = protocol::Kind::query;
 };
 
 struct CommandOperation : Operation {
@@ -413,28 +419,43 @@ struct CommandOperation : Operation {
   std::vector<std::byte> argument_schema;
 };
 
+// A statically registered plugin (`descriptor`, in this process) or a dynamic one (`process`,
+// in its own `liquify-plugin-host`). The IDE never maps a dynamic plugin's library.
 struct PluginModule {
   std::string name;
   const liquify_plugin_v1 *descriptor{};
-  void *library{};
-  bool owns_library{};
+  std::shared_ptr<detail::PluginProcess> process;
   std::vector<Operation> queries;
   std::vector<CommandOperation> commands;
   std::vector<Operation> panels;
   liquify_plugin_event_callbacks_v1 events{};
+  std::vector<std::string> process_events;
+
+  PluginModule() = default;
+  PluginModule(const PluginModule &) = delete;
+  auto operator=(const PluginModule &) -> PluginModule & = delete;
 
   ~PluginModule() {
     if (descriptor && descriptor->destroy) {
       descriptor->destroy(descriptor->plugin_context);
     }
-    if (!owns_library || !library) {
+  }
+
+  [[nodiscard]] auto context() const -> void * {
+    return descriptor ? descriptor->plugin_context : nullptr;
+  }
+
+  void publish(liquify_plugin_event_v1 callback, std::string_view kind,
+               std::span<const std::byte> event) const {
+    if (process) {
+      if (std::ranges::find(process_events, kind) != process_events.end()) {
+        (void)process->call(protocol::Kind::event, kind, event, view_deadline);
+      }
       return;
     }
-#if defined(_WIN32)
-    FreeLibrary(static_cast<HMODULE>(library));
-#else
-    dlclose(library);
-#endif
+    if (callback) {
+      callback(context(), {reinterpret_cast<const std::uint8_t *>(event.data()), event.size()});
+    }
   }
 };
 
@@ -576,6 +597,20 @@ auto invoke_operation(const Operation &operation, void *context,
   if (!input) {
     return std::unexpected(input.error());
   }
+  if (operation.process) {
+    const auto deadline = operation.kind == protocol::Kind::panel ? view_deadline
+                                                                  : operation_deadline;
+    auto value = operation.process->call(operation.kind, operation.name, arguments, deadline);
+    if (!value) {
+      return std::unexpected(value.error());
+    }
+    auto valid = validate_cbor(*value, liquid::errc::corrupt,
+                               operation.plugin + ":" + operation.name);
+    if (!valid) {
+      return std::unexpected(valid.error());
+    }
+    return value;
+  }
   auto output = liquid_frontend_owned_bytes_v1{};
   auto error = liquid_frontend_error_v1{};
   const auto callbacks = liquid_frontend_callbacks_v1{};
@@ -618,19 +653,6 @@ auto invoke_operation(const Operation &operation, void *context,
 }
 
 auto nonempty(const char *value) -> bool { return value && value[0] != '\0'; }
-
-auto library_error(const std::filesystem::path &path, std::string action)
-    -> liquid::error {
-#if defined(_WIN32)
-  return plugin_error(liquid::errc::unavailable, std::move(action),
-                      path.string());
-#else
-  const auto *detail = dlerror();
-  auto message = detail ? std::string(detail) : std::move(action);
-  return plugin_error(liquid::errc::unavailable, std::move(message),
-                      path.string());
-#endif
-}
 
 class PanelDecoder {
 public:
@@ -759,8 +781,8 @@ struct PluginHost::Impl {
     return {};
   }
 
-  [[nodiscard]] auto add(const liquify_plugin_v1 *descriptor, void *library,
-                         bool owns_library) -> liquid::result<void> {
+  [[nodiscard]] auto add(const liquify_plugin_v1 *descriptor)
+      -> liquid::result<void> {
     constexpr auto descriptor_size = offsetof(liquify_plugin_v1, events);
     if (!descriptor || descriptor->abi_version != LIQUIFY_PLUGIN_ABI_VERSION ||
         descriptor->struct_size < descriptor_size ||
@@ -802,7 +824,8 @@ struct PluginHost::Impl {
                                             "plugin has an invalid query",
                                             module->name));
       }
-      module->queries.push_back({module->name, query.name, query.invoke});
+      module->queries.push_back(
+          {module->name, query.name, query.invoke, nullptr, protocol::Kind::query});
     }
     for (std::size_t index = 0; index < descriptor->command_count; ++index) {
       const auto &command = descriptor->commands[index];
@@ -822,7 +845,8 @@ struct PluginHost::Impl {
       if (!valid) {
         return std::unexpected(valid.error());
       }
-      module->commands.push_back({{module->name, command.name, command.invoke},
+      module->commands.push_back({{module->name, command.name, command.invoke,
+                                   nullptr, protocol::Kind::command},
                                   command.default_binding,
                                   {schema.begin(), schema.end()}});
     }
@@ -834,7 +858,8 @@ struct PluginHost::Impl {
                                             "plugin has an invalid panel",
                                             module->name));
       }
-      module->panels.push_back({module->name, panel.name, panel.view_model});
+      module->panels.push_back({module->name, panel.name, panel.view_model,
+                                nullptr, protocol::Kind::panel});
     }
     if (descriptor->struct_size >= sizeof(liquify_plugin_v1) &&
         descriptor->events &&
@@ -855,8 +880,73 @@ struct PluginHost::Impl {
       }
     }
     module->descriptor = descriptor;
-    module->library = library;
-    module->owns_library = owns_library;
+    modules.push_back(std::move(module));
+    return {};
+  }
+
+  // A dynamic plugin, described by the manifest its host reported. Every check `add` makes on a
+  // descriptor is made again here: the host is not trusted either.
+  [[nodiscard]] auto add(std::shared_ptr<detail::PluginProcess> process)
+      -> liquid::result<void> {
+    const auto &manifest = process->manifest();
+    auto module = std::make_unique<PluginModule>();
+    module->name = manifest.name;
+    if (module->name.empty()) {
+      return std::unexpected(plugin_error(
+          liquid::errc::invalid_argument,
+          "plugin descriptor does not implement ABI v1", "plugin"));
+    }
+    const auto taken = [this, &module](std::string_view name, auto member) {
+      const auto named = [name](const auto &operation) {
+        return operation.name == name;
+      };
+      return name.empty() || contains(name, member) ||
+             std::ranges::any_of((*module).*member, named);
+    };
+    for (const auto &query : manifest.queries) {
+      if (taken(query, &PluginModule::queries)) {
+        return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                            "plugin has an invalid query",
+                                            module->name));
+      }
+      module->queries.push_back(
+          {module->name, query, nullptr, process, protocol::Kind::query});
+    }
+    for (const auto &command : manifest.commands) {
+      if (taken(command.name, &PluginModule::commands)) {
+        return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                            "plugin has an invalid command",
+                                            module->name));
+      }
+      auto valid = validate_cbor(command.argument_schema,
+                                 liquid::errc::invalid_argument,
+                                 module->name + ":" + command.name);
+      if (!valid) {
+        return std::unexpected(valid.error());
+      }
+      module->commands.push_back(
+          {{module->name, command.name, nullptr, process, protocol::Kind::command},
+           command.default_binding,
+           command.argument_schema});
+    }
+    for (const auto &panel : manifest.panels) {
+      if (taken(panel, &PluginModule::panels)) {
+        return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                            "plugin has an invalid panel",
+                                            module->name));
+      }
+      module->panels.push_back(
+          {module->name, panel, nullptr, process, protocol::Kind::panel});
+    }
+    for (const auto &event : manifest.events) {
+      if (event != "presence" && event != "lease" && event != "attribution") {
+        return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                            "plugin has an invalid event",
+                                            module->name));
+      }
+      module->process_events.push_back(event);
+    }
+    module->process = std::move(process);
     modules.push_back(std::move(module));
     return {};
   }
@@ -871,61 +961,19 @@ auto PluginHost::operator=(PluginHost &&) noexcept -> PluginHost & = default;
 
 auto PluginHost::add(const liquify_plugin_v1 *descriptor)
     -> liquid::result<void> {
-  return impl_->add(descriptor, nullptr, false);
+  return impl_->add(descriptor);
 }
 
+// A dynamic plugin runs in its own `liquify-plugin-host` process (liquify#82): this process
+// never maps its library, and a crash or hang in it is an error of the call that met it.
 auto PluginHost::load(std::filesystem::path shared_object)
     -> liquid::result<void> {
-#if defined(_WIN32)
-  auto library = LoadLibraryW(shared_object.wstring().c_str());
-  if (!library) {
-    return std::unexpected(
-        library_error(shared_object, "could not load plugin"));
+  auto process = detail::PluginProcess::start(detail::plugin_host_executable(),
+                                              std::move(shared_object));
+  if (!process) {
+    return std::unexpected(process.error());
   }
-  auto *symbol = reinterpret_cast<liquify_plugin_entrypoint_v1>(
-      GetProcAddress(library, LIQUIFY_PLUGIN_ENTRYPOINT_V1));
-#else
-  dlerror();
-  auto *library = dlopen(shared_object.c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    return std::unexpected(
-        library_error(shared_object, "could not load plugin"));
-  }
-  auto *symbol = reinterpret_cast<liquify_plugin_entrypoint_v1>(
-      dlsym(library, LIQUIFY_PLUGIN_ENTRYPOINT_V1));
-#endif
-  if (!symbol) {
-    auto error = library_error(shared_object, "plugin entry point is missing");
-#if defined(_WIN32)
-    FreeLibrary(library);
-#else
-    dlclose(library);
-#endif
-    return std::unexpected(std::move(error));
-  }
-  const liquify_plugin_v1 *descriptor = nullptr;
-  try {
-    descriptor = symbol();
-  } catch (...) {
-#if defined(_WIN32)
-    FreeLibrary(library);
-#else
-    dlclose(library);
-#endif
-    return std::unexpected(plugin_error(liquid::errc::internal,
-                                        "plugin entry point threw an exception",
-                                        shared_object.string()));
-  }
-  auto added = impl_->add(descriptor, library, true);
-  if (!added) {
-#if defined(_WIN32)
-    FreeLibrary(library);
-#else
-    dlclose(library);
-#endif
-    return std::unexpected(added.error());
-  }
-  return {};
+  return impl_->add(std::move(*process));
 }
 
 auto PluginHost::query_names() const -> std::vector<std::string> {
@@ -958,8 +1006,7 @@ auto PluginHost::invoke_command(std::string_view name,
                                         "plugin command is not registered",
                                         std::string(name)));
   }
-  return invoke_operation(*command, module->descriptor->plugin_context,
-                          arguments_cbor);
+  return invoke_operation(*command, module->context(), arguments_cbor);
 }
 
 auto PluginHost::panels(std::span<const std::byte> context_cbor)
@@ -968,8 +1015,7 @@ auto PluginHost::panels(std::span<const std::byte> context_cbor)
   for (const auto &module : impl_->modules) {
     for (const auto &panel : module->panels) {
       auto snapshot = PluginPanelSnapshot{panel.plugin, panel.name, {}, {}};
-      auto value = invoke_operation(panel, module->descriptor->plugin_context,
-                                    context_cbor);
+      auto value = invoke_operation(panel, module->context(), context_cbor);
       if (!value) {
         snapshot.error = value.error().message;
         if (!value.error().context.empty()) {
@@ -988,17 +1034,16 @@ auto PluginHost::register_queries(liquid::query_registry &registry) const
     -> liquid::result<void> {
   for (const auto &module : impl_->modules) {
     for (const auto &query : module->queries) {
-      const auto *descriptor = module->descriptor;
+      auto *context = module->context();
       auto added = registry.add(
           {.name = query.name,
            .encode_arguments =
                [](std::span<const std::byte> arguments) {
                  return canonical_plugin_cbor(arguments);
                },
-           .compute = [operation = query, descriptor](auto &, auto arguments)
+           .compute = [operation = query, context](auto &, auto arguments)
                -> liquid::runtime::task<std::vector<std::byte>> {
-             auto value = invoke_operation(
-                 operation, descriptor->plugin_context, arguments);
+             auto value = invoke_operation(operation, context, arguments);
              if (!value) {
                co_return std::unexpected(value.error());
              }
@@ -1021,8 +1066,7 @@ auto PluginHost::invoke_query(std::string_view name,
                                         "plugin query is not registered",
                                         std::string(name)));
   }
-  return invoke_operation(*query, module->descriptor->plugin_context,
-                          arguments_cbor);
+  return invoke_operation(*query, module->context(), arguments_cbor);
 }
 
 void PluginHost::publish_presence(const liquid::presence &value) {
@@ -1030,13 +1074,8 @@ void PluginHost::publish_presence(const liquid::presence &value) {
   if (!event) {
     return;
   }
-  const auto bytes = std::span(
-      reinterpret_cast<const std::uint8_t *>(event->data()), event->size());
-  const auto input = liquid_frontend_bytes_v1{bytes.data(), bytes.size()};
   for (const auto &module : impl_->modules) {
-    if (module->events.presence) {
-      module->events.presence(module->descriptor->plugin_context, input);
-    }
+    module->publish(module->events.presence, "presence", *event);
   }
 }
 
@@ -1046,13 +1085,8 @@ void PluginHost::publish_lease(const liquid::semantic_lease &value,
   if (!event) {
     return;
   }
-  const auto bytes = std::span(
-      reinterpret_cast<const std::uint8_t *>(event->data()), event->size());
-  const auto input = liquid_frontend_bytes_v1{bytes.data(), bytes.size()};
   for (const auto &module : impl_->modules) {
-    if (module->events.lease) {
-      module->events.lease(module->descriptor->plugin_context, input);
-    }
+    module->publish(module->events.lease, "lease", *event);
   }
 }
 
@@ -1063,13 +1097,8 @@ void PluginHost::publish_attribution(
   if (!event) {
     return;
   }
-  const auto bytes = std::span(
-      reinterpret_cast<const std::uint8_t *>(event->data()), event->size());
-  const auto input = liquid_frontend_bytes_v1{bytes.data(), bytes.size()};
   for (const auto &module : impl_->modules) {
-    if (module->events.attribution) {
-      module->events.attribution(module->descriptor->plugin_context, input);
-    }
+    module->publish(module->events.attribution, "attribution", *event);
   }
 }
 

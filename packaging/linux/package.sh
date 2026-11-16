@@ -33,6 +33,8 @@ app_directory="$work_directory/Liquify.AppDir"
 artifact="$output_directory/liquify-${version}-x86_64.AppImage"
 mkdir -p "$app_directory/usr/bin"
 install -m 755 "$binary_path" "$app_directory/usr/bin/liquify"
+install -m 755 "$(dirname "$binary_path")/liquify-plugin-host" \
+    "$app_directory/usr/bin/liquify-plugin-host"
 cp -R "$(dirname "$binary_path")/frontends" "$app_directory/usr/bin/frontends"
 install -m 755 "$script_directory/AppRun" "$app_directory/AppRun"
 install -m 644 \

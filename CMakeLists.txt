@@ -177,6 +177,8 @@ add_library(liquify-core STATIC
   src/navigation.cpp
   src/multiplayer.cpp
   src/plugin.cpp
+  src/plugin_process.cpp
+  src/plugin_protocol.cpp
   src/redraw.cpp
   src/repository_error.cpp
   src/repository_view.cpp
@@ -205,6 +207,22 @@ elseif(WIN32)
 endif()
 target_link_libraries(liquify-core PRIVATE ${CMAKE_DL_LIBS})
 add_dependencies(liquify-core liquid-frontend-tree-sitter)
+
+# The process every dynamic plugin runs in (liquify#82). It links only the protocol and the C ABI
+# header: no liquid, no SDL, no ImGui. liquify finds it beside its own executable and falls back
+# to this build tree's copy.
+add_executable(liquify-plugin-host src/plugin_host_main.cpp src/plugin_protocol.cpp)
+target_include_directories(liquify-plugin-host PRIVATE "${LIQUIFY_LIQUID_SOURCE_DIR}/include")
+target_link_libraries(liquify-plugin-host PRIVATE ${CMAKE_DL_LIBS})
+if(WIN32)
+  target_link_libraries(liquify-plugin-host PRIVATE Shell32)
+elseif(NOT APPLE)
+  find_package(Threads REQUIRED)
+  target_link_libraries(liquify-plugin-host PRIVATE Threads::Threads)
+endif()
+add_dependencies(liquify-core liquify-plugin-host)
+target_compile_definitions(liquify-core PRIVATE
+  LIQUIFY_PLUGIN_HOST="$<TARGET_FILE:liquify-plugin-host>")
 
 add_library(liquify-sample-plugin-objects OBJECT plugins/sample/sample_plugin.cpp)
 set_target_properties(liquify-sample-plugin-objects PROPERTIES

@@ -83,8 +83,11 @@ public:
   PluginHost(const PluginHost &) = delete;
   auto operator=(const PluginHost &) -> PluginHost & = delete;
 
+  // A plugin compiled into this binary; it runs in this process.
   [[nodiscard]] auto add(const liquify_plugin_v1 *descriptor)
       -> liquid::result<void>;
+  // A plugin library, mapped only by its own sandboxed `liquify-plugin-host` process
+  // (liquify#82). A crash or hang there fails the call that met it, never the IDE.
   [[nodiscard]] auto load(std::filesystem::path shared_object)
       -> liquid::result<void>;
 

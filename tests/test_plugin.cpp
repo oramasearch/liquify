@@ -21,7 +21,14 @@
 #include "liquify/interactive_analysis.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/settings.hpp"
+#include "plugin_protocol.hpp"
 #include "sample_plugin.hpp"
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 namespace {
 
@@ -326,6 +333,186 @@ TEST(PluginHost, RejectsNonCanonicalCbor) {
   auto canonical = liquify::canonical_plugin_cbor(bytes(non_minimal_zero));
   ASSERT_FALSE(canonical);
   EXPECT_EQ(canonical.error().code, liquid::errc::invalid_argument);
+}
+
+// liquify#82: a dynamic plugin runs in its own `liquify-plugin-host` process.
+namespace {
+
+auto text_cbor(std::string_view value) -> std::vector<std::byte> {
+  auto output = std::vector<std::byte>{};
+  if (value.size() < 24) {
+    output.push_back(static_cast<std::byte>(0x60U + value.size()));
+  } else if (value.size() <= 0xffU) {
+    output.push_back(std::byte{0x78});
+    output.push_back(static_cast<std::byte>(value.size()));
+  } else {
+    output.push_back(std::byte{0x79});
+    output.push_back(static_cast<std::byte>(value.size() >> 8U));
+    output.push_back(static_cast<std::byte>(value.size() & 0xffU));
+  }
+  const auto text = text_bytes(value);
+  output.insert(output.end(), text.begin(), text.end());
+  return output;
+}
+
+auto cbor_boolean(bool value) -> std::vector<std::byte> {
+  return {value ? std::byte{0xf5} : std::byte{0xf4}};
+}
+
+auto library_is_mapped(const char *path) -> bool {
+#if defined(_WIN32)
+  return GetModuleHandleW(std::filesystem::path(path).wstring().c_str()) != nullptr;
+#else
+  auto *library = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+  if (library != nullptr) {
+    dlclose(library);
+    return true;
+  }
+  return false;
+#endif
+}
+
+auto load_fault_plugin() -> std::shared_ptr<liquify::PluginHost> {
+  auto host = std::make_shared<liquify::PluginHost>();
+  auto loaded = host->load(LIQUIFY_FAULT_PLUGIN);
+  EXPECT_TRUE(loaded) << loaded.error().message << ": " << loaded.error().context;
+  return host;
+}
+
+} // namespace
+
+TEST(PluginProcess, TheIdeNeverMapsADynamicPlugin) {
+  auto host = std::make_shared<liquify::PluginHost>();
+  auto loaded = host->load(LIQUIFY_SAMPLE_PLUGIN);
+  ASSERT_TRUE(loaded) << loaded.error().message << ": " << loaded.error().context;
+  EXPECT_FALSE(library_is_mapped(LIQUIFY_SAMPLE_PLUGIN));
+  EXPECT_FALSE(host->commands().empty());
+}
+
+TEST(PluginProcess, ACrashingCommandFailsTheCallAndTheNextCallRestartsTheHost) {
+  auto host = load_fault_plugin();
+  auto crashed = host->invoke_command("fault.crash", liquify::plugin_empty_map_cbor());
+  ASSERT_FALSE(crashed);
+  EXPECT_EQ(crashed.error().code, liquid::errc::unavailable);
+  EXPECT_EQ(crashed.error().context, "fault:fault.crash");
+#if !defined(_WIN32)
+  EXPECT_NE(crashed.error().message.find("signal"), std::string::npos)
+      << crashed.error().message;
+#endif
+  auto environment = host->invoke_command("fault.environment", liquify::plugin_empty_map_cbor());
+  ASSERT_TRUE(environment) << environment.error().message;
+}
+
+TEST(PluginProcess, AHangingPanelBecomesThatPanelsErrorAndAnotherPanelStillRenders) {
+  auto host = load_fault_plugin();
+  const auto panels = host->panels(liquify::plugin_null_cbor());
+  ASSERT_EQ(panels.size(), 2);
+  EXPECT_EQ(panels[0].name, "fault.hang");
+  EXPECT_NE(panels[0].error.find("did not answer in time"), std::string::npos)
+      << panels[0].error;
+  ASSERT_TRUE(panels[1].error.empty()) << panels[1].error;
+  auto healthy = liquify::decode_plugin_text_panel(panels[1].view_model_cbor);
+  ASSERT_TRUE(healthy) << healthy.error().message;
+  EXPECT_EQ(healthy->title, "Healthy");
+}
+
+TEST(PluginProcess, AFailingPluginIsDisabledAfterItsRestartBudget) {
+  auto host = load_fault_plugin();
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    ASSERT_FALSE(host->invoke_command("fault.crash", liquify::plugin_empty_map_cbor()));
+  }
+  auto disabled = host->invoke_command("fault.environment", liquify::plugin_empty_map_cbor());
+  ASSERT_FALSE(disabled);
+  EXPECT_NE(disabled.error().message.find("disabled"), std::string::npos)
+      << disabled.error().message;
+}
+
+TEST(PluginProcess, ThePluginCannotWriteFiles) {
+  auto location = TemporaryDirectory("liquify-plugin-sandbox");
+  const auto target = location.path() / "written-by-plugin";
+  auto host = load_fault_plugin();
+  auto written = host->invoke_command("fault.write", text_cbor(target.string()));
+  ASSERT_TRUE(written) << written.error().message;
+  EXPECT_EQ(*written, cbor_boolean(false));
+  EXPECT_FALSE(std::filesystem::exists(target));
+}
+
+TEST(PluginProcess, ThePluginCannotOpenANetworkConnection) {
+#if defined(_WIN32)
+  GTEST_SKIP() << "the Windows host has no network sandbox (docs/plugins/README.md)";
+#else
+  auto host = load_fault_plugin();
+  auto network = host->invoke_command("fault.network", liquify::plugin_empty_map_cbor());
+  ASSERT_TRUE(network) << network.error().message;
+  EXPECT_EQ(*network, cbor_boolean(false));
+#endif
+}
+
+TEST(PluginProcess, ThePluginDoesNotSeeTheIdesEnvironment) {
+#if defined(_WIN32)
+  _putenv_s("LIQUIFY_PLUGIN_TEST_SECRET", "secret");
+#else
+  setenv("LIQUIFY_PLUGIN_TEST_SECRET", "secret", 1);
+#endif
+  auto host = load_fault_plugin();
+  auto environment = host->invoke_command("fault.environment", liquify::plugin_empty_map_cbor());
+#if defined(_WIN32)
+  _putenv_s("LIQUIFY_PLUGIN_TEST_SECRET", "");
+#else
+  unsetenv("LIQUIFY_PLUGIN_TEST_SECRET");
+#endif
+  ASSERT_TRUE(environment) << environment.error().message;
+  EXPECT_EQ(*environment, cbor_boolean(false));
+}
+
+TEST(PluginProcess, AMissingHostLibraryIsALoadFailure) {
+  auto host = liquify::PluginHost{};
+  auto loaded = host.load("missing-plugin-library");
+  ASSERT_FALSE(loaded);
+  EXPECT_NE(loaded.error().context.find("missing-plugin-library"), std::string::npos);
+}
+
+TEST(PluginProtocol, MessagesRoundTripAndMalformedFramesAreRefused) {
+  namespace protocol = liquify::plugin_protocol;
+  auto manifest = protocol::Manifest{};
+  manifest.name = "sample";
+  manifest.queries = {"sample.echo"};
+  manifest.commands = {{"sample.reset", "Primary+Shift+R", {std::byte{0xa0}}}};
+  manifest.panels = {"sample.status"};
+  manifest.events = {"presence"};
+  auto decoded = protocol::decode_manifest(protocol::encode(manifest));
+  ASSERT_TRUE(decoded) << decoded.error();
+  EXPECT_EQ(*decoded, manifest);
+
+  auto failed = protocol::Manifest{};
+  failed.error = "could not load plugin";
+  auto decoded_failure = protocol::decode_manifest(protocol::encode(failed));
+  ASSERT_TRUE(decoded_failure);
+  EXPECT_EQ(decoded_failure->error, "could not load plugin");
+
+  const auto request = protocol::Request{protocol::Kind::panel, "sample.status", {std::byte{0xf6}}};
+  auto decoded_request = protocol::decode_request(protocol::encode(request));
+  ASSERT_TRUE(decoded_request) << decoded_request.error();
+  EXPECT_EQ(decoded_request->kind, protocol::Kind::panel);
+  EXPECT_EQ(decoded_request->name, "sample.status");
+  EXPECT_EQ(decoded_request->input, request.input);
+
+  const auto response = protocol::Response{4, {}, "plugin operation failed"};
+  auto decoded_response = protocol::decode_response(protocol::encode(response));
+  ASSERT_TRUE(decoded_response) << decoded_response.error();
+  EXPECT_EQ(decoded_response->status, 4U);
+  EXPECT_EQ(decoded_response->message, "plugin operation failed");
+
+  auto truncated = protocol::encode(request);
+  truncated.pop_back();
+  EXPECT_FALSE(protocol::decode_request(truncated));
+  auto trailing = protocol::encode(response);
+  trailing.push_back(std::byte{0});
+  EXPECT_FALSE(protocol::decode_response(trailing));
+  const auto unknown_kind = std::vector<std::byte>{std::byte{0x83}, std::byte{0x09},
+                                                   std::byte{0x60}, std::byte{0x40}};
+  EXPECT_FALSE(protocol::decode_request(unknown_kind));
+  EXPECT_EQ(protocol::frame_size(protocol::frame_header(70'000)), 70'000U);
 }
 
 namespace {
