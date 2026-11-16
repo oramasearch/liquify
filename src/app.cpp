@@ -1738,6 +1738,7 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
   editor_graph_.reset();
   review_.reset();
   assistant_.reset();
+  plugin_dispatcher_.reset();
   plugin_host_.reset();
   plugin_failures_.clear();
   plugin_untrusted_.clear();
@@ -1785,6 +1786,11 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
     plugin_failures_ = std::move(plugins->failures);
     plugin_untrusted_ = std::move(plugins->untrusted);
   }
+  plugin_dispatcher_ = std::make_unique<PluginDispatcher>(
+      plugin_host_, [this] { request_repaint(); });
+  plugin_panels_ = plugin_dispatcher_->panels();
+  plugin_generation_ = plugin_dispatcher_->generation();
+  next_plugin_refresh_ = {};
   editor_graph_ = std::make_unique<EditorGraph>(
       *options_.repository_path, plugin_host_, syntax_frontend_path());
 
@@ -2079,6 +2085,8 @@ void App::poll_sign_in() {
 }
 
 App::~App() {
+  // Before SDL goes: its answer callback pushes an SDL event. It never waits for a plugin.
+  plugin_dispatcher_.reset();
   shutdown();
 }
 
@@ -5948,11 +5956,13 @@ void App::draw_structural_panel() {
   }
 }
 
+// The command runs on its plugin's worker (liquify#149); poll_plugins reports how it ended.
 void App::invoke_plugin_command(std::string_view name) {
-  if (!plugin_host_) {
+  if (!plugin_dispatcher_) {
     return;
   }
-  auto invoked = plugin_host_->invoke_command(name, plugin_empty_map_cbor());
+  auto invoked =
+      plugin_dispatcher_->invoke_command(name, plugin_empty_map_cbor());
   if (!invoked) {
     editor_status_ = invoked.error().message;
     if (!invoked.error().context.empty()) {
@@ -5960,15 +5970,30 @@ void App::invoke_plugin_command(std::string_view name) {
     }
     return;
   }
-  editor_status_ = "plugin command completed: " + std::string(name);
+  editor_status_ = "plugin command running: " + std::string(name);
 }
 
+// Reads what the plugins have answered and asks for the next refresh. Never waits for a
+// plugin: a panel still being asked keeps its last answer, or its loading state.
 void App::poll_plugins() {
-  const auto now = std::chrono::steady_clock::now();
-  if (!plugin_host_ || now < next_plugin_refresh_) {
+  if (!plugin_dispatcher_) {
     return;
   }
-  plugin_panels_ = plugin_host_->panels(plugin_null_cbor());
+  for (auto &outcome : plugin_dispatcher_->take_command_outcomes()) {
+    editor_status_ = outcome.error.empty()
+                         ? "plugin command completed: " + outcome.name
+                         : std::move(outcome.error);
+  }
+  const auto generation = plugin_dispatcher_->generation();
+  if (generation != plugin_generation_) {
+    plugin_generation_ = generation;
+    plugin_panels_ = plugin_dispatcher_->panels();
+  }
+  const auto now = std::chrono::steady_clock::now();
+  if (now < next_plugin_refresh_) {
+    return;
+  }
+  plugin_dispatcher_->refresh_panels(plugin_null_cbor());
   next_plugin_refresh_ = now + std::chrono::milliseconds(500);
 }
 
@@ -6156,16 +6181,16 @@ void App::poll_multiplayer() {
       editor_status_ = refreshed.error().message;
     } else {
       multiplayer_ = std::move(*refreshed);
-      if (plugin_host_) {
+      if (plugin_dispatcher_) {
         for (const auto &value : multiplayer_->presence) {
-          plugin_host_->publish_presence(value);
+          plugin_dispatcher_->publish_presence(value);
         }
         for (const auto &value : multiplayer_->leases) {
-          plugin_host_->publish_lease(value);
+          plugin_dispatcher_->publish_lease(value);
         }
-        plugin_host_->publish_attribution(editor_->display_path(),
-                                          multiplayer_->change,
-                                          multiplayer_->attribution);
+        plugin_dispatcher_->publish_attribution(editor_->display_path(),
+                                                multiplayer_->change,
+                                                multiplayer_->attribution);
       }
     }
   }
@@ -6256,6 +6281,10 @@ void App::draw_plugin_panels() {
   }
   for (const auto &panel : plugin_panels_) {
     const auto panel_name = panel.plugin + "/" + panel.name;
+    if (panel.loading) {
+      ImGui::TextDisabled("%s: loading...", panel_name.c_str());
+      continue;
+    }
     if (!panel.error.empty()) {
       ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F), "%s: %s",
                          panel_name.c_str(), panel.error.c_str());

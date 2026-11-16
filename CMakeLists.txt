@@ -177,6 +177,7 @@ add_library(liquify-core STATIC
   src/navigation.cpp
   src/multiplayer.cpp
   src/plugin.cpp
+  src/plugin_dispatcher.cpp
   src/plugin_process.cpp
   src/plugin_protocol.cpp
   src/redraw.cpp
