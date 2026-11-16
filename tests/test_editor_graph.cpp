@@ -11,6 +11,12 @@
 
 #include <gtest/gtest.h>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
+
 #include "liquid/daemon.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
@@ -253,6 +259,59 @@ TEST(EditorGraph, AttachesWhenTheDaemonAlreadyOwnsTheCheckout) {
 
     EXPECT_TRUE(liquid::runtime::block_on(hosted->shutdown()));
     EXPECT_TRUE(liquid::runtime::block_on(hosted->wait()));
+}
+
+// liquify#36: the snapshot reports a daemon that could not start, and keeps reporting it after
+// a successful query clears query_error.
+TEST(EditorGraph, ReportsADaemonThatFailedToStart) {
+    TemporaryDirectory location;
+    auto repository = create_repository(location.path(), "int main() { return 0; }\n");
+    static_cast<void>(repository);
+    // Holding the daemon's lock with nothing listening: start answers "already running" and
+    // attach finds no service.
+    const auto directory =
+        std::filesystem::weakly_canonical(location.path()) / ".liquid" / "daemon";
+    std::filesystem::create_directories(directory);
+    const auto lock = ::open((directory / "lock").c_str(), O_CREAT | O_RDWR, 0600);
+    ASSERT_GE(lock, 0);
+    ASSERT_EQ(::flock(lock, LOCK_EX | LOCK_NB), 0);
+    {
+        liquify::EditorGraph graph(location.path());
+        graph.wait_until_idle();
+        graph.open_buffer("main.cpp", liquify::StubLanguage::cpp, "int main() { return 0; }\n");
+        graph.wait_until_idle();
+        const auto snapshot = graph.snapshot();
+        EXPECT_FALSE(snapshot.daemon_running);
+        EXPECT_EQ(snapshot.daemon_state, liquify::DaemonState::start_failed);
+        EXPECT_FALSE(snapshot.daemon_error.empty());
+        EXPECT_NE(liquify::editor_graph_status(snapshot).find("daemon failed to start"),
+                  std::string::npos)
+            << liquify::editor_graph_status(snapshot);
+    }
+    ::close(lock);
+}
+
+TEST(EditorGraph, ReportsALostDaemonConnection) {
+    TemporaryDirectory location;
+    auto repository = create_repository(location.path(), "int main() { return 0; }\n");
+    static_cast<void>(repository);
+    auto options = liquid::daemon_options{};
+    options.capture.exclude.push_back(".liquid/**");
+    auto hosted = liquid::runtime::block_on(liquid::daemon::start(location.path(), options));
+    ASSERT_TRUE(hosted) << (hosted ? "" : hosted.error().message);
+
+    liquify::EditorGraph graph(location.path());
+    graph.wait_until_idle();
+    EXPECT_EQ(graph.snapshot().daemon_state, liquify::DaemonState::running);
+    EXPECT_TRUE(liquid::runtime::block_on(hosted->shutdown()));
+    EXPECT_TRUE(liquid::runtime::block_on(hosted->wait()));
+    graph.refresh_status();
+    graph.wait_until_idle();
+    const auto snapshot = graph.snapshot();
+    EXPECT_FALSE(snapshot.daemon_running);
+    EXPECT_EQ(snapshot.daemon_state, liquify::DaemonState::disconnected);
+    EXPECT_FALSE(snapshot.daemon_error.empty());
+    EXPECT_FALSE(snapshot.daemon.has_value());
 }
 #endif
 

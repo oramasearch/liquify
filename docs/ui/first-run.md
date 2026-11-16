@@ -82,6 +82,27 @@ actionable sync, hydration, build, and failure state. Identity, current-change, 
 and collaboration records are available from deliberate details, panel, and gutter affordances.
 When no repository is active it also says so explicitly.
 
+The daemon state comes from the editor graph's snapshot of the repository's build service, never
+from whether a graph exists (liquify#36). `DaemonState` is `starting` until the start or attach
+answers, then `running` or `stopped` from each status call, `start_failed` when neither starting
+nor attaching worked, and `disconnected` when a status call fails after the service once answered.
+The last two keep their message in `daemon_error`, which a later successful query does not clear.
+Repository details then read `Daemon failed to start` or `Daemon connection lost`, and the status
+row shows the failure as "The build service is not running for this repository" (the Build panel's
+words for a build that found no service) or "The build service stopped answering", opening
+Diagnostics.
+
+The status row is one measured line. Its height follows the UI font (32 pixels at the default
+size, growing with the compact buttons when the font is enlarged), and its segments give way in
+priority order when the width runs out: Details and a failure stay and elide last, then the
+repository name, the cursor position and the branch; plain status text and the collaborator count
+elide first. An elided segment shows its full text as a tooltip. The native acceptance scenario
+`daemon-failure` holds the repository's daemon lock with nothing listening, so the service cannot
+start, and requires the snapshot, the repository details, the status row and the F7 build error to
+agree, then narrows the window to 520 pixels at UI sizes 14 and 24 and requires the failure to stay
+readable and still open Build; `shell-sizes` checks the row's controls at UI sizes 14, 24 and 32 in
+both themes.
+
 Repository summaries come from libliquid's repository status, refs, change log, active presence,
 and drive status APIs. This supplies the current change and branch, last named change and date,
 remote bytes, hydration debt, pending uploads, offline reason, and active collaborator count.

@@ -163,6 +163,21 @@ TEST(StatusBar, ReportsEveryRepositoryAndSessionSignal) {
               }));
 }
 
+TEST(StatusBar, NamesTheDaemonProblemInsteadOfItsPresence) {
+    const auto failed = liquify::status_bar_segments(
+        {.repository_open = true, .daemon_problem = "failed to start"});
+    EXPECT_EQ(failed.front(), "Daemon failed to start");
+    const auto lost = liquify::status_bar_segments(
+        {.repository_open = true, .daemon_available = false, .daemon_problem = "connection lost"});
+    EXPECT_EQ(lost.front(), "Daemon connection lost");
+    const auto starting =
+        liquify::status_bar_segments({.repository_open = true, .daemon_starting = true});
+    EXPECT_EQ(starting.front(), "Daemon starting");
+    const auto stopped =
+        liquify::status_bar_segments({.repository_open = true, .daemon_available = true});
+    EXPECT_EQ(stopped.front(), "Daemon stopped");
+}
+
 TEST(StatusBar, ReportsWelcomeAndOfflineDefaults) {
     const auto segments = liquify::status_bar_segments({.offline = true});
 

@@ -298,6 +298,10 @@ auto status_bar_segments(const StatusBarInput& input) -> std::vector<std::string
     }
     if (input.daemon_running) {
         output.push_back("Daemon on");
+    } else if (!input.daemon_problem.empty()) {
+        output.push_back("Daemon " + input.daemon_problem);
+    } else if (input.daemon_starting) {
+        output.push_back("Daemon starting");
     } else if (input.daemon_available) {
         output.push_back("Daemon stopped");
     } else {

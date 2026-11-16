@@ -105,7 +105,12 @@ struct FirstRunStateLoad {
 struct StatusBarInput {
     bool repository_open{};
     bool daemon_running{};
+    // The service answered its last status call (liquify#36).
     bool daemon_available{};
+    bool daemon_starting{};
+    // What went wrong with the service ("failed to start", "connection lost"); empty when
+    // nothing did.
+    std::string daemon_problem;
     bool sync_running{};
     bool hydration_running{};
     bool build_running{};
