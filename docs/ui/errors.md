@@ -12,10 +12,44 @@ pages*).
 
 | Field | Shown as |
 |---|---|
-| `summary` | One line in the danger role, naming what failed and where (the lake's host, the folder) |
-| `next_step` | One line of body text: what the person does next |
+| `summary` | The notice's sentence, body text in `text_primary`, naming what failed and where (the lake's host, the folder) |
+| `next_step` | Body text in `text_secondary`: what the person does next |
 | `details` | liquid's `context: message`, hidden until **Details** is pressed |
-| `kind` | Not shown; it chooses the words and decides whether the failure is "offline" |
+| `kind` | Not drawn; it chooses the words, decides whether the failure is "offline", and an offline failure is a warning notice |
+
+## How a failure looks
+
+A failure is lake's *notice* (lake `frontend/src/styles/lake.css`, `.notice` and `.error`), drawn by
+`App::draw_user_error`. It never colours the sentence itself:
+
+- A compact panel filled with its role's soft colour (`danger_soft`, `warning_soft`, `info_soft`),
+  a 1-pixel hairline in the role at half strength (full strength in high contrast), and the
+  `panel_radius` corner.
+- A 6-pixel status dot in the role, centred on the first line.
+- Padding of 8 pixels above and below and 12 at the sides; the text starts 8 pixels after the dot.
+- The sentence, then the next step, then the buttons: the action as a compact secondary button and
+  **Details** as a compact quiet button, right-aligned. They share one line when it has room; where
+  it does not, the next step wraps under the sentence, and the buttons move under the text. The
+  room is measured with the longer *Hide details* label, so opening Details never rearranges the
+  notice.
+- Details open under the buttons, in `text_secondary`, inside the same panel.
+
+The role is the caller's choice (`NoticeLook::tone`). The default is danger, and warning for an
+unreachable lake (`UserError::offline`), where working offline is normal. The error model in
+`user_error.hpp` carries no severity.
+
+A **quiet** notice (`NoticeLook::quiet`) is for a failure that leaves its panel working: 8-pixel
+sides, always one line of sentence and action, the next step in its tooltip. When a narrow panel
+has no room for **Details**, the sentence itself is the Details control (underlined on hover, the
+tooltip says so). The repository sidebar uses quiet warnings for the index and for one unreadable
+folder: the tree keeps listing files.
+
+The controls each notice records for the native driver are unchanged: `<id>/summary`,
+`<id>/action`, `<id>/details`, plus `<id>/notice` for the whole panel.
+
+Loading and empty lines in panels (`App::draw_panel_state`) are one line of body text in
+`text_secondary`, a full sentence ending in a full stop or an ellipsis: "Indexing paths and
+symbols...", "This repository has no files.", "Loading...", "No other active sessions.".
 
 No field carries an absolute local path the person did not type. `without_absolute_paths` keeps a
 path inside the repository relative to it, says "the repository" for the root, and reduces any
@@ -33,8 +67,8 @@ Each failure is shown once, in the panel that owns it, and the status bar names 
 | Push (F9), no sync remote | Build | This repository has no lake to push to | Set lake |
 | Push, the lake failed | Build | The lake failure classes below, worded for a push | Push again, where retrying can help |
 | Code analysis (diagnostics, hover, definition, completion) | Diagnostics | Code analysis could not update | |
-| The path and symbol index | Repository sidebar | The file and symbol index could not be built | |
-| One folder of the tree | Repository sidebar | The folder *name* could not be read | |
+| The path and symbol index | Repository sidebar, quiet warning | Search index unavailable | Retry |
+| One folder of the tree | Repository sidebar, quiet warning | The folder *name* could not be read | |
 | Opening a repository | Front door, repository sidebar | This folder could not be opened as a repository | Retry |
 | Clone | Front door | The lake failure classes below | Retry clone |
 
@@ -44,7 +78,8 @@ The status bar shows the first of build, push and code-analysis failures as its 
 
 A failure's action is drawn only when liquify can perform it (`App::error_action_available`): Set
 up build opens the Set Up Build dialog ([`../editor/build.md`](../editor/build.md)), Set lake the Set
-Lake dialog, and Retry repeats the operation.
+Lake dialog, and Retry repeats the operation (for the index, `RepositoryView::retry_navigation`
+builds it again).
 
 Build and push failures are recorded separately from code-analysis failures in the editor graph
 (`EditorGraphSnapshot::build_error`, `DeploySnapshot::failure`, `query_failure`), so a failed

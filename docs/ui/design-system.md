@@ -186,6 +186,28 @@ its own: its rows keep `space3` inside, and the text surface reaches the region'
   selection the `selection` role, in both themes. A file dragged over the editor outlines it with a
   1-pixel `focus` line.
 
+## Notices
+
+A failure, a warning or a piece of information shown in place is lake's notice
+(`App::draw_user_error`, [`errors.md`](errors.md) has the full rules):
+
+| Part | Token |
+|---|---|
+| Fill | `danger_soft`, `warning_soft` or `info_soft` |
+| Hairline | the role (`danger`, `warning`, `info`) at half strength, 1 pixel, `panel_radius` corners |
+| Status dot | the role, 6 pixels |
+| Padding | `space2` (8) above and below, `space3` (12) at the sides; `space2` for a quiet notice |
+| Sentence | body, `text_primary` |
+| Next step | body, `text_secondary` |
+| Action | compact secondary button (the one-button rule: never a second primary on the surface) |
+| Details | compact quiet button |
+
+It is one line when the panel has room. A quiet notice is always one line and keeps its next step
+in a tooltip; the repository sidebar uses it for failures that leave the tree working.
+
+Loading and empty states are one quiet line of body text in `text_secondary`
+(`App::draw_panel_state`), not the disabled ink, which is for hints under fields.
+
 ## Surfaces
 
 Lake's direction is flat surfaces and hairline boundaries, with shadows only on overlays

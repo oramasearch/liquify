@@ -62,6 +62,13 @@ struct AppOptions {
   std::filesystem::path executable_path;
 };
 
+// How App::draw_user_error draws a failure: its role, and whether it is a quiet one-line notice.
+enum class NoticeTone : std::uint8_t { danger, warning, info };
+struct NoticeLook {
+  std::optional<NoticeTone> tone;
+  bool quiet{};
+};
+
 class App {
 public:
   explicit App(AppOptions options);
@@ -131,8 +138,16 @@ private:
       -> std::optional<StatusFailure>;
   [[nodiscard]] auto error_action_available(ErrorAction action) const -> bool;
   void run_error_action(ErrorAction action);
+  // A failure is drawn as lake's notice: a compact panel tinted with its role's soft colour, a
+  // hairline in the role, a status dot, the sentence, the next step in secondary ink, and the
+  // action and Details as compact buttons, on one line when there is room. The tone is the role:
+  // an unreachable lake is a warning, every other failure danger unless the caller says so. A
+  // quiet notice stays one line and moves the next step into its tooltip, for a failure that
+  // leaves the panel working.
   void draw_user_error(const UserError &failure, std::string_view id,
-                       const std::function<void()> &retry = {});
+                       const std::function<void()> &retry = {}, NoticeLook look = {});
+  // A panel's loading or empty line: one quiet line of body text in secondary ink.
+  void draw_panel_state(std::string_view text);
   void draw_clone_dialog();
   void begin_create_repository(std::filesystem::path path);
   void draw_new_repository_dialog();
