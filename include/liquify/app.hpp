@@ -108,6 +108,8 @@ private:
   void draw_user_error(const UserError &failure, std::string_view id,
                        const std::function<void()> &retry = {});
   void draw_clone_dialog();
+  void begin_create_repository(std::filesystem::path path);
+  void draw_new_repository_dialog();
   void open_cut_composer();
   void poll_cut_composer();
   void draw_cut_composer();
@@ -429,6 +431,8 @@ private:
   std::optional<std::string> cut_result_;
   UserError cut_failure_;
   bool clone_dialog_open_{};
+  bool new_repository_dialog_open_{};
+  std::string new_repository_path_;
   bool folder_dialog_open_{};
   bool repository_operation_is_clone_{};
   bool quit_ = false;

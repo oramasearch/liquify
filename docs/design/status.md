@@ -12,9 +12,10 @@ over one pinned libliquid.
 
 ## Shell and repository
 
-With no path, the shell is a repository front door: open a local folder, clone through liquid's
-drive client, reopen one of eight persisted recent repositories, establish a public TAAP identity
-session, or create another process-backed window. Opening a different repository replaces its
+With no path, the shell is a repository front door: open a local folder, create a repository,
+clone through liquid's drive client, reopen one of eight persisted recent repositories, show Your
+identity (this computer's TAAP signing identity, not a lake sign-in), or create another
+process-backed window. Opening a different repository replaces its
 services in the current process. Unreadable local repositories and unreachable lake remotes have
 separate retry states. A failed clone is classified from liquid's error code: only an unreachable
 lake is offline, and a lake that answered (TLS, token, access, not found, busy, unsupported) gets its

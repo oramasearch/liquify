@@ -533,15 +533,13 @@ void NativeAcceptance::clone_push(App &app, const std::filesystem::path &output)
   require(lake.advance_head("main.cpp", source).has_value(),
           "test lake holds main.cpp");
   click(app, app.frame_layout().controls.at("front-door/clone"));
-  for (int attempt = 0; attempt < 3 && !popup("Clone from lake"); ++attempt) {
+  for (int attempt = 0; attempt < 3 && !popup("Clone from Lake"); ++attempt) {
     click(app, app.frame_layout().controls.at("front-door/clone"));
   }
-  require(popup("Clone from lake"), "Clone from lake dialog opened");
-  app.clone_remote_ = lake.url();
+  require(popup("Clone from Lake"), "Clone from lake dialog opened");
   const auto stamp = std::to_string(
       std::chrono::steady_clock::now().time_since_epoch().count());
-  app.clone_path_ = (output / ("clone-" + stamp)).string();
-  pulse(app);
+  fill_clone(app, lake.url(), (output / ("clone-" + stamp)).string());
   click(app, app.frame_layout().controls.at("clone/submit"));
   wait_for_repository_operation(app);
   require(app.repository_ != nullptr && app.repository_->error().empty(),
@@ -766,6 +764,74 @@ void NativeAcceptance::request_review(const std::filesystem::path &output) {
   capture_themes(app, output, "review-opened");
 }
 
+void NativeAcceptance::front_door(App &app, const std::filesystem::path &output) {
+  for (const auto *control : {"front-door/open", "front-door/new", "front-door/clone",
+                              "front-door/new-window", "front-door/identity"}) {
+    require(app.frame_layout().controls.contains(control),
+            std::string("front door shows ") + control);
+  }
+  capture_themes(app, output, "front-door");
+  click(app, app.frame_layout().controls.at("front-door/clone"));
+  for (int attempt = 0; attempt < 3 && !popup("Clone from Lake"); ++attempt) {
+    click(app, app.frame_layout().controls.at("front-door/clone"));
+  }
+  require(popup("Clone from Lake"), "Clone from Lake dialog opened");
+  capture_themes(app, output, "front-door-clone");
+  click(app, app.frame_layout().controls.at("clone/cancel"));
+  require(!popup("Clone from Lake"), "Cancel closed the clone dialog");
+
+  // Your identity: this computer's signing key, not a lake sign-in.
+  click(app, app.frame_layout().controls.at("front-door/identity"));
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (!app.first_run_.session() &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  require(app.first_run_.session().has_value(),
+          "Your identity shows this computer's signing identity");
+  click(app, app.frame_layout().controls.at("front-door/identity"));
+  capture_themes(app, output, "front-door-identity");
+  key(app, "Escape");
+
+  // New repository, created with no terminal, then open in the same window.
+  click(app, app.frame_layout().controls.at("front-door/new"));
+  for (int attempt = 0; attempt < 3 && !popup("New Repository"); ++attempt) {
+    click(app, app.frame_layout().controls.at("front-door/new"));
+  }
+  require(popup("New Repository"), "New repository opened its dialog");
+  const auto folder =
+      output / ("new-" + std::to_string(std::chrono::steady_clock::now()
+                                             .time_since_epoch()
+                                             .count()));
+  text(app, folder.string());
+  require(app.new_repository_path_ == folder.string(), "folder typed");
+  capture_themes(app, output, "front-door-new");
+  click(app, app.frame_layout().controls.at("new-repository/submit"));
+  wait_for_repository_operation(app);
+  std::printf("new repository: open=%d error='%s' phase=%d\n",
+              app.repository_ != nullptr,
+              app.repository_ ? std::string(app.repository_->error()).c_str() : "",
+              static_cast<int>(app.first_run_.phase()));
+  require(app.repository_ != nullptr && app.repository_->error().empty() &&
+              app.repository_->path() == folder,
+          "#106: New repository created and opened the repository");
+  auto reopened = liquid::runtime::block_on(liquid::repository::open(folder));
+  require(reopened.has_value(), "#106: libliquid opens the new repository");
+  capture_themes(app, output, "front-door-created");
+}
+
+// Types the address into the focused field and the folder into the next, as a person would.
+void NativeAcceptance::fill_clone(App &app, const std::string &remote,
+                                  const std::string &folder) {
+  text(app, remote);
+  click(app, app.frame_layout().controls.at("clone/folder"));
+  text(app, folder);
+  pulse(app);
+  require(app.clone_remote_ == remote && app.clone_path_ == folder,
+          "address and folder typed into Clone from Lake");
+}
+
 void NativeAcceptance::wait_for_repository_operation(App &app) {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(60);
@@ -827,16 +893,13 @@ void NativeAcceptance::clone_failures(App &app,
     std::printf("front-door/clone at %.0f,%.0f %.0fx%.0f phase=%d\n", button.x,
                 button.y, button.width, button.height,
                 static_cast<int>(app.first_run_.phase()));
-    for (int attempt = 0; attempt < 3 && !popup("Clone from lake"); ++attempt) {
+    for (int attempt = 0; attempt < 3 && !popup("Clone from Lake"); ++attempt) {
       click(app, button);
       pulse(app);
     }
-    require(popup("Clone from lake"), "Clone from lake dialog opened");
-    // Text entry into ImGui fields is liquify#39; the person's typed values are set here
-    // and the dialog's own button starts the clone.
-    app.clone_remote_ = remote;
-    app.clone_path_ = (output / ("clone-" + std::string(item.name))).string();
-    pulse(app);
+    require(popup("Clone from Lake"), "Clone from lake dialog opened");
+    fill_clone(app, remote,
+               (output / ("clone-" + std::string(item.name))).string());
     click(app, app.frame_layout().controls.at("clone/submit"));
     wait_for_repository_operation(app);
     const auto &failure = app.first_run_.clone_failure();
@@ -904,6 +967,8 @@ int NativeAcceptance::run(std::string_view scenario,
     pulse(app);
     if (scenario == "front-door-clone-failures") {
       clone_failures(app, output);
+    } else if (scenario == "front-door-actions") {
+      front_door(app, output);
     } else if (scenario == "front-door-clone-push") {
       clone_push(app, output);
     } else {

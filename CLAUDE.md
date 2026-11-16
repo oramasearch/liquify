@@ -9,8 +9,8 @@ document rules, confidentiality, and the decisions not to drift past. Read both.
 ## Status
 
 **Retained GPU editor with indexed repository and graph-symbol navigation, graph-backed interactive C/C++ analysis, multiplayer presence and attribution, lease controls, inline build, test and push, structural editing, review in place, native plugins, and optional AI.**
-`./build/liquify` opens a repository front door with local open, lake clone, recent repositories,
-local TAAP identity and additional-window actions. Repositories switch without restarting.
+`./build/liquify` opens a repository front door with local open, New Repository, lake clone, recent repositories,
+Your identity (local TAAP signing identity) and additional-window actions. Repositories switch without restarting.
 `./build/liquify <path>` opens a liquid repository off the render thread, shows its root entries,
 loads nested trees when expanded, indexes all paths and libliquid symbol records, annotates file
 kind plus drive and change state, and opens blobs into retained in-memory buffers keyed by path.

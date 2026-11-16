@@ -7120,37 +7120,128 @@ void App::draw_cut_composer() {
 
 void App::draw_clone_dialog() {
   if (clone_dialog_open_) {
-    ImGui::OpenPopup("Clone from lake");
+    ImGui::OpenPopup("Clone from Lake");
     clone_dialog_open_ = false;
   }
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
-  ImGui::SetNextWindowSize(ImVec2(560.0F, 0.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Clone from lake", nullptr,
+  ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Clone from Lake", nullptr,
                               ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
-  ImGui::TextWrapped(
-      "Clone a lake repository through liquid's drive client. Offline failures "
-      "remain available for retry.");
+  ImGui::PushTextWrapPos(580.0F);
+  ImGui::TextUnformatted(
+      "Copy a repository from lake into a new folder on this computer. Paste "
+      "its address from the repository's page on lake.");
+  ImGui::PopTextWrapPos();
   ImGui::Spacing();
-  ImGui::InputTextWithHint("Lake repository", "https://lake.example/repository",
+  ImGui::TextUnformatted("Lake repository address");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(580.0F);
+  ImGui::InputTextWithHint("##clone-remote",
+                           "https://lake.example/v1/repositories/…",
                            &clone_remote_);
-  ImGui::InputTextWithHint("Local folder", "/path/to/new-folder", &clone_path_);
+  frame_layout_.controls["clone/remote"] = item_rectangle();
+  ImGui::TextUnformatted("New folder");
+  ImGui::SetNextItemWidth(580.0F);
+  ImGui::InputTextWithHint("##clone-folder", "/Users/you/projects/name",
+                           &clone_path_);
+  frame_layout_.controls["clone/folder"] = item_rectangle();
+  ImGui::TextDisabled("The folder must not exist yet, or be empty.");
   ImGui::Spacing();
   const auto ready = !clone_remote_.empty() && !clone_path_.empty();
   ImGui::BeginDisabled(!ready);
-  if (ImGui::Button("Clone repository")) {
+  if (ImGui::Button("Clone")) {
     begin_clone_repository(clone_remote_, clone_path_);
     ImGui::CloseCurrentPopup();
   }
   frame_layout_.controls["clone/submit"] = item_rectangle();
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel")) {
+  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     ImGui::CloseCurrentPopup();
   }
   frame_layout_.controls["clone/cancel"] = item_rectangle();
+  ImGui::EndPopup();
+}
+
+void App::begin_create_repository(std::filesystem::path path) {
+  if (repository_operation_) {
+    return;
+  }
+  first_run_.begin_open(path);
+  repository_operation_is_clone_ = false;
+  request_repaint();
+  repository_operation_.emplace(
+      std::async(std::launch::async, [path = std::move(path)] {
+        {
+          auto created =
+              liquid::runtime::block_on(liquid::repository::create(path));
+          if (!created) {
+            throw std::runtime_error(
+                created.error().code == liquid::errc::already_exists
+                    ? std::string{"this folder is already a liquid "
+                                  "repository; open it instead"}
+                    : without_absolute_paths(created.error().message, path));
+          }
+        }
+        return std::make_unique<RepositoryView>(RepositoryView::open(path));
+      }));
+}
+
+void App::draw_new_repository_dialog() {
+  if (new_repository_dialog_open_) {
+    ImGui::OpenPopup("New Repository");
+    new_repository_dialog_open_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("New Repository", nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::PushTextWrapPos(580.0F);
+  ImGui::TextUnformatted(
+      "Start a liquid repository in a new or empty folder. Every save becomes "
+      "a drip; cut drips into changes and push them to lake when you are "
+      "ready.");
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Folder");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(460.0F);
+  ImGui::InputTextWithHint("##new-repository-folder",
+                           "/Users/you/projects/name", &new_repository_path_);
+  frame_layout_.controls["new-repository/folder"] = item_rectangle();
+  ImGui::SameLine();
+  if (ImGui::Button("Choose…")) {
+    SDL_ShowOpenFolderDialog(
+        [](void *userdata, const char *const *files, int) {
+          auto *app = static_cast<App *>(userdata);
+          if (files != nullptr && files[0] != nullptr) {
+            app->new_repository_path_ = files[0];
+          }
+        },
+        this, window_, nullptr, false);
+  }
+  ImGui::Spacing();
+  ImGui::BeginDisabled(new_repository_path_.empty());
+  if (ImGui::Button("Create repository")) {
+    begin_create_repository(new_repository_path_);
+    ImGui::CloseCurrentPopup();
+  }
+  frame_layout_.controls["new-repository/submit"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
   ImGui::EndPopup();
 }
 
@@ -7167,6 +7258,8 @@ void App::draw_welcome() {
   ImGui::TextUnformatted("Welcome to liquify");
   ImGui::TextDisabled(
       "Build software locally. Collaborate through lake when it is reachable.");
+  ImGui::TextDisabled("Open or create a repository here, or clone one from "
+                      "lake.");
   ImGui::Spacing();
 
   const auto phase = first_run_.phase();
@@ -7220,8 +7313,15 @@ void App::draw_welcome() {
   }
   frame_layout_.controls["front-door/open"] = item_rectangle();
   ImGui::SameLine();
+  if (ImGui::Button("New repository", ImVec2(150.0F, 38.0F))) {
+    new_repository_dialog_open_ = true;
+  }
+  frame_layout_.controls["front-door/new"] = item_rectangle();
+  ImGui::SameLine();
   if (ImGui::Button("Clone from lake", ImVec2(150.0F, 38.0F))) {
     clone_dialog_open_ = true;
+    clone_remote_.clear();
+    clone_path_.clear();
   }
   frame_layout_.controls["front-door/clone"] = item_rectangle();
   ImGui::SameLine();
@@ -7232,32 +7332,46 @@ void App::draw_welcome() {
   ImGui::EndDisabled();
   ImGui::Spacing();
 
+  // This is the computer's own signing identity (TAAP), not a lake account: it signs every
+  // drip and change. Signing in to a lake comes with choosing one (liquify#96).
   if (first_run_.session()) {
-    if (ImGui::SmallButton("Signed in to lake")) {
+    if (ImGui::SmallButton("Your identity")) {
       ImGui::OpenPopup("identity-details");
     }
+    frame_layout_.controls["front-door/identity"] = item_rectangle();
     if (ImGui::BeginPopup("identity-details")) {
+      ImGui::TextUnformatted(
+          "This computer signs your drips and changes with this identity.");
       identifier_detail("Identity", first_run_.session()->actor);
+      ImGui::TextDisabled("Key custody: %s",
+                          first_run_.session()->custody.c_str());
       ImGui::EndPopup();
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("Local custody available");
+    ImGui::TextDisabled("Signs your drips and changes");
     ImGui::SameLine();
-    if (ImGui::SmallButton("Sign out")) {
+    if (ImGui::SmallButton("Forget")) {
       first_run_.sign_out();
       persist_first_run();
     }
   } else {
     ImGui::BeginDisabled(identity_operation_.has_value());
-    if (ImGui::Button(identity_operation_ ? "Signing in..."
-                                          : "Sign in to lake")) {
+    if (ImGui::Button(identity_operation_ ? "Reading your identity..."
+                                          : "Your identity")) {
       begin_sign_in();
     }
+    frame_layout_.controls["front-door/identity"] = item_rectangle();
     ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::TextDisabled("The key this computer signs your work with");
   }
   if (!identity_error_.empty()) {
-    ImGui::TextWrapped("Could not establish a session: %s",
-                       identity_error_.c_str());
+    draw_user_error({.kind = FailureKind::local,
+                     .summary = "Your identity could not be read",
+                     .next_step = "Try again. liquid keeps the key in this "
+                                  "computer's credential store.",
+                     .details = without_absolute_paths(identity_error_)},
+                    "identity-failure");
   }
 
   ImGui::Spacing();
@@ -7309,6 +7423,7 @@ void App::draw_welcome() {
   }
   ImGui::EndChild();
   draw_clone_dialog();
+  draw_new_repository_dialog();
 }
 
 void App::draw_status_bar() {
@@ -8207,6 +8322,9 @@ void NativeAcceptance::click(App &app, InputRectangle rectangle) {
   event.motion.x = x;
   event.motion.y = y;
   SDL_PushEvent(&event);
+  pulse(app);
+  // ImGui decides what is hovered from the previous frame; a loaded machine can deliver the
+  // motion late, so the press follows a second settled pulse, as a person's would.
   pulse(app);
   event = {};
   event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;

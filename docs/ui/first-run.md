@@ -1,8 +1,22 @@
 # First run and repository lifecycle
 
 Liquify starts at a repository front door when no path is supplied. The front door can open a
-local folder, clone a lake repository into a new local folder, reopen a recent repository, create
-another Liquify window, or establish a local TAAP identity session. Opening another repository
+local folder, create a new repository, clone a lake repository into a new local folder, reopen a
+recent repository, create another Liquify window, or show **Your identity**.
+
+**New repository** opens a dialog with a Folder field (and Choose… for the native folder picker).
+Create repository calls libliquid's `repository::create` on a worker, then opens the repository in
+the same window. A folder that already holds a liquid repository is refused with "open it instead".
+
+**Your identity** is this computer's TAAP signing identity, the key that signs every drip and
+change; it is not a lake account, and the button no longer says "Sign in to lake". It reads (or
+creates) the identity through `identity_detail::local_signer`, and its popover shows the identifier
+and where the key is held. Forget removes it from the front door only. Signing in to a lake comes
+with choosing one (liquify#96).
+
+**Clone from Lake** asks for the lake repository address (pasted from the repository's page on
+lake) and a new folder, each with its label above the field, and says the folder must not exist
+yet or be empty. Opening another repository
 replaces the active repository services in the same process; no restart is required. The active
 repository name in the status bar returns to this front door, while each recent row can open in the
 current window or a new one.
@@ -35,6 +49,10 @@ When no repository is active it also says so explicitly.
 Repository summaries come from libliquid's repository status, refs, change log, active presence,
 and drive status APIs. This supplies the current change and branch, last named change and date,
 remote bytes, hydration debt, pending uploads, offline reason, and active collaborator count.
+
+The native acceptance scenario `front-door-actions` drives every front-door action in the real
+window, creates a repository with no terminal, and saves `front-door`, `front-door-clone`,
+`front-door-identity`, `front-door-new` and `front-door-created` in light and dark.
 
 The deterministic screenshot registry covers the front door and both recovery states in light and
 dark themes. `welcome-*` shows recent repositories and the identity action;
