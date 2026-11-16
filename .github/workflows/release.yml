@@ -1,54 +1,57 @@
-name: Release
-
-on:
-  push:
-    tags:
-      - 'v*'
-
-permissions:
-  contents: read
-
-jobs:
-  installers:
-    uses: ./.github/workflows/ci.yml
-    secrets: inherit
-
-  publish:
-    name: Publish GitHub release
-    needs: installers
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download verified installers
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts
-          merge-multiple: true
-
-      - name: Compute release digests
-        shell: bash
-        run: |
-          cd release-artifacts
-          mapfile -t artifacts < <(
-            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort
-          )
-          if [[ ${#artifacts[@]} -eq 0 ]]; then
-            echo "no release artifacts were downloaded" >&2
-            exit 1
-          fi
-          sha256sum "${artifacts[@]}" > SHA256SUMS
-          sha256sum --check SHA256SUMS
-
-      - name: Create release and upload installers
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --generate-notes \
-            --title "Liquify $GITHUB_REF_NAME" \
-            release-artifacts/*
+# Disabled 2026-11-15 at Steve's request: no hosted CI in oramasearch repositories.
+# Actions are also turned off in the repository settings. Kept, commented, for reference.
+#
+# name: Release
+#
+# on:
+#   push:
+#     tags:
+#       - 'v*'
+#
+# permissions:
+#   contents: read
+#
+# jobs:
+#   installers:
+#     uses: ./.github/workflows/ci.yml
+#     secrets: inherit
+#
+#   publish:
+#     name: Publish GitHub release
+#     needs: installers
+#     runs-on: ubuntu-24.04
+#     permissions:
+#       contents: write
+#
+#     steps:
+#       - name: Download verified installers
+#         uses: actions/download-artifact@v4
+#         with:
+#           path: release-artifacts
+#           merge-multiple: true
+#
+#       - name: Compute release digests
+#         shell: bash
+#         run: |
+#           cd release-artifacts
+#           mapfile -t artifacts < <(
+#             find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort
+#           )
+#           if [[ ${#artifacts[@]} -eq 0 ]]; then
+#             echo "no release artifacts were downloaded" >&2
+#             exit 1
+#           fi
+#           sha256sum "${artifacts[@]}" > SHA256SUMS
+#           sha256sum --check SHA256SUMS
+#
+#       - name: Create release and upload installers
+#         shell: bash
+#         env:
+#           GH_TOKEN: ${{ github.token }}
+#         run: |
+#           gh release create "$GITHUB_REF_NAME" \
+#             --repo "$GITHUB_REPOSITORY" \
+#             --verify-tag \
+#             --generate-notes \
+#             --title "Liquify $GITHUB_REF_NAME" \
+#             release-artifacts/*

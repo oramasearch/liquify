@@ -1,5 +1,9 @@
 # GitHub Actions workflows
 
+> **Disabled 2026-11-15.** GitHub Actions are turned off for this repository and every workflow file
+> is commented out (no hosted CI in oramasearch repositories). Builds, installers and their checks run
+> locally; tests run when a release is cut. What follows describes the workflows as they were.
+
 `ci.yml` is both the pull-request workflow and the reusable three-platform installer build. It
 builds and tests the release executable plus its tree-sitter frontend, packages and verifies the native installers, uploads them
 as workflow artifacts, and verifies the AppImage again in Fedora.
