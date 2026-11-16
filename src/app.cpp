@@ -19,6 +19,9 @@
 #include <utility>
 
 #include "imgui.h"
+// The shell reads ImGui's internal item state (the button kit's hover and disabled checks, popup
+// layering), so every build includes it, not only the native-window test builds (liquify#145).
+#include "imgui_internal.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
 #include "misc/cpp/imgui_stdlib.h"
@@ -26,7 +29,6 @@
 #ifdef LIQUIFY_NATIVE_WINDOW_TESTS
 #include "../tests/native_acceptance.hpp"
 #include "../tests/ui_property_assert.hpp"
-#include "imgui_internal.h"
 #endif
 
 #if defined(__APPLE__) && defined(__OBJC__)
