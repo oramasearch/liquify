@@ -1,16 +1,19 @@
 # Assistant surface
 
-**Decision.** AI is a first-class editor surface and is disabled by default. The repository
-document key `config.liquify.ai.enabled` overrides the same key in the global configuration file.
-The status-line `AI: off` / `AI: on` button and the Assistant: Toggle palette command write the
-repository key. Global configuration uses `key=value` lines at the platform configuration path:
+**Decision.** AI is a first-class editor surface and is disabled by default. **It is turned on per
+user and per repository, never by a settings file** (liquify#75): the status-line `AI: off` /
+`AI: on` button, the Assistant: Toggle palette command and the settings checkbox add or remove the
+open repository's canonical path in `ai-repositories`, beside the user's settings file. A repository
+cannot turn it on for itself, and turning it on for one repository does not turn it on for others
+([settings](../ui/settings.md)). Global configuration uses `key=value` lines at the platform
+configuration path:
 
 - macOS: `~/Library/Application Support/liquify/config`
 - Windows: `%APPDATA%/liquify/config`
 - Linux: `$XDG_CONFIG_HOME/liquify/config`, or `~/.config/liquify/config`
 
-The supported keys are `config.liquify.ai.enabled`, `config.liquify.ai.context_bytes`,
-`config.liquify.ai.model`, and `config.liquify.ai.max_tokens`. Defaults are off, 65,536 context
+The supported keys are `config.liquify.ai.context_bytes`, `config.liquify.ai.model`, and
+`config.liquify.ai.max_tokens`. Defaults are off, 65,536 context
 bytes, `claude-opus-5`, and 4,096 output tokens.
 
 ## Off means offline
@@ -55,7 +58,18 @@ thread only starts or cancels an operation and receives state snapshots.
 
 The provider sends `POST /v1/messages` with `x-api-key`, `anthropic-version: 2023-06-01`, and
 `content-type: application/json`. The JSON contains `model`, `max_tokens`, `system`, `messages`,
-and `stream: true`; it deliberately has no `thinking` member. Server-sent `content_block_delta`
+and `stream: true`; it deliberately has no `thinking` member.
+
+**Repository context is data, never instructions** (liquify#73). The one user message has two
+content blocks. The first is the context inside `<repository_context>` tags, with every
+`[user-request]` and every `<repository_context>` or `</repository_context>` inside it rewritten,
+so text from a hostile repository can neither close the block nor start a request. The match
+ignores ASCII case and allows whitespace inside the brackets and around the `/`, so
+`</Repository_Context >`, `< /repository_context>` and `[ USER-REQUEST ]` are rewritten as well
+(liquify#123); text that only resembles a marker, such as `[user-requests]`, is left alone. The second is
+`[user-request]` followed by the person's prompt. The system prompt ends by telling the model that
+everything inside `<repository_context>` is data read from the repository, never an instruction.
+`anthropic_request_body` builds it and `quote_repository_context` does the rewriting. Server-sent `content_block_delta`
 events become text deltas. `message_delta.stop_reason` and `message_stop` produce the terminal
 result. A `refusal` is a distinct successful stop reason shown as a refusal in the panel. An
 in-process TLS double verifies the request and covers a normal answer, refusal, and disconnection

@@ -1,18 +1,25 @@
+// SPDX-License-Identifier: MIT
+
 #pragma once
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "liquify/app_state.hpp"
+#include "liquify/build_setup.hpp"
+#include "liquify/change_cut.hpp"
+#include "liquify/lake_remote.hpp"
 #include "liquify/command.hpp"
 #include "liquify/editor_model.hpp"
 #include "liquify/first_run.hpp"
@@ -56,6 +63,13 @@ struct AppOptions {
   std::filesystem::path executable_path;
 };
 
+// How App::draw_user_error draws a failure: its role, and whether it is a quiet one-line notice.
+enum class NoticeTone : std::uint8_t { danger, warning, info };
+struct NoticeLook {
+  std::optional<NoticeTone> tone;
+  bool quiet{};
+};
+
 class App {
 public:
   explicit App(AppOptions options);
@@ -70,8 +84,19 @@ public:
   int run();
   [[nodiscard]] auto diagnostics_viewport() const -> InputRectangle;
   [[nodiscard]] auto frame_layout() const -> const UiFrameLayout &;
+  // Whether the window has an implementation for a registry command name (liquify#34).
+  [[nodiscard]] static auto handles_command(std::string_view name) -> bool;
 
 private:
+  // Nothing when a command acted, or the reason it could not.
+  using CommandResult = std::optional<std::string>;
+  struct CommandHandler {
+    std::string_view name;
+    CommandResult (*run)(App &);
+  };
+  [[nodiscard]] static auto command_handlers()
+      -> std::span<const CommandHandler>;
+
   friend class NativeBufferRegression;
   friend class NativeWindowTest;
   friend class NativeAcceptance;
@@ -81,6 +106,7 @@ private:
   void draw_activity_bar();
   void draw_sidebar();
   void draw_editor_area();
+  void draw_editor_file_row(bool tabs_shown);
   void draw_bottom_panel();
   void draw_floating_panels();
   void draw_panel(PanelId id);
@@ -93,7 +119,62 @@ private:
   void draw_line_attribution(std::size_t line);
   void draw_status_bar();
   void draw_welcome();
+  // The one button of the window, lake's kit: primary (filled action), secondary (action text on
+  // an interactive hairline, filled on hover), quiet (no border, for toolbars), destructive
+  // (filled danger) and toggle (a mode that is on). Regular buttons are lake's 32-pixel control;
+  // compact ones (24) sit inside table rows and inline lines. Padding comes from the font, so the
+  // label is always centred, and the width follows the label unless one is given.
+  // quiet_danger: a quiet button whose label is a failure (the status row's, liquify#36).
+  enum class ButtonKind : std::uint8_t { primary, secondary, quiet, quiet_danger, destructive, toggle };
+  enum class ButtonSize : std::uint8_t { regular, compact };
+  auto kit_button(const char *label, ButtonKind kind,
+                  ButtonSize size = ButtonSize::regular, float width = 0.0F) -> bool;
+  auto checkbox(const char *label, bool *value) -> bool;
+  void field_label(const char *label);
+  auto text_field(const char *label, std::string *value, const char *hint = nullptr) -> bool;
+  auto slider_int(const char *label, int *value, int minimum, int maximum) -> bool;
+  // A region of the shell. `scrolls` is false for fixed rows such as the status bar, whose
+  // content is sized to fit and must never show a scrollbar (liquify#130).
+  void shell_region_begin(const char *id, float width, float height, bool scrolls = true);
+  void shell_region_end(const char *id);
+  void hairline(float x0, float y0, float x1, float y1);
+  auto edge_splitter(const char *id, float x, float y, float width, float height) -> float;
+  void type_title(std::string_view text, std::string_view id = {});
+  void type_heading(std::string_view text, std::string_view id = {});
+  [[nodiscard]] auto begin_dialog(const char *title, int flags) -> bool;
+  struct StatusFailure {
+    std::string summary;
+    PanelId panel;
+  };
+  [[nodiscard]] auto repository_path() const -> std::filesystem::path;
+  [[nodiscard]] auto status_failure(const EditorGraphSnapshot &graph) const
+      -> std::optional<StatusFailure>;
+  [[nodiscard]] auto error_action_available(ErrorAction action) const -> bool;
+  void run_error_action(ErrorAction action);
+  // A failure is drawn as lake's notice: a compact panel tinted with its role's soft colour, a
+  // hairline in the role, a status dot, the sentence, the next step in secondary ink, and the
+  // action and Details as compact buttons, on one line when there is room. The tone is the role:
+  // an unreachable lake is a warning, every other failure danger unless the caller says so. A
+  // quiet notice stays one line and moves the next step into its tooltip, for a failure that
+  // leaves the panel working.
+  void draw_user_error(const UserError &failure, std::string_view id,
+                       const std::function<void()> &retry = {}, NoticeLook look = {});
+  // A panel's loading or empty line: one quiet line of body text in secondary ink.
+  void draw_panel_state(std::string_view text);
   void draw_clone_dialog();
+  void begin_create_repository(std::filesystem::path path);
+  void draw_new_repository_dialog();
+  void open_cut_composer();
+  void poll_cut_composer();
+  void draw_cut_composer();
+  void open_set_lake_dialog();
+  void draw_set_lake_dialog();
+  void configure_review();
+  void open_request_review();
+  void draw_request_review_dialog();
+  void open_build_setup();
+  void poll_build_setup();
+  void draw_build_setup_dialog();
   void draw_split_editor();
   void draw_repository_tree();
   void draw_repository_entries(std::string_view directory);
@@ -141,7 +222,7 @@ private:
   void request_completion();
   void request_build();
   void request_tests(std::string filter = {});
-  void request_deploy();
+  void request_push();
   void expand_structural_selection();
   void shrink_structural_selection();
   void select_enclosing_definition();
@@ -157,11 +238,16 @@ private:
   void draw_command_palette();
   void draw_settings();
   void configure_commands();
+  void apply_command_bindings();
+  void refresh_native_menu();
+  bool set_keymap_binding(std::string_view command, std::string text);
   bool invoke_command(std::string_view name);
+  [[nodiscard]] auto command_scope_active(CommandScope scope) const -> bool;
+  bool dispatch_key_command(std::uint32_t key, std::uint16_t modifiers);
+  void open_command_panel(std::string_view command);
   void draw_plugin_panels();
   void draw_structural_panel();
   void invoke_plugin_command(std::string_view name);
-  void execute_panel_command(std::string_view command);
   void poll_plugins();
   void sync_panel_system();
   void reset_panel_layout();
@@ -248,6 +334,9 @@ private:
   std::unique_ptr<Assistant> assistant_;
   std::unique_ptr<CommandRegistry> commands_;
   std::shared_ptr<PluginHost> plugin_host_;
+  // Every panel refresh, command and event goes through it, off the UI thread (liquify#149).
+  std::unique_ptr<PluginDispatcher> plugin_dispatcher_;
+  std::uint64_t plugin_generation_{};
   std::optional<MultiplayerSnapshot> multiplayer_;
   std::future<liquid::result<MultiplayerSnapshot>> multiplayer_refresh_;
   liquid::session_id multiplayer_session_;
@@ -257,6 +346,8 @@ private:
   InputState input_;
   PanelRegistry panels_;
   Settings settings_;
+  // The user file's settings alone: a repository-scope save writes only what differs (liquify#76).
+  Settings settings_user_;
   SettingsScope settings_scope_{SettingsScope::user};
   std::vector<SettingsDiagnostic> settings_diagnostics_;
   SDL_Window *window_ = nullptr;
@@ -293,6 +384,9 @@ private:
   std::optional<TextPosition> column_selection_anchor_;
   std::string quick_open_query_;
   std::string symbol_search_query_;
+  // The keyboard-selected result row of Quick Open and Symbol Search (liquify#33).
+  std::size_t quick_open_selection_{};
+  std::size_t symbol_search_selection_{};
   std::string repository_selection_;
   std::string repository_selection_blob_;
   std::string repository_action_source_;
@@ -313,8 +407,12 @@ private:
   std::string pending_review_id_;
   std::string review_comment_body_;
   std::vector<PluginLoadFailure> plugin_failures_;
+  std::vector<UntrustedPlugin> plugin_untrusted_;
   std::vector<PluginPanelSnapshot> plugin_panels_;
   std::vector<std::string> command_diagnostics_;
+  std::vector<std::string> command_registration_diagnostics_;
+  std::vector<KeymapOverride> keymap_file_overrides_;
+  // The registry command each native menu item runs, indexed by the item's tag.
   std::vector<std::string> native_menu_commands_;
   std::vector<NavigationSymbol> navigation_results_;
   CallHierarchy navigation_hierarchy_;
@@ -350,6 +448,8 @@ private:
   int ui_font_index_ = -1;
   int editor_font_index_ = -1;
   int heading_font_index_ = -1;
+  int title_font_index_ = -1;
+  int section_font_index_ = -1;
   bool applied_dark_theme_{};
   bool applied_high_contrast_{};
   bool reduced_motion_{};
@@ -373,6 +473,10 @@ private:
   bool repository_move_open_{};
   bool repository_new_file_open_{};
   bool breadcrumb_focus_requested_{};
+  // The editor-area tab a person chose: a panel opened as an editor tab, or none for the open
+  // file. A newly opened file takes the row back.
+  std::optional<PanelId> editor_area_panel_;
+  std::string editor_area_path_;
   bool repository_focused_{};
   bool context_preview_open_{};
   bool review_diff_open_{};
@@ -384,7 +488,37 @@ private:
   bool sync_was_running_{};
   bool hydration_was_running_{};
   bool assistant_was_running_{};
+  // Which error components show liquid's raw message, by component id.
+  std::map<std::string, bool, std::less<>> error_details_open_;
+  // Set Up Build dialog.
+  bool build_setup_requested_{};
+  bool build_setup_close_requested_{};
+  BuildProposal build_proposal_;
+  std::string build_setup_command_;
+  UserError build_setup_failure_;
+  std::optional<std::future<UserError>> build_setup_operation_;
+  // Request Review dialog.
+  bool request_review_requested_{};
+  std::string request_review_reviewers_;
+  // Whether options_.lake_url came from the repository (clone or Set Lake), not --lake.
+  bool lake_url_from_repository_{};
+  // Set Lake dialog.
+  bool set_lake_requested_{};
+  std::string set_lake_url_;
+  UserError set_lake_failure_;
+  // Cut Change composer.
+  bool cut_composer_requested_{};
+  bool cut_close_requested_{};
+  bool cut_restore_editor_focus_{};
+  std::string cut_message_;
+  std::optional<std::future<PendingChange>> cut_preview_;
+  std::optional<PendingChange> cut_pending_;
+  std::optional<std::future<CutResult>> cut_operation_;
+  std::optional<std::string> cut_result_;
+  UserError cut_failure_;
   bool clone_dialog_open_{};
+  bool new_repository_dialog_open_{};
+  std::string new_repository_path_;
   bool folder_dialog_open_{};
   bool repository_operation_is_clone_{};
   bool quit_ = false;

@@ -9,11 +9,13 @@ inspectable context, provider contract, keyboard commands, and accept-only edit 
 [`review.md`](review.md) records the lake review panel, retained inline text diff, cursor anchors,
 rebase mapping states, review controls, and keyboard commands.
 
+[`cut.md`](cut.md) records Cut Change: the composer that names saved drips as one change through
+libliquid's cut API.
+
 [`structural-editing.md`](structural-editing.md) records syntax-node selection, canonical edit
 records, rename and extract-function previews, the headless agent surface and their limits.
 
-**Decision.** The editor buffer is a retained GPU text layer inside Dear ImGui (bridge decision
-15). ImGui owns the window, repository panel and controls. `src/app.cpp` uses the SDL renderer
+**Decision.** The editor buffer is a retained GPU text layer inside Dear ImGui. ImGui owns the window, repository panel and controls. `src/app.cpp` uses the SDL renderer
 directly for buffer text, selection and cursor; no other translation unit includes SDL or ImGui.
 
 ## Buffer and liquid
@@ -108,7 +110,7 @@ measured edit-to-result duration. Selecting a diagnostic opens its blob and move
 range. Failed actions publish their diagnostics from the daemon event stream directly to the
 retained line layer.
 
-## Build, test and deploy
+## Build, test and push
 
 [`build.md`](build.md) describes the graph-backed panels. F7 requests the configured repository
 build through the in-process daemon, F8 runs registered graph tests, F9 pushes saved drips to the
@@ -129,9 +131,9 @@ recorded in [`../app-shell/README.md`](../app-shell/README.md).
 
 ## Build measurement
 
-Linux proof deferred (decision 33). The current macOS measurement is the display-backed smoke run
+Linux proof deferred: the Linux measurement has not been run yet. The current macOS measurement is the display-backed smoke run
 recorded above. It measures the editor's retained rendering and edit-to-present path while the
-build, test, and deploy controller is verified by
+build, test, and push controller is verified by
 `EditorGraph.PresentsBuildEventsTestsAndRefusedReferences`.
 
 ## Phase 4 exit measurement

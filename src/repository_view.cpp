@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "repository_view.hpp"
 
 #include <algorithm>
@@ -20,6 +22,40 @@
 #include "repository_error.hpp"
 
 namespace liquify {
+
+auto valid_entry_name(std::string_view name) -> bool {
+  if (name.empty() || name == "." || name == "..") {
+    return false;
+  }
+  return std::ranges::none_of(name, [](char character) {
+    const auto value = static_cast<unsigned char>(character);
+    return character == '/' || character == '\\' || value < 0x20 || value == 0x7f;
+  });
+}
+
+auto printable_name(std::string_view name) -> std::string {
+  auto output = std::string{};
+  output.reserve(name.size());
+  for (const auto character : name) {
+    const auto value = static_cast<unsigned char>(character);
+    if (value < 0x20 || value == 0x7f) {
+      output += std::format("\\x{:02x}", value);
+    } else {
+      output += character;
+    }
+  }
+  return output;
+}
+
+namespace {
+
+// Leaves out entries whose names are not one safe path component (liquify#78).
+auto valid_entries(std::vector<liquid::tree_entry> entries) -> std::vector<liquid::tree_entry> {
+  std::erase_if(entries, [](const liquid::tree_entry &entry) { return !valid_entry_name(entry.name); });
+  return entries;
+}
+
+} // namespace
 namespace {
 
 std::mutex repository_worker_mutex;
@@ -250,10 +286,6 @@ void clean_failed_clone(const std::filesystem::path &target, bool existed) {
   }
 }
 
-auto is_offline_error(liquid::errc code) -> bool {
-  return code == liquid::errc::io || code == liquid::errc::unavailable;
-}
-
 auto display_date(std::chrono::sys_seconds at) -> std::string {
   return std::format("{:%Y-%m-%d}", std::chrono::floor<std::chrono::days>(at));
 }
@@ -417,6 +449,18 @@ auto RepositoryView::offline_reason() const -> std::string_view {
 
 auto RepositoryView::offline() const -> bool { return offline_; }
 
+auto RepositoryView::lake_remote() const -> std::string_view {
+  return lake_remote_;
+}
+
+void RepositoryView::set_lake_remote(std::string remote) {
+  lake_remote_ = std::move(remote);
+}
+
+auto RepositoryView::clone_failure() const -> const UserError & {
+  return clone_failure_;
+}
+
 auto RepositoryView::remote_bytes() const -> std::uint64_t {
   return remote_bytes_;
 }
@@ -550,7 +594,7 @@ RepositoryView RepositoryView::load(std::filesystem::path path) {
     return view;
   }
 
-  view.entries_ = std::move(root->entries);
+  view.entries_ = valid_entries(std::move(root->entries));
   auto annotations = load_annotations(*opened);
   view.modified_paths_ = std::move(annotations.modified);
   view.in_change_paths_ = std::move(annotations.in_change);
@@ -593,6 +637,7 @@ RepositoryView RepositoryView::load(std::filesystem::path path) {
       view.pending_uploads_ = drive_status->pending_uploads;
       view.offline_reason_ = drive_status->offline_reason;
       view.offline_ = !view.offline_reason_.empty();
+      view.lake_remote_ = drive_status->remote;
     }
   }
   view.open_time_ = std::chrono::steady_clock::now() - started;
@@ -608,35 +653,36 @@ RepositoryView RepositoryView::clone_impl(std::filesystem::path path,
   const auto valid = validate_clone_target(path);
   if (!valid) {
     view.error_ = error_message(valid.error());
+    view.clone_failure_ = describe_clone_target_failure(valid.error(), path);
     return view;
   }
+  const auto fail = [&](const liquid::error &error) {
+    view.error_ = error_message(error);
+    view.clone_failure_ = describe_clone_failure(error, remote);
+    view.offline_ = view.clone_failure_.offline();
+    clean_failed_clone(path, *valid);
+  };
 
   auto options = liquid::drive_options{};
   options.bearer_token = std::move(bearer_token);
   auto client = liquid::runtime::block_on(
-      liquid::drive_client::open(path, std::move(remote), std::move(options)));
+      liquid::drive_client::open(path, remote, std::move(options)));
   if (!client) {
-    view.error_ = error_message(client.error());
-    view.offline_ = is_offline_error(client.error().code);
-    clean_failed_clone(path, *valid);
+    fail(client.error());
     return view;
   }
   auto pinned = liquid::runtime::block_on(client->pin(""));
   if (!pinned) {
     const auto error = pinned.error();
     client = liquid::drive_client{};
-    view.error_ = error_message(error);
-    view.offline_ = is_offline_error(error.code);
-    clean_failed_clone(path, *valid);
+    fail(error);
     return view;
   }
   auto report = liquid::runtime::block_on(client->sync());
   if (!report) {
     const auto error = report.error();
     client = liquid::drive_client{};
-    view.error_ = error_message(error);
-    view.offline_ = is_offline_error(error.code);
-    clean_failed_clone(path, *valid);
+    fail(error);
     return view;
   }
   for (const auto &reference : report->status.references) {
@@ -645,6 +691,8 @@ RepositoryView RepositoryView::clone_impl(std::filesystem::path path,
     }
     client = liquid::drive_client{};
     view.error_ = reference.name + ": " + reference.reason;
+    view.clone_failure_ =
+        describe_clone_refusal(reference.name, reference.reason, remote);
     clean_failed_clone(path, *valid);
     return view;
   }
@@ -673,7 +721,7 @@ auto RepositoryView::load_directory(std::filesystem::path repository_path,
     output.error = error_message(tree.error());
     return output;
   }
-  output.entries = std::move(tree->entries);
+  output.entries = valid_entries(std::move(tree->entries));
   return output;
 }
 
@@ -742,7 +790,7 @@ auto RepositoryView::move_path(std::filesystem::path repository_path,
     output.error = error_message(root.error());
     return output;
   }
-  output.entries = std::move(root->entries);
+  output.entries = valid_entries(std::move(root->entries));
   auto annotations = load_annotations(*opened);
   output.modified = std::move(annotations.modified);
   output.in_change = std::move(annotations.in_change);
@@ -771,13 +819,21 @@ auto RepositoryView::create_file(std::filesystem::path repository_path,
     output.error = error_message(root.error());
     return output;
   }
-  output.entries = std::move(root->entries);
+  output.entries = valid_entries(std::move(root->entries));
   auto annotations = load_annotations(*opened);
   output.modified = std::move(annotations.modified);
   output.in_change = std::move(annotations.in_change);
   output.conflicted = std::move(annotations.conflicted);
   output.status = "created " + path;
   return output;
+}
+
+void RepositoryView::retry_navigation() {
+  if (navigation_pending_) {
+    return;
+  }
+  navigation_error_.clear();
+  start_navigation_load();
 }
 
 void RepositoryView::start_navigation_load() {

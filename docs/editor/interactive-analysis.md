@@ -69,10 +69,18 @@ missing named-pipe transport. A hosted daemon is shut down with the editor; an a
 left to its owner.
 
 The daemon owns working-tree capture, its persisted graph and the `liquid status` data. The
-registered editor query kinds remain in the in-process `InteractiveAnalysis` graph at
-`.liquid/liquify-graph`; both stay inside libliquid and no query crosses the daemon socket. The
-daemon's public construction API does not accept an additional query registry. `.liquid/**` is
-excluded from capture so graph persistence cannot create editor drips.
+registered editor query kinds remain in the in-process `InteractiveAnalysis` graph; both stay inside
+libliquid and no query crosses the daemon socket. The daemon's public construction API does not
+accept an additional query registry.
+
+**The analysis cache is the user's, never the repository's** (liquify#79). The graph
+(`liquify-graph`) and the stub graph (`liquify-stub-graph`) live in
+`analysis_cache_directory(repository)`: `analysis/<16 hex>` beside liquify's other per-user state
+(`$LIQUID_HOME/liquify`, `%LOCALAPPDATA%\liquify`, or `~/.liquid/liquify`), named by a stable hash of
+the repository's canonical path. A repository therefore cannot ship a cache the editor reads on open;
+caches left in a repository's `.liquid/` by an earlier version are no longer read. Reading a cache is
+also bounded: every count is capped by the bytes left before anything is reserved, and declaration
+kinds and diagnostic severities are checked before they are cast.
 
 Buffer open, close and edit operations are serialized on the worker. Cursor and diagnostic
 demands run concurrently with that worker, allowing the next edit to invalidate an active query
@@ -80,7 +88,10 @@ instead of waiting for it. Results carry monotonically increasing request genera
 answer cannot replace a newer hover, completion, definition or diagnostic result. The render
 thread copies one `EditorGraphSnapshot` containing those answers, graph statistics and daemon
 status. The normal reading path exposes only actionable graph state. Repository drip counters and
-the measured edit-to-diagnostic duration are available through Diagnostics details.
+the measured edit-to-diagnostic duration are available through Diagnostics details. Each concurrent demand runs on
+its own thread, which is joined, never detached (liquify#80): the worker joins finished ones as new
+work arrives, and `EditorGraph`'s destructor joins every remaining one after the worker has stopped,
+so no task can outlive the graph it uses.
 
 `publish_build_diagnostics` is the producer boundary for the build path: it writes the
 translation-unit diagnostic input before requesting the editor diagnostic query. Inline build

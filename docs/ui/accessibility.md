@@ -8,7 +8,12 @@ state-machine tests.
 ## Text composition
 
 An editor with focus starts SDL text input and supplies the active caret rectangle with
-`SDL_SetTextInputArea`. `SDL_EVENT_TEXT_EDITING` updates a retained composition without changing
+`SDL_SetTextInputArea`. The retained editor and ImGui's fields share one SDL text-input session
+(liquify#39). The ImGui SDL backend stops it when one of its fields loses focus, for example when
+Quick Open or the palette closes, so each frame the focused, visible editor starts it again if it
+is inactive. While a modal dialog is open or an ImGui field owns the keyboard, the editor leaves
+the session and the IME rectangle to them, and neither text nor keys reach the source behind the
+dialog. `SDL_EVENT_TEXT_EDITING` updates a retained composition without changing
 the buffer. The editor draws that text at the caret and marks the composing selection. A following
 `SDL_EVENT_TEXT_INPUT` commits the supplied UTF-8 bytes as one normal editor insertion and clears
 the composition. An empty edit, Escape, focus loss, or leaving the editor cancels it.
@@ -53,11 +58,11 @@ then visible floating-panel controls.
 | Screen | Focus order after the activity bar |
 |---|---|
 | Welcome | status actions, Theme, High contrast |
-| Repository | panel menu, tree rows, editor tab, mode, save, build, tests, deploy, split, bottom-panel toggle, source editor, bottom tabs, status actions, Theme, High contrast |
+| Repository | panel menu, tree rows, editor tab, mode, save, build, tests, push, split, bottom-panel toggle, source editor, bottom tabs, status actions, Theme, High contrast |
 | C++ editor | repository controls, editor tab and toolbar, source editor, diagnostics and other bottom tabs, status actions, Theme, High contrast |
 | Editor view | search field and results, editor tab and toolbar, source editor, find and replace controls, bottom tabs, status actions, Theme, High contrast |
 | Diagnostics | repository controls, editor tab and toolbar, source editor, bottom tabs, diagnostic rows, status actions, Theme, High contrast |
-| Build | build sidebar controls, editor tab and toolbar, source editor, bottom tabs, build, test and deploy actions, status actions, Theme, High contrast |
+| Build | build sidebar controls, editor tab and toolbar, source editor, bottom tabs, build, test and push actions, status actions, Theme, High contrast |
 | Review | review refresh, change and hunk controls, comment controls, approve, editor controls, bottom tabs, status actions, Theme, High contrast |
 | Assistant | repository and editor controls, bottom tabs, assistant toggle, prompt, ask, explain, propose, context, accept and reject, status actions, Theme, High contrast |
 | Plugins | repository and editor controls, bottom tabs, registered plugin commands, status actions, Theme, High contrast |

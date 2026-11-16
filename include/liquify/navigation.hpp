@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <cstddef>
@@ -121,10 +123,11 @@ enum class NavigationAction : std::uint8_t {
     reveal,
 };
 
+// Each navigation action is a command in the registry (command.hpp): `name` is its stable id, and
+// its title, group and key bindings live there, so a rebind reaches keys, palette and menus alike.
 struct NavigationCommand {
     NavigationAction action;
     std::string_view name;
-    std::string_view default_binding;
 };
 
 [[nodiscard]] auto navigation_file_kind(const std::filesystem::path& path, bool directory)

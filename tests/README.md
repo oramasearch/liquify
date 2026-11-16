@@ -77,7 +77,10 @@ paths, deduplicates the shared module, and reports a missing path without losing
 suite also refuses a mismatched ABI and
 non-canonical CBOR, then proves one panel error does not hide a healthy panel from the same host.
 It also installs an ABI-v1 event table and checks that presence, lease, and attribution callbacks
-each receive canonical CBOR.
+each receive canonical CBOR. The module path runs in `liquify-plugin-host` (liquify#82):
+`fault_plugin.cpp` builds `liquify-fault-plugin`, which crashes, hangs and tries to write a file,
+open a socket and read the environment, so the `PluginProcess` tests show each stays in its host.
+`PluginProtocol` round-trips the host messages and refuses malformed frames.
 
 `test_multiplayer.cpp` checks the exact editor labels for presence, lease holders, and per-line
 attribution, including the delegated-agent marker, session, and change identifiers.

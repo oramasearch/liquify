@@ -28,6 +28,14 @@ Quick Open ranks file paths with a case-insensitive subsequence matcher. Contigu
 component starts, exact matches, prefixes, and filename matches receive higher scores; shorter
 paths and then lexical order break ties. Directories are excluded from results.
 
+Quick Open and Symbol Search work without a pointer (liquify#33). The query field takes keyboard
+focus when the dialog opens, so typing filters at once. The first result is selected; Up and Down
+move the selection while the field keeps the keyboard, Enter opens the selected result and closes
+the dialog, and Escape closes it. Result rows and Close are not keyboard-navigation targets, so the
+arrows never move focus out of the field. While either dialog is open it owns Enter and the arrows:
+they never reach the repository row or the source behind it. Opening a result shows its source,
+not a panel that shares the editor area, also when the result is the file already open.
+
 Symbol Search ranks definitions from libliquid symbol records. It never reparses source in the UI.
 The same records support Go to Definition and Find References. Call Hierarchy uses a record's
 container symbol when the graph supplies one, so callers and callees are shown only when that
@@ -40,28 +48,31 @@ visited.
 
 ## Commands and default keys
 
-The navigation registry is plain C++ and supplies both the command palette and default bindings.
-`Primary` means Command on macOS and Control elsewhere.
+Every navigation action is a command in the one registry (`src/command.cpp`), with a stable id,
+a title in the palette, an item in the native Go or Repository menu and a default binding that
+`.liquid` settings can rebind. `navigation_commands()` maps each `NavigationAction` to its id; the
+titles and keys live only in the registry, so a rebind reaches keys, the palette and the menus
+together. `Primary` means Command on macOS and Control elsewhere.
 
-| Action | Default |
-|---|---|
-| Quick Open | `Primary+P` |
-| Symbol Search | `Primary+T` |
-| Go to Definition | `F12` |
-| Find References | `Shift+F12` |
-| Call Hierarchy | `Alt+F12` |
-| Focus Breadcrumbs | `Primary+Shift+.` |
-| Open Recent | `Primary+R` |
-| Back | `Alt+Left` |
-| Forward | `Alt+Right` |
-| Open | `Enter` |
-| Rename | `F2` |
-| Move | `Primary+Shift+M` |
-| New File | `Primary+N` |
-| Reveal | `Primary+Alt+R` |
+| Action | Command | Default | Keys live in |
+|---|---|---|---|
+| Quick Open | `go.quick-open` | `Primary+P` | the window |
+| Go to Symbol | `go.symbol` | `Primary+T` | the window |
+| Go to Definition | `go.definition` | `F12` | the editor |
+| Find References | `go.references` | `Shift+F12` | the window |
+| Call Hierarchy | `go.call-hierarchy` | `Alt+F12` | the window |
+| Focus Breadcrumbs | `go.breadcrumbs` | `Primary+Shift+Period` | the window |
+| Open Recent | `go.open-recent` | `Primary+R` | the window |
+| Back | `go.back` | `Alt+Left` | the window |
+| Forward | `go.forward` | `Alt+Right` | the window |
+| Open Selected Entry | `repository.open` | `Enter` | the repository tree |
+| Rename Entry | `repository.rename` | `F2` | the window |
+| Move Entry | `repository.move` | `Primary+Shift+M` | the window |
+| New File | `repository.new-file` | `Primary+N` | the window |
+| Reveal in File Manager | `repository.reveal` | `Primary+Alt+R` | the window |
 
-The repository-wide configurable command system remains tracked by issue #34. This page records
-the navigation registry consumed by the current palette and key handler.
+A command that needs a selection or an open file says so in the status bar instead of doing
+nothing. The full table, with every platform's label, is [`commands.md`](commands.md).
 
 ## Verification and screenshots
 

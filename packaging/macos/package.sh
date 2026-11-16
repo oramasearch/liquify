@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 
 set -euo pipefail
 
@@ -16,11 +17,31 @@ installer_identity="${LIQUIFY_APPLE_INSTALLER_IDENTITY:-}"
 notary_key_path="${LIQUIFY_APPLE_NOTARY_KEY_PATH:-}"
 notary_key_id="${LIQUIFY_APPLE_NOTARY_KEY_ID:-}"
 notary_issuer_id="${LIQUIFY_APPLE_NOTARY_ISSUER_ID:-}"
-version="${LIQUIFY_PACKAGE_VERSION:-0.0.1}"
+version="${LIQUIFY_PACKAGE_VERSION:-0.1.0}"
 
 if [[ ! -x "$binary_path" ]]; then
     echo "liquify binary is not executable: $binary_path" >&2
     exit 1
+fi
+
+# A release is never ad hoc signed or unnotarized (liquify#77). LIQUIFY_RELEASE=1, or a build of a
+# v* tag, requires the Developer ID application and installer identities and the notary key; the
+# ad hoc path, whose entitlements allow any library to load, is for local and test builds only.
+release=false
+if [[ "${LIQUIFY_RELEASE:-}" == 1 || "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+    release=true
+fi
+if [[ "$release" == true ]]; then
+    missing=()
+    [[ -n "$application_identity" ]] || missing+=(LIQUIFY_APPLE_APPLICATION_IDENTITY)
+    [[ -n "$installer_identity" ]] || missing+=(LIQUIFY_APPLE_INSTALLER_IDENTITY)
+    [[ -n "$notary_key_path" ]] || missing+=(LIQUIFY_APPLE_NOTARY_KEY_PATH)
+    [[ -n "$notary_key_id" ]] || missing+=(LIQUIFY_APPLE_NOTARY_KEY_ID)
+    [[ -n "$notary_issuer_id" ]] || missing+=(LIQUIFY_APPLE_NOTARY_ISSUER_ID)
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "refusing to package a release without signing and notarization: missing ${missing[*]}" >&2
+        exit 1
+    fi
 fi
 
 mkdir -p "$output_directory"
@@ -211,6 +232,11 @@ sign_frameworks() {
 
 mkdir -p "$app_path/Contents/MacOS/frontends" "$frameworks_path"
 install -m 755 "$binary_path" "$app_path/Contents/MacOS/liquify"
+# Every dynamic plugin runs in this separate, sandboxed process (liquify#82).
+install -m 755 "$(dirname "$binary_path")/liquify-plugin-host" \
+    "$app_path/Contents/MacOS/liquify-plugin-host"
+bundle_dependencies "$app_path/Contents/MacOS/liquify-plugin-host" \
+    "$(dirname "$binary_path")/liquify-plugin-host"
 frontend_path="$(find "$(dirname "$binary_path")/frontends" -type f | head -n 1)"
 install -m 755 "$frontend_path" "$app_path/Contents/MacOS/frontends/$(basename "$frontend_path")"
 install -m 644 "$script_directory/Info.plist" "$app_path/Contents/Info.plist"
@@ -251,10 +277,24 @@ if [[ -n "$application_identity" ]]; then
         --timestamp \
         --entitlements "$script_directory/entitlements.plist" \
         --sign "$application_identity" \
+        "$app_path/Contents/MacOS/liquify-plugin-host"
+    codesign \
+        --force \
+        --options runtime \
+        --timestamp \
+        --entitlements "$script_directory/entitlements.plist" \
+        --sign "$application_identity" \
         "$app_path"
     signing_kind="Developer ID"
 else
     sign_frameworks - --timestamp=none
+    codesign \
+        --force \
+        --options runtime \
+        --timestamp=none \
+        --entitlements "$script_directory/entitlements-ci.plist" \
+        --sign - \
+        "$app_path/Contents/MacOS/liquify-plugin-host"
     codesign \
         --force \
         --options runtime \

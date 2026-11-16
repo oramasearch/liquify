@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/stub_tree.hpp"
 
 #include <algorithm>
@@ -123,13 +125,18 @@ auto decode(std::span<const std::byte> input, liquid::digest blob)
     return std::unexpected(count.error());
   }
   auto declarations = std::vector<StubDeclaration>{};
-  declarations.reserve(*count);
+  // Each declaration takes at least one byte: never reserve more than the input holds (liquify#79).
+  declarations.reserve(std::min<std::size_t>(*count, input.size() - cursor));
   for (std::uint32_t index = 0; index < *count; ++index) {
     if (cursor == input.size()) {
       return std::unexpected(failure("truncated stub declaration"));
     }
     StubDeclaration declaration;
-    declaration.kind = static_cast<DeclarationKind>(input[cursor++]);
+    const auto kind = static_cast<std::uint8_t>(input[cursor++]);
+    if (!valid_declaration_kind(kind)) {
+      return std::unexpected(failure("unknown declaration kind"));
+    }
+    declaration.kind = static_cast<DeclarationKind>(kind);
     auto name = read_string(input, cursor);
     if (!name) {
       return std::unexpected(name.error());
@@ -139,7 +146,7 @@ auto decode(std::span<const std::byte> input, liquid::digest blob)
     if (!modifier_count) {
       return std::unexpected(modifier_count.error());
     }
-    declaration.modifiers.reserve(*modifier_count);
+    declaration.modifiers.reserve(std::min<std::size_t>(*modifier_count, input.size() - cursor));
     for (std::uint32_t modifier_index = 0; modifier_index < *modifier_count;
          ++modifier_index) {
       auto modifier = read_string(input, cursor);

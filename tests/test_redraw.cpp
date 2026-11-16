@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/redraw.hpp"
 
 #include <gtest/gtest.h>

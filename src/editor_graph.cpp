@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/editor_graph.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <condition_variable>
@@ -24,11 +27,24 @@
 #include "liquid/runtime.hpp"
 #include "liquid/sync.hpp"
 #include "liquify/editor_model.hpp"
+#include "liquify/first_run.hpp"
+#include "liquify/lake_remote.hpp"
 #include "liquify/plugin.hpp"
 #include "liquify/stub_tree.hpp"
 
 namespace liquify {
 namespace {
+
+// FNV-1a 64: a stable, short name for a repository's cache directory (not a security boundary; the
+// directory is the user's own).
+auto stable_name(std::string_view text) -> std::string {
+  auto hash = std::uint64_t{0xcbf29ce484222325ULL};
+  for (const auto character : text) {
+    hash ^= static_cast<unsigned char>(character);
+    hash *= 0x100000001b3ULL;
+  }
+  return std::format("{:016x}", hash);
+}
 
 auto error_message(const liquid::error &error) -> std::string {
   if (error.context.empty()) {
@@ -368,6 +384,28 @@ struct EditorGraph::Impl {
     }
     ready.notify_all();
     worker.join();
+    // Every concurrent task's thread is joined before any member it uses is destroyed
+    // (liquify#80): a detached thread could still be destroying its task after the idle count
+    // reached zero.
+    for (auto &running : concurrent) {
+      running.thread.join();
+    }
+  }
+
+  struct ConcurrentTask {
+    std::thread thread;
+    std::shared_ptr<std::atomic<bool>> done;
+  };
+
+  // Joins the concurrent threads that have finished; only the worker thread calls this.
+  void reap_concurrent() {
+    std::erase_if(concurrent, [](ConcurrentTask &running) {
+      if (!running.done->load()) {
+        return false;
+      }
+      running.thread.join();
+      return true;
+    });
   }
 
   void run() {
@@ -384,10 +422,16 @@ struct EditorGraph::Impl {
         tasks.pop_front();
       }
       if (task.concurrent) {
-        std::thread([this, task = std::move(task)]() mutable {
-          task.run();
-          finish_task();
-        }).detach();
+        reap_concurrent();
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        concurrent.push_back(
+            {std::thread([this, done, task = std::move(task)]() mutable {
+               task.run();
+               task = Task{};  // its captures are released before the task is reported finished
+               finish_task();
+               done->store(true);
+             }),
+             done});
       } else {
         task.run();
         finish_task();
@@ -398,10 +442,14 @@ struct EditorGraph::Impl {
 
   void initialize() {
     initialize_daemon();
-    auto opened = InteractiveAnalysis::open(
-        repository_path / ".liquid" / "liquify-graph", plugins);
-    auto opened_stubs =
-        StubTrees::open(repository_path / ".liquid" / "liquify-stub-graph");
+    // The cache lives outside the repository (liquify#79).
+    const auto cache = analysis_cache_directory(repository_path);
+    {
+      auto created = std::error_code{};
+      std::filesystem::create_directories(cache, created);
+    }
+    auto opened = InteractiveAnalysis::open(cache / "liquify-graph", plugins);
+    auto opened_stubs = StubTrees::open(cache / "liquify-stub-graph");
     auto loaded_frontend = liquid::result<liquid::frontend_module>{std::unexpected(
         liquid::error{liquid::errc::not_found, "tree-sitter frontend is unavailable"})};
     if (!syntax_frontend_path.empty()) {
@@ -457,7 +505,9 @@ struct EditorGraph::Impl {
     auto lock = std::lock_guard(mutex);
     current.daemon_running = false;
     current.daemon_hosted = false;
-    current.query_error = "daemon: " + error_message(error);
+    current.daemon_state = DaemonState::start_failed;
+    current.daemon_error = error_message(error);
+    current.query_error = "daemon: " + current.daemon_error;
   }
 
   void stop_hosted_daemon() {
@@ -496,24 +546,27 @@ struct EditorGraph::Impl {
   void record_query_error(const liquid::error &error) {
     auto lock = std::lock_guard(mutex);
     current.query_error = error_message(error);
+    current.query_failure = error;
   }
 
+  // Build and push failures belong to the Build panel, never to Diagnostics.
   void record_build_error(const liquid::error &error) {
     auto lock = std::lock_guard(mutex);
-    current.query_error = error_message(error);
+    current.build_error = error;
     current.build_running = false;
   }
 
   void record_deploy_error(const liquid::error &error) {
     auto lock = std::lock_guard(mutex);
-    current.query_error = error_message(error);
     current.deploy.running = false;
-    current.deploy.error = current.query_error;
+    current.deploy.error = error_message(error);
+    current.deploy.failure = error;
   }
 
   void clear_query_error() {
     auto lock = std::lock_guard(mutex);
     current.query_error.clear();
+    current.query_failure.reset();
   }
 
   void refresh_daemon_status() {
@@ -523,12 +576,18 @@ struct EditorGraph::Impl {
     auto status = liquid::runtime::block_on(daemon->status());
     auto lock = std::lock_guard(mutex);
     if (!status) {
+      // The service answered when it was started or attached; it has stopped answering.
       current.daemon_running = false;
-      current.query_error = "daemon: " + error_message(status.error());
+      current.daemon_state = DaemonState::disconnected;
+      current.daemon_error = error_message(status.error());
+      current.query_error = "daemon: " + current.daemon_error;
+      current.daemon.reset();
       return;
     }
     current.daemon_running = status->running;
     current.daemon_hosted = daemon_hosted;
+    current.daemon_state = status->running ? DaemonState::running : DaemonState::stopped;
+    current.daemon_error.clear();
     current.daemon = std::move(*status);
   }
 
@@ -536,6 +595,7 @@ struct EditorGraph::Impl {
     auto lock = std::lock_guard(mutex);
     build_requested_at = std::chrono::steady_clock::now();
     current.build_running = true;
+    current.build_error.reset();
     current.build_result.clear();
     current.build_first_action = {};
     current.build_finished = {};
@@ -748,15 +808,15 @@ struct EditorGraph::Impl {
   }
 
   void load_tests() {
+    // Listing tests in the background is not an operation the person asked for: a repository
+    // with no recorded build simply has no tests yet, and other failures wait for F7 or F8.
     auto source = liquid::runtime::block_on(
         liquid::repository::open_build(repository_path));
     if (!source) {
-      record_query_error(source.error());
       return;
     }
     auto targets = liquid::runtime::block_on(source->tests());
     if (!targets) {
-      record_query_error(targets.error());
       return;
     }
     auto lock = std::lock_guard(mutex);
@@ -978,7 +1038,7 @@ struct EditorGraph::Impl {
       current.history_generation = request;
   }
 
-  void deploy() {
+  void deploy(std::string lake_remote) {
     {
       auto lock = std::lock_guard(mutex);
       current.deploy = {};
@@ -990,22 +1050,35 @@ struct EditorGraph::Impl {
       record_deploy_error(source.error());
       return;
     }
-    const auto remote = source->remote_configuration();
-    if (!remote) {
-      record_deploy_error({liquid::errc::not_found,
-                           "repository has no configured sync remote",
-                           repository_path.string()});
+    // The push goes to the repository's configured sync remote, or else to the lake it was
+    // cloned from (or that Set Lake recorded), which libliquid's drive client keeps.
+    auto endpoint_url = std::string{};
+    auto token = lake_token();
+    if (const auto remote = source->remote_configuration()) {
+      endpoint_url = remote->endpoint;
+      token = bearer_token(*remote);
+    } else {
+      endpoint_url = std::move(lake_remote);
+    }
+    if (endpoint_url.empty()) {
+      record_deploy_error({liquid::errc::not_configured,
+                           "repository has no configured sync remote", ""});
       return;
     }
+    {
+      auto lock = std::lock_guard(mutex);
+      current.deploy.remote = endpoint_url;
+    }
     auto endpoint = liquid::sync_endpoint{
-        remote->endpoint,
-        liquid::sync_endpoint_options{.bearer_token = bearer_token(*remote),
+        endpoint_url,
+        liquid::sync_endpoint_options{.bearer_token = std::move(token),
                                       .atomic = false}};
     auto pushed = liquid::runtime::block_on(endpoint.push(*source));
     auto lock = std::lock_guard(mutex);
     current.deploy.running = false;
     if (!pushed) {
       current.deploy.error = error_message(pushed.error());
+      current.deploy.failure = pushed.error();
       return;
     }
     current.deploy.objects = pushed->sent.objects;
@@ -1028,6 +1101,9 @@ struct EditorGraph::Impl {
   EditorGraphSnapshot current;
   std::filesystem::path active_buffer_path;
   std::thread worker;
+  // Threads of concurrent tasks, joined (never detached): touched only by the worker thread, and by
+  // the destructor after the worker has stopped.
+  std::vector<ConcurrentTask> concurrent;
   std::uint64_t pending_tasks{};
   std::uint64_t diagnostics_request{};
   std::uint64_t hover_request{};
@@ -1611,9 +1687,11 @@ void EditorGraph::refresh_tests() {
       {[implementation = impl_.get()] { implementation->load_tests(); }});
 }
 
-void EditorGraph::request_deploy() {
-  impl_->enqueue(
-      {[implementation = impl_.get()] { implementation->deploy(); }});
+void EditorGraph::request_push(std::string lake_remote) {
+  impl_->enqueue({[implementation = impl_.get(),
+                   lake_remote = std::move(lake_remote)]() mutable {
+    implementation->deploy(std::move(lake_remote));
+  }});
 }
 
 void EditorGraph::publish_build_event(liquid::build_event event) {
@@ -1648,6 +1726,22 @@ auto EditorGraph::snapshot() const -> EditorGraphSnapshot {
 
 void EditorGraph::wait_until_idle() { impl_->wait_until_idle(); }
 
+auto daemon_state_name(DaemonState state) -> std::string_view {
+  switch (state) {
+  case DaemonState::starting:
+    return "starting";
+  case DaemonState::running:
+    return "running";
+  case DaemonState::stopped:
+    return "stopped";
+  case DaemonState::start_failed:
+    return "failed to start";
+  case DaemonState::disconnected:
+    return "connection lost";
+  }
+  return "unknown";
+}
+
 auto editor_graph_status(const EditorGraphSnapshot &snapshot) -> std::string {
   if (!snapshot.ready) {
     return snapshot.error.empty() ? "analysis graph starting"
@@ -1668,7 +1762,11 @@ auto editor_graph_status(const EditorGraphSnapshot &snapshot) -> std::string {
     output += " | last build " + snapshot.build_result;
   }
   if (!snapshot.daemon) {
-    return output + " | daemon unavailable";
+    if (snapshot.daemon_error.empty()) {
+      return output + " | daemon unavailable";
+    }
+    return output + " | daemon " + std::string(daemon_state_name(snapshot.daemon_state)) +
+           ": " + snapshot.daemon_error;
   }
   const auto backlog = std::accumulate(
       snapshot.daemon->targets.begin(), snapshot.daemon->targets.end(),
@@ -1694,6 +1792,17 @@ auto editor_graph_status(const EditorGraphSnapshot &snapshot) -> std::string {
   }
   output += std::format(" | validation backlog={}", backlog);
   return output;
+}
+
+auto analysis_cache_directory(const std::filesystem::path &repository_path,
+                              std::optional<std::filesystem::path> state_root)
+    -> std::filesystem::path {
+  auto code = std::error_code{};
+  auto canonical = std::filesystem::weakly_canonical(repository_path, code);
+  const auto identity =
+      (code ? std::filesystem::absolute(repository_path) : canonical).generic_string();
+  const auto root = state_root.value_or(default_first_run_state_path().parent_path());
+  return root / "analysis" / stable_name(identity);
 }
 
 } // namespace liquify

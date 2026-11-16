@@ -1,6 +1,7 @@
 # IBM Plex native fonts
 
-liquify embeds IBM Plex Sans Regular and IBM Plex Mono Regular in its one binary. The files are
+liquify embeds IBM Plex Sans Regular and SemiBold (600, for titles and headings) and IBM Plex Mono
+Regular in its one binary. The files are
 from `IBM/plex` commit `bf260093582f04622aacc1e9f9ca604d7ccd0c42`; `UPSTREAM.json` pins their
 SHA-256 digests and `OFL.txt` is the upstream OFL-1.1 licence.
 

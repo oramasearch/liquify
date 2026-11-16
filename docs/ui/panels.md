@@ -15,7 +15,7 @@ order, the last docked placement, floating bounds, busy state, status text, and 
 | Repository | Sidebar | — |
 | Search | Sidebar | — |
 | Review | Sidebar | Refresh, hunk and comment navigation, new comment, approve |
-| Build, test and deploy | Bottom | Build, run tests, deploy |
+| Build, test and push | Bottom | Build, run tests, push |
 | Multiplayer | Sidebar | — |
 | Diagnostics | Bottom | — |
 | Assistant | Bottom | Ask, explain, propose, accept, reject, toggle, inspect context |
@@ -23,8 +23,23 @@ order, the last docked placement, floating bounds, busy state, status text, and 
 | Structural editing | Editor tab | Selection expansion, definition and references, rename, extract |
 
 The activity bar remains the quick route to Repository, Search, Review, Build, and Multiplayer.
-It focuses the registered panel wherever that panel currently lives. The command palette is built
-from the same descriptor commands and adds `Panels: Show …` entries plus `Panels: Reset layout`.
+It focuses the registered panel wherever that panel currently lives.
+
+A panel's command list names the registry's own commands (`run.build`, `assistant.accept-edit`,
+`selection.expand`, ...), never a copy of them, so the palette shows each action once and a panel
+button, its key, the palette row and the native menu run the same command. The former
+panel-scoped names (`build.push`, `structural.expand`, ...) are aliases of those commands
+([`commands.md`](commands.md#former-names), liquify#34). The palette also lists `Show … Panel`,
+the `Show …` sidebar commands and `Reset Panel Layout`; each opens or resets its panel where it is
+docked.
+
+Bottom-panel tabs are sized from their label at the current UI font, and their height grows
+with an enlarged font. Each tab's hit rectangle is the drawn tab: the selectables do not pad into
+their neighbours' spacing, so the rectangles are disjoint and the keyboard focus outline, the
+pointer target and the underline cover the same area (liquify#35). The native acceptance scenario
+`shell-sizes` checks this at UI sizes 14, 24 and 32 in light and dark: disjoint tab rectangles at
+least as tall as the font, a click selecting every tab in both directions, and Tab moving keyboard
+focus along the row with Space selecting the focused tab, without typing into the editor.
 
 ## Docking and repository-local state
 
@@ -43,13 +58,18 @@ the theme and high-contrast preferences.
 ## Status, empty states, and errors
 
 The registry is the single state and notification API for built-in panels. Every panel has an
-empty sentence that says what is absent or what action enables it. Repository, review,
-diagnostics, build, plugin, assistant, and structural failures are introduced with direct text such
-as “Could not load reviews” or “Could not complete the operation”; controller error detail follows
-that sentence.
+empty sentence that says what is absent or what action enables it. Repository, index, folder,
+diagnostics, build and push failures use the one error component of [errors.md](errors.md): a
+sentence in the product's words, the next step, the action that fixes it where liquify offers one,
+and liquid's message behind Details. Each failure is shown once, in the panel that owns it: build and
+push failures in Build, code-analysis failures in Diagnostics, index and folder failures in the
+repository sidebar. Review, plugin, assistant and structural failures still use direct text such as
+“Could not load reviews”, followed by the controller's detail.
 
 One status-bar channel reports progress and completion for builds, saved-drip sync, repository
-folder hydration, and assistant streaming. Selecting the message focuses its source panel.
+folder hydration, and assistant streaming. Selecting the message focuses its source panel. A failure
+is named in the status bar by its sentence and the panel that holds it ("This repository has no
+build set up yet · Open Build, test and push"); selecting it opens that panel.
 Determinate work includes a progress bar. The channel offers Cancel only when the controller can
 honour it: assistant streaming currently can; the pinned libliquid build handle, sync endpoint, and
 repository directory future do not expose cancellation.

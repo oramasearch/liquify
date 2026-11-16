@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: MIT
+
 #include "editor_buffer.hpp"
 
 #include <algorithm>
+#include <format>
 #include <exception>
 #include <future>
 #include <iterator>
@@ -99,6 +102,19 @@ EditorBuffer EditorBuffer::open(std::filesystem::path repository_path,
           if (!contents) {
               return std::tuple<std::string, std::string, std::string>{
                   "", error_message(contents.error()), ""};
+          }
+          // liquify#78: a blob is opened only when it is text of a size an editor can hold.
+          constexpr auto max_editor_bytes = std::size_t{16} * 1024 * 1024;
+          if (contents->size() > max_editor_bytes) {
+              return std::tuple<std::string, std::string, std::string>{
+                  "", std::format("{} is too large to open ({} bytes; the limit is {})", file,
+                                  contents->size(), max_editor_bytes), ""};
+          }
+          const auto probe = std::min<std::size_t>(contents->size(), 8192);
+          if (std::any_of(contents->begin(), contents->begin() + static_cast<std::ptrdiff_t>(probe),
+                          [](auto byte) { return static_cast<unsigned char>(byte) == 0; })) {
+              return std::tuple<std::string, std::string, std::string>{
+                  "", file + " looks binary and is not opened as text", ""};
           }
           const auto *data = reinterpret_cast<const char *>(contents->data());
           auto editor_config = std::string{};

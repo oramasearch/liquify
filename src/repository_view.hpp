@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <chrono>
@@ -12,8 +14,18 @@
 
 #include "liquid/object.hpp"
 #include "liquify/navigation.hpp"
+#include "liquify/user_error.hpp"
 
 namespace liquify {
+
+// liquify#78: a tree entry name from a repository is used only when it is one path component:
+// non-empty, not "." or "..", without '/' or '\\', and without NUL or other control characters.
+// Entries with other names are left out of the view, so they never become a path or reach a
+// terminal.
+[[nodiscard]] auto valid_entry_name(std::string_view name) -> bool;
+
+// `name` with every control character written as \xHH, safe to print to a terminal (liquify#78).
+[[nodiscard]] auto printable_name(std::string_view name) -> std::string;
 
 class RepositoryView {
 public:
@@ -54,6 +66,12 @@ public:
   [[nodiscard]] auto last_changed_at() const -> std::string_view;
   [[nodiscard]] auto offline_reason() const -> std::string_view;
   [[nodiscard]] auto offline() const -> bool;
+  // The lake repository this one was cloned from or that Set Lake recorded, read with the rest
+  // of the repository at open (libliquid's drive client); empty when none.
+  [[nodiscard]] auto lake_remote() const -> std::string_view;
+  void set_lake_remote(std::string remote);
+  // Why a clone failed, in the product's words; empty after a successful clone or an open.
+  [[nodiscard]] auto clone_failure() const -> const UserError &;
   [[nodiscard]] auto remote_bytes() const -> std::uint64_t;
   [[nodiscard]] auto hydration_debt() const -> std::uint64_t;
   [[nodiscard]] auto pending_uploads() const -> std::uint64_t;
@@ -64,6 +82,8 @@ public:
   void request_directory(std::string path, liquid::digest id);
   void request_move(std::string from, std::string to);
   void request_new_file(std::string path);
+  // Builds the path and symbol index again after it failed; does nothing while one is building.
+  void retry_navigation();
   void poll();
 
 private:
@@ -129,6 +149,8 @@ private:
   std::string last_changed_at_;
   std::string offline_reason_;
   bool offline_{};
+  UserError clone_failure_;
+  std::string lake_remote_;
   std::uint64_t remote_bytes_{};
   std::uint64_t hydration_debt_{};
   std::uint64_t pending_uploads_{};

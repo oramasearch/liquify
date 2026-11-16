@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/navigation.hpp"
 
 #include <algorithm>
@@ -367,30 +369,20 @@ auto breadcrumbs(const std::filesystem::path& path, std::optional<std::string_vi
 
 auto navigation_commands() -> std::span<const NavigationCommand> {
     static constexpr auto commands = std::array{
-        NavigationCommand{NavigationAction::quick_open, "Navigation: Quick open", "Primary+P"},
-        NavigationCommand{NavigationAction::symbol_search,
-                          "Navigation: Symbol search",
-                          "Primary+T"},
-        NavigationCommand{NavigationAction::go_to_definition,
-                          "Navigation: Go to definition",
-                          "F12"},
-        NavigationCommand{NavigationAction::find_references,
-                          "Navigation: Find references",
-                          "Shift+F12"},
-        NavigationCommand{NavigationAction::call_hierarchy,
-                          "Navigation: Call hierarchy",
-                          "Alt+F12"},
-        NavigationCommand{NavigationAction::focus_breadcrumbs,
-                          "Navigation: Focus breadcrumbs",
-                          "Primary+Shift+."},
-        NavigationCommand{NavigationAction::open_recent, "Navigation: Open recent", "Primary+R"},
-        NavigationCommand{NavigationAction::back, "Navigation: Back", "Alt+Left"},
-        NavigationCommand{NavigationAction::forward, "Navigation: Forward", "Alt+Right"},
-        NavigationCommand{NavigationAction::open, "Repository: Open", "Enter"},
-        NavigationCommand{NavigationAction::rename, "Repository: Rename", "F2"},
-        NavigationCommand{NavigationAction::move, "Repository: Move", "Primary+Shift+M"},
-        NavigationCommand{NavigationAction::new_file, "Repository: New file", "Primary+N"},
-        NavigationCommand{NavigationAction::reveal, "Repository: Reveal", "Primary+Alt+R"},
+        NavigationCommand{NavigationAction::quick_open, "go.quick-open"},
+        NavigationCommand{NavigationAction::symbol_search, "go.symbol"},
+        NavigationCommand{NavigationAction::go_to_definition, "go.definition"},
+        NavigationCommand{NavigationAction::find_references, "go.references"},
+        NavigationCommand{NavigationAction::call_hierarchy, "go.call-hierarchy"},
+        NavigationCommand{NavigationAction::focus_breadcrumbs, "go.breadcrumbs"},
+        NavigationCommand{NavigationAction::open_recent, "go.open-recent"},
+        NavigationCommand{NavigationAction::back, "go.back"},
+        NavigationCommand{NavigationAction::forward, "go.forward"},
+        NavigationCommand{NavigationAction::open, "repository.open"},
+        NavigationCommand{NavigationAction::rename, "repository.rename"},
+        NavigationCommand{NavigationAction::move, "repository.move"},
+        NavigationCommand{NavigationAction::new_file, "repository.new-file"},
+        NavigationCommand{NavigationAction::reveal, "repository.reveal"},
     };
     return commands;
 }

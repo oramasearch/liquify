@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <filesystem>
+#include <string>
 #include <string_view>
 
 #include "liquify/app.hpp"
@@ -22,8 +25,14 @@ public:
   static ScreenshotImage capture(App &app);
   static bool popup(std::string_view name);
   static void resize(App &app);
+  static void resize_to(App &app, int width, int height);
   static void fonts(App &app);
   static void source_tab(App &app);
+  // macOS: the key equivalent the native menu item for `command` shows ("Cmd+Shift+P", "F6");
+  // empty elsewhere.
+  static auto menu_key(App &app, std::string_view command) -> std::string;
+  // macOS: chooses the native menu item for `command`; false elsewhere.
+  static bool choose_menu(App &app, std::string_view command);
 
 private:
   static void open_file(App &app);
@@ -31,9 +40,37 @@ private:
   static void edit(App &app, const std::filesystem::path &output);
   static void quick_open(App &app);
   static void palette(App &app);
+  static void rebind(App &app);
+  static void commands(App &app);
   static void modal_input(App &app);
   static void tabs(App &app);
-  static void build(App &app);
+  static void shell_sizes(App &app, const std::filesystem::path &output);
+  static void tab_row(App &app, float font, std::string_view name);
+  static void status_row(App &app, float font, std::string_view name);
+  static void daemon_failure(App &app, const std::filesystem::path &output);
+  static void build(App &app, const std::filesystem::path &output);
+  static void cut(App &app, const std::filesystem::path &output);
+  static void edit_save_cut(App &app, std::string_view marker,
+                            std::string_view message);
+  static void push(App &app);
+  static auto lake_file(const std::string &remote,
+                        const std::filesystem::path &folder, std::string path)
+      -> std::string;
+  static void clone_push(App &app, const std::filesystem::path &output);
+  static void set_lake_push(App &app, const std::filesystem::path &output);
+  static void opened_clone_push(const std::filesystem::path &output);
+  static void request_review(const std::filesystem::path &output);
+  static void set_up_build(const std::filesystem::path &output);
+  static void table_headers(App &app, const std::filesystem::path &output);
+  static void look(App &app, const std::filesystem::path &output);
+  static void front_door(App &app, const std::filesystem::path &output);
+  static void fill_clone(App &app, const std::string &remote,
+                         const std::string &folder);
+  static void wait_for_repository_operation(App &app);
+  static void capture_themes(App &app, const std::filesystem::path &output,
+                             std::string_view name);
+  static void clone_failures(App &app, const std::filesystem::path &output);
+  static void plugin_hang(App &app, const std::filesystem::path &output);
 };
 
 } // namespace liquify

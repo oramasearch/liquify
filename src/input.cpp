@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/input.hpp"
 
 #include <algorithm>
@@ -13,7 +15,7 @@ constexpr auto nodes = std::to_array<AccessibilityNode>({
      AccessibilityRole::button},
     {"activity.review", "Review", "Show review controls",
      AccessibilityRole::button},
-    {"activity.build", "Build", "Show build, test, and deploy",
+    {"activity.build", "Build", "Show build, test, and push",
      AccessibilityRole::button},
     {"activity.multiplayer", "Multiplayer", "Show collaboration activity",
      AccessibilityRole::button},
@@ -23,7 +25,7 @@ constexpr auto nodes = std::to_array<AccessibilityNode>({
      AccessibilityRole::group},
     {"panel.review", "Review panel", "Read and update the active review",
      AccessibilityRole::group},
-    {"panel.build", "Build panel", "Run and inspect build, test, and deploy",
+    {"panel.build", "Build panel", "Run and inspect build, test, and push",
      AccessibilityRole::group},
     {"panel.diagnostics", "Diagnostics panel", "Inspect editor diagnostics",
      AccessibilityRole::group},
@@ -42,7 +44,7 @@ constexpr auto nodes = std::to_array<AccessibilityNode>({
     {"editor.build", "Build", "Build the active repository",
      AccessibilityRole::button},
     {"editor.test", "Tests", "Run repository tests", AccessibilityRole::button},
-    {"editor.deploy", "Deploy", "Deploy saved repository changes",
+    {"editor.push", "Push", "Push saved changes to lake",
      AccessibilityRole::button},
     {"editor.split", "Editor split", "Show or hide the secondary editor",
      AccessibilityRole::button},

@@ -13,9 +13,9 @@ expanded, then published to the panel after the worker completes. Its second wor
 full tree and libliquid symbol records for navigation, drive and change annotations without
 blocking the render thread ([`../ui/navigation.md`](../ui/navigation.md)).
 
-**Decision.** liquify is a native, cross-platform IDE from the start (Steve, 2026-09-02), not an
+**Decision.** liquify is a native, cross-platform IDE from the start not an
 editor extension. The repository panel is its first Phase 1 client. The editor buffer is a retained
-GPU text layer inside Dear ImGui (bridge decision 15); ImGui continues to own chrome and panels.
+GPU text layer inside Dear ImGui; ImGui continues to own chrome and panels.
 Diagnostics and the incremental graph follow the liquid #20 and #21 interfaces.
 
 **Lifecycle** (mirrors Zetta `src/gui/app.cpp`): `SDL_Init(VIDEO)` → window at 70 % of the usable
@@ -44,9 +44,9 @@ non-zero.
 blob at any expanded depth be opened in the editor. C and C++ buffers add graph-query controls, an
 inline diagnostics layer, diagnostics/completion and configured plugin panels, plugin commands in
 the shared command registry, fuzzy palette and native macOS menus, and a daemon status line;
-`liquify --lake <repository-url> <path>` adds the review panel and reads its bearer from
+`liquify --lake <repository-url> <path>` points the review panel at that lake (otherwise it uses the lake the repository came from; see `docs/editor/review.md`) and reads its bearer from
 `LIQUID_TOKEN`;
-`liquify --print-tree <path>` prints name, kind and mode without a display;
+`liquify --print-tree <path>` prints name, kind and mode without a display, with every control character in a name written as `\xHH` (liquify#78);
 `liquify --apply-edits <file> <path>` applies canonical-CBOR structural edits without a display
 and writes the result record to standard output
 ([`../editor/structural-editing.md`](../editor/structural-editing.md));
@@ -55,6 +55,10 @@ version and reference commands write text, configured plugin commands consume an
 canonical-CBOR map and write canonical CBOR, and UI-only commands report that an open IDE is
 required. `liquify docs commands` and `liquify docs keymap` generate or check the registry-backed
 files under [`../ui/commands.md`](../ui/commands.md);
+`liquify plugin trust <file>` shows a native plugin's name, origin and SHA-256 digest and records
+the digest in the per-user trust store only after the user types `yes`, and
+`liquify plugin list <repository>` reports which configured plugins would load, without loading
+any ([`../plugins/README.md`](../plugins/README.md));
 `liquify --screenshot <state> --out <png>` renders one named, fixed shell state through SDL's
 dummy video driver and software renderer ([`../ui/README.md`](../ui/README.md),
 [`../ui/app-shell.md`](../ui/app-shell.md)); `liquify --smoke [N]` scrolls and edits a generated
@@ -72,7 +76,7 @@ state file contains the public actor and custody description, never a credential
 **libliquid.** liquid is a sibling module resolved by `LIQUIFY_LIQUID_SOURCE_DIR`
 (default `../liquid`), built library-only
 (`LIQUID_BUILD_CLI OFF`, `LIQUID_BUILD_TESTS OFF`, `EXCLUDE_FROM_ALL`) and linked as
-`liquid::liquid`. The pin is `7ff6ed82f93b916ef206c5776e2761b19536d8f3`: liquid Phase 1 plus its Phase 2 build engine, Phase 3
+`liquid::liquid`. The pin is `27d56ba3726f19834dce23125e0e15299f889ba7` (libliquid 0.2.0; the earlier `7ff6ed8` carried): liquid Phase 1 plus its Phase 2 build engine, Phase 3
 distribution foundation, compact shallow repository checkpoints, the persisted demand-driven
 query graph from liquid #20, tree-diff and record-enumeration APIs, and the per-checkout daemon and
 cursor fan-out from liquid #21. It also includes liquid #65's registered frontend modules and
@@ -96,13 +100,12 @@ checkouts and pin updates must initialize submodules recursively. The
 pin is not a working copy: change liquid in its own repo, push, then bump here in one commit naming
 the liquid change it takes:
 
-liquid is **not** pinned here any more — `liquid-bridge` holds the one pin. Move it there,
-verify liquify against it, then bump the bridge pointer:
+liquid is **not** pinned here: liquify builds against the liquid checkout beside it. To move to
+a new liquid revision, check it out and verify liquify against it:
 
 ```sh
 git -C ../liquid fetch origin && git -C ../liquid checkout <sha>
 cmake --build build && ./build/liquify --smoke && ctest --test-dir build
-git -C .. add modules/liquid && git -C .. commit -m "Bump liquid to <sha>: <why>"
 ```
 
 CI resolves liquid from its own checkout, so bump the `ref:` in
@@ -129,3 +132,16 @@ live-safe defaults, validation, reset, search, and credential-free serialization
 
 **Verify.** `cmake -S . -B build -G Ninja && cmake --build build && ctest --test-dir build &&
 ./build/liquify --smoke 30 && ./build/liquify --print-tree <repository>`.
+
+## Input from a repository (liquify#78)
+
+A repository may be hostile, so what it supplies is bounded before use:
+
+- **Names.** A tree entry is shown, opened or printed only when its name is one path component:
+  non-empty, not `.` or `..`, without `/` or `\`, and without control characters
+  (`valid_entry_name`). Other entries are left out of the view.
+- **Blobs.** A file opens in the editor only when it is at most 16 MiB and its first 8 KiB hold no
+  NUL byte; otherwise the editor shows why and opens nothing.
+- **Go to definition** opens only a relative path inside the repository, never an absolute path or
+  one with a `..` component.
+- Not yet done: running tree-sitter's scanners under AddressSanitizer with upstream corpora.

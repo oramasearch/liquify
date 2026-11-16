@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // The one translation unit that knows SDL3 and Dear ImGui. The shell uses
 // ImGui; the editor submits retained line geometry directly through
 // SDL_Renderer with ImGui's GPU glyph atlas.
@@ -17,6 +19,9 @@
 #include <utility>
 
 #include "imgui.h"
+// The shell reads ImGui's internal item state (the button kit's hover and disabled checks, popup
+// layering), so every build includes it, not only the native-window test builds (liquify#145).
+#include "imgui_internal.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
 #include "misc/cpp/imgui_stdlib.h"
@@ -24,7 +29,6 @@
 #ifdef LIQUIFY_NATIVE_WINDOW_TESTS
 #include "../tests/native_acceptance.hpp"
 #include "../tests/ui_property_assert.hpp"
-#include "imgui_internal.h"
 #endif
 
 #if defined(__APPLE__) && defined(__OBJC__)
@@ -53,39 +57,12 @@
 #endif
 
 #if defined(__APPLE__) && defined(__OBJC__)
-enum NativeMenuCommand : std::int32_t {
-  menu_save = 1,
-  menu_close,
-  menu_quit,
-  menu_palette,
-  menu_sidebar,
-  menu_panel,
-  menu_split,
-  menu_theme,
-  menu_contrast,
-  menu_copy,
-  menu_cut,
-  menu_paste,
-  menu_definition,
-  menu_hover,
-  menu_build,
-  menu_tests,
-  menu_deploy,
-  menu_next_hunk,
-  menu_previous_hunk,
-  menu_next_comment,
-  menu_expand_selection,
-  menu_shrink_selection,
-  menu_quick_open,
-  menu_symbol_search,
-  menu_references,
-  menu_call_hierarchy,
-  menu_open_recent,
-  menu_back,
-  menu_forward,
-};
+// A native menu item pushes SDL_EVENT_USER with this code plus its index in the App's
+// native_menu_commands_, and the event loop runs that registry command (liquify#34). The base
+// keeps menu codes apart from the repaint wake code.
+constexpr std::int32_t native_menu_code_base = 0x10000;
 
-@interface LiquifyMenuTarget : NSObject
+@interface LiquifyMenuTarget : NSObject <NSMenuDelegate>
 - (void)performLiquifyCommand:(id)sender;
 @end
 
@@ -93,104 +70,173 @@ enum NativeMenuCommand : std::int32_t {
 - (void)performLiquifyCommand:(id)sender {
   auto event = SDL_Event{};
   event.type = SDL_EVENT_USER;
-  event.user.code = static_cast<Sint32>([sender tag]);
+  event.user.code =
+      native_menu_code_base + static_cast<Sint32>([sender tag]);
   SDL_PushEvent(&event);
 }
-@end
 
-struct NativeMenuEntry {
-  NSString *title;
-  NSString *key;
-  NSEventModifierFlags modifiers;
-  NativeMenuCommand command;
-};
+// The menus show each command's resolved key equivalent but never take the key press: keys go
+// to the window, where the registry's dispatcher applies scope and conflicts. A menu shortcut
+// therefore cannot run outside its scope or around a rebind (liquify#34).
+- (BOOL)menuHasKeyEquivalent:(NSMenu *)menu
+                    forEvent:(NSEvent *)event
+                      target:(id *)target
+                      action:(SEL *)action {
+  return NO;
+}
+@end
 
 static LiquifyMenuTarget *native_menu_target = nullptr;
 static NSMutableArray *native_accessibility_elements = nullptr;
 
-static void add_native_menu(NSMenu *main_menu, NSString *title,
-                            std::initializer_list<NativeMenuEntry> entries) {
-  auto *root =
-      [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
-  auto *menu = [[NSMenu alloc] initWithTitle:title];
-  for (const auto &entry : entries) {
-    auto *item =
-        [[NSMenuItem alloc] initWithTitle:entry.title
-                                   action:@selector(performLiquifyCommand:)
-                            keyEquivalent:entry.key];
-    [item setKeyEquivalentModifierMask:entry.modifiers];
-    [item setTag:entry.command];
-    [item setTarget:native_menu_target];
-    [menu addItem:item];
-  }
-  [root setSubmenu:menu];
-  [main_menu addItem:root];
+static NSString *native_string(std::string_view value) {
+  return [[NSString alloc] initWithBytes:value.data()
+                                  length:value.size()
+                                encoding:NSUTF8StringEncoding];
 }
 
-static void install_native_menu() {
-  native_menu_target = [[LiquifyMenuTarget alloc] init];
+static NSString *native_character(unichar character) {
+  return [NSString stringWithCharacters:&character length:1];
+}
+
+// The key equivalent AppKit draws for a registry chord, or empty for a key it cannot draw.
+static NSString *native_key_equivalent(const liquify::KeyChord &chord,
+                                       NSEventModifierFlags *modifiers) {
+  *modifiers = 0;
+  if ((chord.modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::primary)) != 0) {
+    *modifiers |= NSEventModifierFlagCommand;
+  }
+  if ((chord.modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::control)) != 0) {
+    *modifiers |= NSEventModifierFlagControl;
+  }
+  if ((chord.modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::alt)) != 0) {
+    *modifiers |= NSEventModifierFlagOption;
+  }
+  if ((chord.modifiers & static_cast<std::uint8_t>(liquify::KeyModifier::shift)) != 0) {
+    *modifiers |= NSEventModifierFlagShift;
+  }
+  const auto &key = chord.key;
+  if (key.size() == 1) {
+    return native_string(std::string(
+        1, static_cast<char>(std::tolower(static_cast<unsigned char>(key.front())))));
+  }
+  if (key.size() >= 2 && key.front() == 'F' &&
+      std::isdigit(static_cast<unsigned char>(key[1])) != 0) {
+    return native_character(
+        static_cast<unichar>(NSF1FunctionKey + std::stoi(key.substr(1)) - 1));
+  }
+  static const auto named = std::to_array<std::pair<std::string_view, unichar>>({
+      {"Enter", '\r'},
+      {"Tab", '\t'},
+      {"Space", ' '},
+      {"Backspace", NSBackspaceCharacter},
+      {"Delete", NSDeleteFunctionKey},
+      {"Escape", 0x1b},
+      {"Left", NSLeftArrowFunctionKey},
+      {"Right", NSRightArrowFunctionKey},
+      {"Up", NSUpArrowFunctionKey},
+      {"Down", NSDownArrowFunctionKey},
+      {"Home", NSHomeFunctionKey},
+      {"End", NSEndFunctionKey},
+      {"PageUp", NSPageUpFunctionKey},
+      {"PageDown", NSPageDownFunctionKey},
+      {"Backslash", '\\'},
+      {"Comma", ','},
+      {"Period", '.'},
+  });
+  for (const auto &[name, character] : named) {
+    if (name == key) {
+      return native_character(character);
+    }
+  }
+  *modifiers = 0;
+  return @"";
+}
+
+static NSMenuItem *native_command_item(const liquify::CommandRegistry &registry,
+                                       const liquify::CommandDefinition &command,
+                                       std::vector<std::string> &commands) {
+  auto modifiers = NSEventModifierFlags{};
+  auto *key = @"";
+  if (const auto bindings = registry.bindings(command.name); !bindings.empty()) {
+    key = native_key_equivalent(bindings.front(), &modifiers);
+  }
+  auto *item = [[NSMenuItem alloc] initWithTitle:native_string(command.title)
+                                          action:@selector(performLiquifyCommand:)
+                                   keyEquivalent:key];
+  [item setKeyEquivalentModifierMask:modifiers];
+  [item setTag:static_cast<NSInteger>(commands.size())];
+  [item setTarget:native_menu_target];
+  commands.push_back(command.name);
+  return item;
+}
+
+// The menu bar is built from the registry: one menu per group, in registration order, one item
+// per command with its resolved key equivalent. Rebuilt whenever a binding changes.
+static void install_native_menu(const liquify::CommandRegistry &registry,
+                                std::vector<std::string> &commands) {
+  if (native_menu_target == nullptr) {
+    native_menu_target = [[LiquifyMenuTarget alloc] init];
+  }
+  commands.clear();
   auto *main_menu = [[NSMenu alloc] initWithTitle:@"liquify"];
+  [main_menu setDelegate:native_menu_target];
   auto *application_root = [[NSMenuItem alloc] initWithTitle:@"liquify"
                                                       action:nil
                                                keyEquivalent:@""];
   auto *application_menu = [[NSMenu alloc] initWithTitle:@"liquify"];
+  [application_menu setDelegate:native_menu_target];
   auto *about =
       [[NSMenuItem alloc] initWithTitle:@"About liquify"
                                  action:@selector(orderFrontStandardAboutPanel:)
                           keyEquivalent:@""];
   [application_menu addItem:about];
   [application_menu addItem:[NSMenuItem separatorItem]];
-  auto *quit =
-      [[NSMenuItem alloc] initWithTitle:@"Quit liquify"
-                                 action:@selector(performLiquifyCommand:)
-                          keyEquivalent:@"q"];
-  [quit setTag:menu_quit];
-  [quit setTarget:native_menu_target];
-  [application_menu addItem:quit];
+  if (const auto *quit = registry.find("app.quit")) {
+    [application_menu addItem:native_command_item(registry, *quit, commands)];
+  }
   [application_root setSubmenu:application_menu];
   [main_menu addItem:application_root];
 
-  constexpr auto command = NSEventModifierFlagCommand;
-  constexpr auto command_shift =
-      NSEventModifierFlagCommand | NSEventModifierFlagShift;
-  add_native_menu(main_menu, @"File",
-                  {{@"Save", @"s", command, menu_save},
-                   {@"Close File", @"w", command, menu_close}});
-  add_native_menu(main_menu, @"Edit",
-                  {{@"Copy", @"c", command, menu_copy},
-                   {@"Cut", @"x", command, menu_cut},
-                   {@"Paste", @"v", command, menu_paste},
-                   {@"Command Palette", @"p", command_shift, menu_palette}});
-  add_native_menu(main_menu, @"Selection",
-                  {{@"Expand Selection", @"", 0, menu_expand_selection},
-                   {@"Shrink Selection", @"", 0, menu_shrink_selection}});
-  add_native_menu(
-      main_menu, @"View",
-      {{@"Toggle Sidebar", @"b", command, menu_sidebar},
-       {@"Toggle Bottom Panel", @"j", command, menu_panel},
-       {@"Toggle Editor Split", @"\\", command, menu_split},
-       {@"Cycle Color Theme", @"t", command_shift, menu_theme},
-       {@"Toggle High Contrast", @"h", command_shift, menu_contrast}});
-  add_native_menu(main_menu, @"Go",
-                  {{@"Quick Open", @"p", command, menu_quick_open},
-                   {@"Symbol Search", @"t", command, menu_symbol_search},
-                   {@"Go to Definition", @"", 0, menu_definition},
-                   {@"Find References", @"", 0, menu_references},
-                   {@"Call Hierarchy", @"", 0, menu_call_hierarchy},
-                   {@"Open Recent", @"r", command, menu_open_recent},
-                   {@"Back", @"", 0, menu_back},
-                   {@"Forward", @"", 0, menu_forward},
-                   {@"Show Hover", @"", 0, menu_hover}});
-  add_native_menu(main_menu, @"Run",
-                  {{@"Build", @"", 0, menu_build},
-                   {@"Test", @"", 0, menu_tests},
-                   {@"Deploy", @"", 0, menu_deploy}});
-  add_native_menu(main_menu, @"Review",
-                  {{@"Next Hunk", @"", 0, menu_next_hunk},
-                   {@"Previous Hunk", @"", 0, menu_previous_hunk},
-                   {@"Next Comment", @"", 0, menu_next_comment}});
+  auto groups = std::vector<std::string>{};
+  for (const auto &command : registry.commands()) {
+    if (std::ranges::find(groups, command.group) == groups.end()) {
+      groups.push_back(command.group);
+    }
+  }
+  for (const auto &group : groups) {
+    auto *title = native_string(group);
+    auto *root = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+    auto *menu = [[NSMenu alloc] initWithTitle:title];
+    [menu setDelegate:native_menu_target];
+    for (const auto &command : registry.commands()) {
+      if (command.group == group && command.name != "app.quit") {
+        [menu addItem:native_command_item(registry, command, commands)];
+      }
+    }
+    [root setSubmenu:menu];
+    [main_menu addItem:root];
+  }
   [NSApp setMainMenu:main_menu];
 }
+
+#ifdef LIQUIFY_NATIVE_WINDOW_TESTS
+// The native menu item that runs `command`, for the acceptance tests.
+static NSMenuItem *native_menu_item(const std::vector<std::string> &commands,
+                                    std::string_view command) {
+  const auto found = std::ranges::find(commands, command);
+  if (found == commands.end()) {
+    return nil;
+  }
+  const auto tag = static_cast<NSInteger>(found - commands.begin());
+  for (NSMenuItem *root in [[NSApp mainMenu] itemArray]) {
+    if (auto *item = [[root submenu] itemWithTag:tag]; item != nil) {
+      return item;
+    }
+  }
+  return nil;
+}
+#endif
 
 static NSString *accessibility_role(liquify::AccessibilityRole role) {
   switch (role) {
@@ -262,49 +308,6 @@ constexpr float editor_gutter_width = 72.0F;
 constexpr float activity_bar_width = design::control_lg;
 constexpr float divider_size = design::space1;
 
-auto normalized_binding(std::string_view binding) -> std::string {
-  auto output = std::string{};
-  for (const auto value : binding) {
-    if (value != ' ') {
-      output.push_back(
-          static_cast<char>(std::tolower(static_cast<unsigned char>(value))));
-    }
-  }
-  return output;
-}
-
-auto binding_matches(std::string_view binding, std::uint32_t key,
-                     std::uint16_t modifiers) -> bool {
-  const auto normalized = normalized_binding(binding);
-  const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
-  const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
-  const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
-  const auto wants_primary = normalized.contains("cmd+") ||
-                             normalized.contains("ctrl+") ||
-                             normalized.contains("primary+");
-  const auto wants_shift = normalized.contains("shift+");
-  const auto wants_alt =
-      normalized.contains("alt+") || normalized.contains("option+");
-  if (primary != wants_primary || shift != wants_shift || alt != wants_alt) {
-    return false;
-  }
-  const auto separator = normalized.rfind('+');
-  const auto expected_key = separator == std::string::npos
-                                ? normalized
-                                : normalized.substr(separator + 1);
-  return expected_key == normalized_binding(SDL_GetKeyName(key));
-}
-
-auto command_matches(const Settings &settings, std::string_view command,
-                     std::string_view default_binding, std::uint32_t key,
-                     std::uint16_t modifiers) -> bool {
-  const auto found = settings.keymap.find(std::string(command));
-  const auto binding = found == settings.keymap.end()
-                           ? default_binding
-                           : std::string_view(found->second);
-  return binding_matches(binding, key, modifiers);
-}
-
 auto imgui_color(design::Rgba color) -> ImVec4 {
   return {color.red, color.green, color.blue, color.alpha};
 }
@@ -357,7 +360,17 @@ void identifier_detail(const char *label, const std::string &value) {
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
   const auto button = compact_identifier(value) + "##copy";
-  if (ImGui::SmallButton(button.c_str())) {
+  // The same compact quiet button as App::kit_button: no frame until hovered, the label centred
+  // in lake's 24-pixel inline control.
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+  ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                      ImVec2(design::space2,
+                             std::max(0.0F, (design::space6 - ImGui::GetFontSize()) * 0.5F)));
+  const auto copied = ImGui::Button(button.c_str());
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(2);
+  if (copied) {
     SDL_SetClipboardText(value.c_str());
   }
   if (ImGui::IsItemHovered()) {
@@ -388,7 +401,14 @@ enum class ShellIcon {
   header,
   markdown,
   settings,
-  data
+  build_file,
+  data,
+  // The front door's (liquify#126).
+  new_folder,
+  clone,
+  window,
+  key,
+  branch
 };
 
 auto panel_icon(PanelId id) -> ShellIcon {
@@ -427,7 +447,7 @@ auto file_icon(NavigationFileKind kind) -> ShellIcon {
   case NavigationFileKind::markdown:
     return ShellIcon::markdown;
   case NavigationFileKind::cmake:
-    return ShellIcon::settings;
+    return ShellIcon::build_file;
   case NavigationFileKind::json:
   case NavigationFileKind::binary:
     return ShellIcon::data;
@@ -478,6 +498,11 @@ void draw_shell_icon(ShellIcon icon, ImVec2 origin) {
     line(3, 3, 13, 13);
     line(3, 13, 13, 3);
     break;
+  case ShellIcon::build_file:
+    // A build description: a page with the build triangle on it, not the plugin's plug.
+    draw->AddRect(point(2, 1), point(14, 15), color, 1, 0, 1.5F);
+    draw->AddTriangleFilled(point(6, 5), point(11, 8), point(6, 11), color);
+    break;
   case ShellIcon::plugin:
   case ShellIcon::structure:
   case ShellIcon::settings:
@@ -490,6 +515,39 @@ void draw_shell_icon(ShellIcon icon, ImVec2 origin) {
     draw->AddRect(point(1, 2), point(15, 12), color, 2, 0, 1.5F);
     line(4, 12, 4, 16);
     line(4, 16, 8, 12);
+    break;
+  case ShellIcon::new_folder:
+    draw->AddRect(point(1, 5), point(15, 14), color, 1.5F, 0, 1.5F);
+    line(1, 5, 1, 2);
+    line(1, 2, 7, 2);
+    line(7, 2, 9, 5);
+    line(8, 7.5F, 8, 11.5F);
+    line(6, 9.5F, 10, 9.5F);
+    break;
+  case ShellIcon::clone:
+    line(8, 1, 8, 10);
+    line(4.5F, 6.5F, 8, 10);
+    line(11.5F, 6.5F, 8, 10);
+    line(2, 10, 2, 14);
+    line(2, 14, 14, 14);
+    line(14, 14, 14, 10);
+    break;
+  case ShellIcon::window:
+    draw->AddRect(point(1, 2), point(15, 14), color, 1.5F, 0, 1.5F);
+    line(1, 5.5F, 15, 5.5F);
+    break;
+  case ShellIcon::key:
+    draw->AddCircle(point(5, 8), 3.5F, color, 16, 1.5F);
+    line(8.5F, 8, 15, 8);
+    line(12, 8, 12, 11);
+    line(15, 8, 15, 11);
+    break;
+  case ShellIcon::branch:
+    draw->AddCircle(point(4, 3), 2.0F, color, 12, 1.5F);
+    draw->AddCircle(point(4, 13), 2.0F, color, 12, 1.5F);
+    draw->AddCircle(point(12, 5), 2.0F, color, 12, 1.5F);
+    line(4, 5, 4, 11);
+    line(12, 7, 5.5F, 11.5F);
     break;
   default:
     draw->AddRect(point(2, 1), point(14, 15), color, 1, 0, 1.5F);
@@ -801,7 +859,7 @@ auto build_action_state_name(BuildActionState state) -> std::string_view {
   return "unknown";
 }
 
-auto deploy_outcome_name(liquid::sync_ref_outcome_kind outcome)
+auto push_outcome_name(liquid::sync_ref_outcome_kind outcome)
     -> std::string_view {
   switch (outcome) {
   case liquid::sync_ref_outcome_kind::applied:
@@ -810,6 +868,49 @@ auto deploy_outcome_name(liquid::sync_ref_outcome_kind outcome)
     return "refused";
   }
   return "unknown";
+}
+
+// The panel a view.* or panel.* command opens.
+auto command_panel(std::string_view command) -> std::optional<PanelId> {
+  static constexpr auto panels = std::to_array<std::pair<std::string_view, PanelId>>({
+      {"view.repository", PanelId::repository},
+      {"edit.focus-search", PanelId::search},
+      {"view.review", PanelId::review},
+      {"view.multiplayer", PanelId::multiplayer},
+      {"panel.diagnostics", PanelId::diagnostics},
+      {"panel.build", PanelId::build},
+      {"panel.assistant", PanelId::assistant},
+      {"panel.plugins", PanelId::plugins},
+  });
+  for (const auto &[name, panel] : panels) {
+    if (name == command) {
+      return panel;
+    }
+  }
+  return std::nullopt;
+}
+
+// A table's header row in lake's style: muted ink on the surface role, with a hairline under
+// it. Records the row's rectangle for the contrast property test.
+void table_headers(const design::Palette &palette, UiFrameLayout &layout,
+                   std::string_view id) {
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::TableHeadersRow();
+  ImGui::PopStyleColor();
+  const auto top_left = ImGui::GetItemRectMin();
+  const auto bottom = ImGui::GetItemRectMax().y;
+  auto *table = ImGui::GetCurrentTable();
+  const auto left = table != nullptr ? table->OuterRect.Min.x : top_left.x;
+  const auto right = table != nullptr ? table->OuterRect.Max.x : ImGui::GetItemRectMax().x;
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(left, bottom), ImVec2(right, bottom),
+                                      packed_color(palette.border_subtle), 1.0F);
+  layout.controls[std::string(id) + "/header"] =
+      InputRectangle{left, top_left.y, right - left, bottom - top_left.y};
+}
+
+auto graph_query_failure(const EditorGraphSnapshot &snapshot) -> liquid::error {
+  return snapshot.query_failure.value_or(
+      liquid::error{liquid::errc::internal, snapshot.query_error, ""});
 }
 
 auto pixel_color(ImVec4 color) -> UiPixelColor {
@@ -874,8 +975,8 @@ public:
          float height, std::size_t first_line, float line_height,
          float cell_width, float horizontal_scroll,
          std::span<const ReviewDiffLine> review_lines,
-         std::span<const std::size_t> comment_lines, bool show_whitespace)
-      -> std::size_t {
+         std::span<const std::size_t> comment_lines, bool show_whitespace,
+         bool focused) -> std::size_t {
     const auto color_changed =
         text_color_.red != palette.text_primary.red ||
         text_color_.green != palette.text_primary.green ||
@@ -896,11 +997,22 @@ public:
         static_cast<std::size_t>(std::ceil(height / line_height)) + 1;
     const auto last_line =
         std::min(buffer.line_count(), first_line + available_lines);
+    // The current line's band marks where the caret is while the editor has focus.
+    const auto current_line = buffer.cursor().line;
+    if (focused && current_line >= first_line && current_line < last_line) {
+      SDL_SetRenderDrawColorFloat(renderer, palette.layer.red, palette.layer.green,
+                                  palette.layer.blue, palette.layer.alpha);
+      const SDL_FRect band{x + editor_gutter_width,
+                           y + static_cast<float>(current_line - first_line) * line_height,
+                           width - editor_gutter_width, line_height};
+      SDL_RenderFillRect(renderer, &band);
+    }
     draw_gutter(renderer, buffer, diagnostics, folds, attribution, presence,
-                drive, palette, x, y, first_line, last_line, line_height);
+                drive, palette, x, y, first_line, last_line, line_height,
+                height);
     draw_review_backgrounds(renderer, review_lines, x, y, width, first_line,
                             last_line, line_height);
-    draw_selection(renderer, buffer, layouts, x, y, width, first_line,
+    draw_selection(renderer, buffer, layouts, palette, x, y, width, first_line,
                    last_line, line_height, cell_width, horizontal_scroll);
     draw_bracket_match(renderer, buffer, layouts, palette, x, y, first_line,
                        last_line, line_height, cell_width, horizontal_scroll);
@@ -921,6 +1033,40 @@ public:
                   x + editor_gutter_width + editor_padding - horizontal_scroll,
                   y + static_cast<float>(line - first_line) * line_height);
     }
+    // Line numbers are set in the editor's own face: tertiary ink, the current line's in
+    // secondary, right-aligned space4 before the gutter's hairline (the fold column).
+    gutter_vertices_.clear();
+    gutter_indices_.clear();
+    for (std::size_t line = first_line; line < last_line; ++line) {
+      const auto number = std::to_string(line + 1);
+      const auto role = line == current_line ? palette.text_secondary : palette.text_tertiary;
+      const SDL_FColor color{role.red, role.green, role.blue, role.alpha};
+      auto origin = x + editor_gutter_width - design::space4 -
+                    static_cast<float>(number.size()) * cell_width;
+      const auto top = y + static_cast<float>(line - first_line) * line_height;
+      for (const auto digit : number) {
+        if (const auto *glyph = font.FindGlyph(static_cast<ImWchar>(digit));
+            glyph != nullptr && glyph->Visible) {
+          const auto first = static_cast<int>(gutter_vertices_.size());
+          gutter_vertices_.push_back(
+              {{origin + glyph->X0, top + glyph->Y0}, color, {glyph->U0, glyph->V0}});
+          gutter_vertices_.push_back(
+              {{origin + glyph->X1, top + glyph->Y0}, color, {glyph->U1, glyph->V0}});
+          gutter_vertices_.push_back(
+              {{origin + glyph->X1, top + glyph->Y1}, color, {glyph->U1, glyph->V1}});
+          gutter_vertices_.push_back(
+              {{origin + glyph->X0, top + glyph->Y1}, color, {glyph->U0, glyph->V1}});
+          gutter_indices_.insert(gutter_indices_.end(), {first, first + 1, first + 2, first,
+                                                         first + 2, first + 3});
+        }
+        origin += cell_width;
+      }
+    }
+    if (!gutter_vertices_.empty()) {
+      SDL_RenderGeometry(renderer, texture, gutter_vertices_.data(),
+                         static_cast<int>(gutter_vertices_.size()), gutter_indices_.data(),
+                         static_cast<int>(gutter_indices_.size()));
+    }
     if (!frame_vertices_.empty()) {
       SDL_RenderGeometry(renderer, texture, frame_vertices_.data(),
                          static_cast<int>(frame_vertices_.size()),
@@ -938,7 +1084,7 @@ public:
                          line_height);
     draw_scroll_markers(renderer, buffer, diagnostics, attribution, presence,
                         palette, x + width - 5.0F, y, height);
-    draw_cursor(renderer, buffer, layouts, x, y, first_line, last_line,
+    draw_cursor(renderer, buffer, layouts, palette, x, y, first_line, last_line,
                 line_height, cell_width, horizontal_scroll);
     return last_line - first_line;
   }
@@ -1028,28 +1174,15 @@ private:
                           const std::optional<liquid::drive_path_status> &drive,
                           const design::Palette &palette, float x, float y,
                           std::size_t first_line, std::size_t last_line,
-                          float line_height) {
-    SDL_SetRenderDrawColorFloat(renderer, palette.layer.red,
-                                palette.layer.green, palette.layer.blue,
-                                palette.layer.alpha);
-    const SDL_FRect background{x, y, editor_gutter_width,
-                               static_cast<float>(last_line - first_line) *
-                                   line_height};
-    SDL_RenderFillRect(renderer, &background);
+                          float line_height, float height) {
+    // No block fill: the gutter is the editor's surface, divided from the text by a
+    // border_subtle hairline that runs the editor's full height (liquify#102, #127). The line
+    // numbers are glyphs from the editor's face, drawn in render().
     SDL_SetRenderDrawColorFloat(
         renderer, palette.border_subtle.red, palette.border_subtle.green,
         palette.border_subtle.blue, palette.border_subtle.alpha);
     SDL_RenderLine(renderer, x + editor_gutter_width - 1.0F, y,
-                   x + editor_gutter_width - 1.0F, y + background.h);
-    SDL_SetRenderDrawColorFloat(
-        renderer, palette.text_tertiary.red, palette.text_tertiary.green,
-        palette.text_tertiary.blue, palette.text_tertiary.alpha);
-    for (auto line = first_line; line < last_line; ++line) {
-      SDL_RenderDebugText(
-          renderer, x + 30.0F,
-          y + static_cast<float>(line - first_line) * line_height + 3.0F,
-          std::to_string(line + 1).c_str());
-    }
+                   x + editor_gutter_width - 1.0F, y + height);
     for (const auto &item : attribution) {
       if (item.line < first_line || item.line >= last_line) {
         continue;
@@ -1168,11 +1301,13 @@ private:
   }
 
   static void draw_selection(SDL_Renderer *renderer, EditorBuffer &buffer,
-                             TextLayoutCache &layouts, float x, float y,
+                             TextLayoutCache &layouts,
+                             const design::Palette &palette, float x, float y,
                              float width, std::size_t first_line,
                              std::size_t last_line, float line_height,
                              float cell_width, float horizontal_scroll) {
-    SDL_SetRenderDrawColor(renderer, 176, 207, 255, 255);
+    SDL_SetRenderDrawColorFloat(renderer, palette.selection.red, palette.selection.green,
+                                palette.selection.blue, palette.selection.alpha);
     for (const auto &selection : buffer.selections()) {
       const auto begin_line = std::max(first_line, selection.begin.line);
       const auto end_line = std::min(last_line, selection.end.line + 1);
@@ -1200,11 +1335,14 @@ private:
   }
 
   static void draw_cursor(SDL_Renderer *renderer, EditorBuffer &buffer,
-                          TextLayoutCache &layouts, float x, float y,
+                          TextLayoutCache &layouts,
+                          const design::Palette &palette, float x, float y,
                           std::size_t first_line, std::size_t last_line,
                           float line_height, float cell_width,
                           float horizontal_scroll) {
-    SDL_SetRenderDrawColor(renderer, 28, 35, 43, 255);
+    SDL_SetRenderDrawColorFloat(renderer, palette.text_primary.red,
+                                palette.text_primary.green, palette.text_primary.blue,
+                                palette.text_primary.alpha);
     for (const auto &cursor : buffer.cursors()) {
       if (cursor.line < first_line || cursor.line >= last_line) {
         continue;
@@ -1391,6 +1529,8 @@ private:
   std::vector<std::optional<LineGeometry>> lines_;
   std::vector<SDL_Vertex> frame_vertices_;
   std::vector<int> frame_indices_;
+  std::vector<SDL_Vertex> gutter_vertices_;
+  std::vector<int> gutter_indices_;
   float cell_width_{};
   float font_size_{};
   design::Rgba text_color_{};
@@ -1406,7 +1546,11 @@ App::App(AppOptions options) : options_(std::move(options)) {
   if (requested_screenshot == nullptr) {
     auto loaded_settings = load_settings(options_.repository_path);
     settings_ = std::move(loaded_settings.settings);
+    settings_user_ = std::move(loaded_settings.user);
     settings_diagnostics_ = std::move(loaded_settings.diagnostics);
+    // AI is on only where this user turned it on for this repository (liquify#75).
+    settings_.ai.enabled = options_.repository_path &&
+                           repository_ai_enabled(*options_.repository_path);
   }
   settings_scope_ = options_.repository_path ? SettingsScope::repository
                                              : SettingsScope::user;
@@ -1470,8 +1614,8 @@ App::App(AppOptions options) : options_(std::move(options)) {
           .last_changed_at = "Yesterday",
           .branch = "main",
           .opened_at = std::chrono::sys_seconds{std::chrono::seconds{20}}},
-         {.path = "/Users/ora/projects/orama-bridge",
-          .name = "orama-bridge",
+         {.path = "/Users/ora/projects/website",
+          .name = "website",
           .last_change = "Update tracking",
           .last_changed_at = "Sep 4",
           .branch = "main",
@@ -1482,9 +1626,12 @@ App::App(AppOptions options) : options_(std::move(options)) {
       first_run_.open_failed("/Users/ora/projects/missing",
                              "repository marker is not readable");
     } else if (screenshot->view == ScreenshotView::lake_offline) {
-      first_run_.begin_clone("https://lake.orama.com/orama/example",
+      first_run_.begin_clone("https://lake.example.com/orama/example",
                              "/Users/ora/projects/example");
-      first_run_.clone_failed("lake.orama.com is unreachable", true);
+      first_run_.clone_failed(describe_clone_failure(
+          {liquid::errc::unavailable, "nodename nor servname provided, or not known",
+           "lake.example.com"},
+          "https://lake.example.com/orama/example"));
     }
   }
   if (screenshot != nullptr && screenshot->view != ScreenshotView::welcome &&
@@ -1563,9 +1710,9 @@ App::App(AppOptions options) : options_(std::move(options)) {
                             ? ThemePreference::dark
                             : ThemePreference::light;
       settings_.editor.wrap = true;
-      settings_.keymap["build.run"] = "F7";
+      settings_.keymap["run.build"] = "F7";
       settings_.lake_accounts.push_back(
-          {"orama", "https://api.oramasearch.com/liquid"});
+          {"team", "https://lake.example.com"});
     }
   }
 }
@@ -1591,8 +1738,10 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
   editor_graph_.reset();
   review_.reset();
   assistant_.reset();
+  plugin_dispatcher_.reset();
   plugin_host_.reset();
   plugin_failures_.clear();
+  plugin_untrusted_.clear();
   plugin_panels_.clear();
   multiplayer_.reset();
   multiplayer_refresh_ = {};
@@ -1607,7 +1756,9 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
   if (!screenshot_mode()) {
     auto loaded_settings = load_settings(options_.repository_path);
     settings_ = std::move(loaded_settings.settings);
+    settings_user_ = std::move(loaded_settings.user);
     settings_diagnostics_ = std::move(loaded_settings.diagnostics);
+    settings_.ai.enabled = repository_ai_enabled(*options_.repository_path);
   }
   settings_scope_ = SettingsScope::repository;
 
@@ -1633,7 +1784,13 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
   } else {
     plugin_host_ = std::move(plugins->host);
     plugin_failures_ = std::move(plugins->failures);
+    plugin_untrusted_ = std::move(plugins->untrusted);
   }
+  plugin_dispatcher_ = std::make_unique<PluginDispatcher>(
+      plugin_host_, [this] { request_repaint(); });
+  plugin_panels_ = plugin_dispatcher_->panels();
+  plugin_generation_ = plugin_dispatcher_->generation();
+  next_plugin_refresh_ = {};
   editor_graph_ = std::make_unique<EditorGraph>(
       *options_.repository_path, plugin_host_, syntax_frontend_path());
 
@@ -1650,19 +1807,94 @@ bool App::activate_repository(std::unique_ptr<RepositoryView> repository) {
   assistant_ = std::make_unique<Assistant>(config, key.configured, [secret] {
     return std::make_unique<AnthropicProvider>(secret);
   });
-  if (options_.lake_url) {
-    try {
-      const auto *token = std::getenv("LIQUID_TOKEN");
-      review_ = std::make_unique<ReviewController>(
-          *options_.repository_path, *options_.lake_url,
-          token == nullptr ? std::string{} : std::string{token});
-      review_->request_list();
-    } catch (const std::exception &error) {
-      editor_status_ = std::string{"review configuration: "} + error.what();
+  // Reviews live on the repository's lake: --lake when given, else the lake the repository
+  // was cloned from or that Set Lake recorded.
+  if (!options_.lake_url || lake_url_from_repository_) {
+    options_.lake_url.reset();
+    lake_url_from_repository_ = false;
+    // Read once with the repository at open: a second store handle opened here, while the
+    // tree and index load, is what liquify#97 / liquid#526 corrupt.
+    if (!repository_->lake_remote().empty()) {
+      options_.lake_url = std::string(repository_->lake_remote());
+      lake_url_from_repository_ = true;
     }
   }
+  review_.reset();
+  configure_review();
   configure_commands();
   return true;
+}
+
+void App::configure_review() {
+  if (!options_.lake_url || !options_.repository_path || review_) {
+    return;
+  }
+  try {
+    review_ = std::make_unique<ReviewController>(
+        *options_.repository_path, *options_.lake_url, lake_token());
+    review_->request_list();
+  } catch (const std::exception &error) {
+    editor_status_ = std::string{"review configuration: "} + error.what();
+  }
+}
+
+void App::open_request_review() {
+  if (!repository_) {
+    editor_status_ = "Open a repository to request a review";
+    return;
+  }
+  if (!review_) {
+    open_set_lake_dialog();
+    return;
+  }
+  request_review_requested_ = true;
+  request_review_reviewers_.clear();
+  panels_.focus(PanelId::review);
+  shell_state_.sidebar_visible = true;
+}
+
+void App::draw_request_review_dialog() {
+  if (request_review_requested_) {
+    ImGui::OpenPopup("Request Review");
+    request_review_requested_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(560.0F, 0.0F), ImGuiCond_Appearing);
+  if (!begin_dialog("Request Review", ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::PushTextWrapPos(540.0F);
+  ImGui::TextUnformatted(
+      "Asks people on lake to read your current change before it lands. Push "
+      "the change first, so lake has it.");
+  ImGui::PopTextWrapPos();
+  if (repository_ && !repository_->current_change().empty()) {
+    ImGui::TextDisabled(
+        "Current change %s",
+        compact_identifiers(std::string(repository_->current_change())).c_str());
+  }
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Reviewers (optional)");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(540.0F);
+  ImGui::InputTextWithHint("##reviewers", "Names, separated by commas",
+                           &request_review_reviewers_);
+  frame_layout_.controls["request-review/reviewers"] = item_rectangle();
+  ImGui::Spacing();
+  if (kit_button("Request review", ButtonKind::primary)) {
+    review_->request_review(parse_reviewers(request_review_reviewers_));
+    editor_status_ = "Requesting a review";
+    ImGui::CloseCurrentPopup();
+  }
+  frame_layout_.controls["request-review/submit"] = item_rectangle();
+  ImGui::SameLine();
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
 }
 
 auto App::repository_summary() const -> RepositorySummary {
@@ -1742,8 +1974,13 @@ void App::poll_repository_lifecycle() {
     auto repository = repository_operation_->get();
     if (!repository->error().empty()) {
       if (repository_operation_is_clone_) {
-        first_run_.clone_failed(std::string{repository->error()},
-                                repository->offline());
+        auto failure = repository->clone_failure();
+        if (failure.empty()) {
+          failure = {.summary = "The clone did not finish",
+                     .next_step = "Retry the clone.",
+                     .details = without_absolute_paths(repository->error())};
+        }
+        first_run_.clone_failed(std::move(failure));
       } else {
         first_run_.open_failed(first_run_.pending_path(),
                                std::string{repository->error()});
@@ -1758,7 +1995,9 @@ void App::poll_repository_lifecycle() {
     }
   } catch (const std::exception &error) {
     if (repository_operation_is_clone_) {
-      first_run_.clone_failed(error.what(), false);
+      first_run_.clone_failed({.summary = "The clone did not finish",
+                               .next_step = "Retry the clone.",
+                               .details = without_absolute_paths(error.what())});
     } else {
       first_run_.open_failed(first_run_.pending_path(), error.what());
     }
@@ -1846,17 +2085,16 @@ void App::poll_sign_in() {
 }
 
 App::~App() {
+  // Before SDL goes: its answer callback pushes an SDL event. It never waits for a plugin.
+  plugin_dispatcher_.reset();
   shutdown();
 }
 
 void App::configure_commands() {
   commands_ = std::make_unique<CommandRegistry>();
   command_diagnostics_.clear();
-  for (const auto &definition : builtin_commands()) {
-    auto added = commands_->add(definition);
-    if (!added) {
-      command_diagnostics_.push_back(added.error());
-    }
+  for (auto &error : add_builtin_commands(*commands_)) {
+    command_diagnostics_.push_back(std::move(error));
   }
   for (const auto &panel : standard_panel_descriptors()) {
     for (const auto &command : panel.commands) {
@@ -1888,22 +2126,88 @@ void App::configure_commands() {
       }
     }
   }
-  const auto apply_file = [this](const std::filesystem::path &path) {
-    const auto loaded = load_keymap(path);
+  keymap_file_overrides_.clear();
+  const auto read_file = [this](const std::filesystem::path &path) {
+    auto loaded = load_keymap(path);
     for (const auto &diagnostic : loaded.diagnostics) {
       command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
     }
-    for (const auto &diagnostic :
-         commands_->apply_overrides(loaded.overrides)) {
-      command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
-    }
+    std::ranges::move(loaded.overrides,
+                      std::back_inserter(keymap_file_overrides_));
   };
   if (!screenshot_mode() && !options_.smoke) {
-    apply_file(global_settings_path());
+    read_file(global_settings_path());
     if (options_.repository_path) {
-      apply_file(repository_settings_path(*options_.repository_path));
+      read_file(repository_settings_path(*options_.repository_path));
     }
   }
+  command_registration_diagnostics_ = command_diagnostics_;
+  apply_command_bindings();
+}
+
+// The one place bindings are resolved (liquify#34): defaults, then the files' `keymap` records,
+// then the settings surface's Keymap group. Keys, the palette and the native menus all read the
+// result, so a rebind reaches every one of them at once.
+void App::apply_command_bindings() {
+  if (!commands_) {
+    return;
+  }
+  commands_->reset_bindings();
+  command_diagnostics_ = command_registration_diagnostics_;
+  for (const auto &diagnostic :
+       commands_->apply_overrides(keymap_file_overrides_)) {
+    command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
+  }
+  auto overrides = std::vector<KeymapOverride>{};
+  for (const auto &[command, text] : settings_.keymap) {
+    overrides.push_back(
+        {command, split_binding_list(text), {"Settings > Keymap", 1, 1}});
+  }
+  for (const auto &diagnostic : commands_->apply_overrides(overrides)) {
+    command_diagnostics_.push_back(format_command_diagnostic(diagnostic));
+  }
+  for (const auto &conflict : commands_->conflicts()) {
+    auto owners = std::string{};
+    for (const auto &command : conflict.commands) {
+      owners += (owners.empty() ? "" : ", ") + command;
+    }
+    command_diagnostics_.push_back(conflict.binding + " is bound to " +
+                                   owners +
+                                   "; it runs neither until one is rebound");
+  }
+  refresh_native_menu();
+}
+
+void App::refresh_native_menu() {
+#if defined(__APPLE__) && defined(__OBJC__)
+  if (initialized_ && !screenshot_mode() && commands_) {
+    install_native_menu(*commands_, native_menu_commands_);
+  }
+#endif
+}
+
+bool App::set_keymap_binding(std::string_view command, std::string text) {
+  const auto *definition = commands_ ? commands_->find(command) : nullptr;
+  if (definition == nullptr) {
+    return false;
+  }
+  const auto name = definition->name;
+  // A former id (build.run) is stored under the command it names.
+  std::erase_if(settings_.keymap, [&](const auto &entry) {
+    const auto *other = commands_->find(entry.first);
+    return other != nullptr && other->name == name;
+  });
+  const auto chords = split_binding_list(text);
+  auto valid = !chords.empty();
+  for (const auto &chord : chords) {
+    valid = valid && parse_key_chord(chord, commands_->platform()).has_value();
+  }
+  settings_.keymap[name] = std::move(text);
+  apply_command_bindings();
+  if (valid) {
+    persist_settings();
+  }
+  return valid;
 }
 
 bool App::invoke_command(std::string_view name) {
@@ -1911,54 +2215,550 @@ bool App::invoke_command(std::string_view name) {
   if (definition == nullptr) {
     return false;
   }
-  commands_->record_use(name);
+  // A former panel-scoped id (build.start, structural.expand, ...) runs the command it names.
+  const auto command = definition->name;
+  const auto title = definition->title;
+  commands_->record_use(command);
   if (definition->plugin) {
-    invoke_plugin_command(name);
+    invoke_plugin_command(command);
     return true;
   }
-  if (name == "file.save") {
-    save_editor();
-  } else if (name == "file.close") {
-    close_editor();
-  } else if (name == "edit.undo" || name == "edit.redo") {
-    undo_editor(name == "edit.redo");
-  } else if (name == "edit.command-palette") {
-    command_palette_open_ = true;
-  } else if (name == "settings.open") {
-    settings_open_ = true;
-  } else if (name == "view.toggle-sidebar") {
-    shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
-    persist_shell_state();
-  } else if (name == "view.toggle-bottom-panel") {
-    shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
-    persist_shell_state();
-  } else if (name == "view.toggle-editor-split") {
-    shell_state_.editor_split = !shell_state_.editor_split;
-    persist_shell_state();
-  } else if (name == "view.cycle-theme") {
-    cycle_theme();
-  } else if (name == "go.definition") {
-    request_definition();
-  } else if (name == "go.hover") {
-    request_hover();
-  } else if (name == "go.completion") {
-    request_completion();
-  } else if (name == "run.build") {
-    request_build();
-  } else if (name == "run.tests") {
-    request_tests();
-  } else if (name == "run.deploy") {
-    request_deploy();
-  } else if (name == "assistant.toggle") {
-    toggle_assistant();
-  } else if (name == "panel.reset-layout") {
-    reset_panel_layout();
-  } else if (name == "help.version") {
-    editor_status_ = "liquify " + std::string(version_string());
-  } else {
-    execute_panel_command(name);
+  const auto handlers = command_handlers();
+  const auto found = std::ranges::find(handlers, command, &CommandHandler::name);
+  if (found == handlers.end()) {
+    editor_status_ = title + " has no action in this window";
+    return false;
+  }
+  if (auto reason = found->run(*this)) {
+    editor_status_ = title + ": " + *reason;
+    return false;
   }
   return true;
+}
+
+auto App::handles_command(std::string_view name) -> bool {
+  return std::ranges::find(command_handlers(), name, &CommandHandler::name) !=
+         command_handlers().end();
+}
+
+// Every built-in command's implementation, in one table (liquify#34). A handler returns nothing
+// when it acted, or the reason it could not, which invoke_command puts in the status bar: no
+// command succeeds as a silent no-op. test_command.cpp checks that every built-in has a row.
+auto App::command_handlers() -> std::span<const CommandHandler> {
+  using Result = CommandResult;
+  static constexpr auto no_file = "open a file first";
+  static constexpr auto read_only = "review diffs are read-only";
+  static constexpr auto no_selection = "select an entry in the repository tree first";
+  static constexpr auto no_review = "open a review first";
+  static const auto handlers = std::to_array<CommandHandler>({
+      {"file.close",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.close_editor();
+         return {};
+       }},
+      {"file.save",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.save_editor();
+         return {};
+       }},
+      {"app.quit",
+       [](App &app) -> Result {
+         app.request_quit();
+         return {};
+       }},
+      {"edit.command-palette",
+       [](App &app) -> Result {
+         app.command_palette_open_ = true;
+         return {};
+       }},
+      {"settings.open",
+       [](App &app) -> Result {
+         app.settings_open_ = true;
+         return {};
+       }},
+      {"edit.select-all",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.editor_->select_all();
+         return {};
+       }},
+      {"edit.toggle-input-mode",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.editor_->set_mode(app.editor_->mode() == EditingMode::standard
+                                   ? EditingMode::modal_command
+                                   : EditingMode::standard);
+         return {};
+       }},
+      {"edit.find",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.find_open_ = true;
+         app.buffer_matches_ = app.editor_->find(app.find_query_, app.find_options_);
+         return {};
+       }},
+      {"edit.focus-search",
+       [](App &app) -> Result {
+         app.open_command_panel("edit.focus-search");
+         return {};
+       }},
+      {"edit.undo",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.undo_editor(false);
+         return {};
+       }},
+      {"edit.redo",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.undo_editor(true);
+         return {};
+       }},
+      {"edit.copy",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.copy_editor_selection(false);
+         return {};
+       }},
+      {"edit.cut",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.copy_editor_selection(true);
+         return {};
+       }},
+      {"edit.paste",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.paste_editor_clipboard();
+         return {};
+       }},
+      {"selection.expand",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.expand_structural_selection();
+         return {};
+       }},
+      {"selection.shrink",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.shrink_structural_selection();
+         return {};
+       }},
+      {"selection.enclosing-definition",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.select_enclosing_definition();
+         return {};
+       }},
+      {"selection.symbol-references",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.select_symbol_references();
+         return {};
+       }},
+      {"selection.line",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.editor_->select(SelectionKind::line);
+         return {};
+       }},
+      {"selection.add-cursor-up",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         const auto cursor = app.editor_->cursor();
+         if (cursor.line == 0) {
+           return "the cursor is on the first line";
+         }
+         app.editor_->add_cursor({cursor.line - 1, cursor.byte});
+         return {};
+       }},
+      {"selection.add-cursor-down",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         const auto cursor = app.editor_->cursor();
+         if (cursor.line + 1 >= app.editor_->line_count()) {
+           return "the cursor is on the last line";
+         }
+         app.editor_->add_cursor({cursor.line + 1, cursor.byte});
+         return {};
+       }},
+      {"view.toggle-sidebar",
+       [](App &app) -> Result {
+         app.shell_state_.sidebar_visible = !app.shell_state_.sidebar_visible;
+         app.persist_shell_state();
+         return {};
+       }},
+      {"view.toggle-bottom-panel",
+       [](App &app) -> Result {
+         app.shell_state_.bottom_panel_visible =
+             !app.shell_state_.bottom_panel_visible;
+         app.persist_shell_state();
+         return {};
+       }},
+      {"view.toggle-editor-split",
+       [](App &app) -> Result {
+         app.shell_state_.editor_split = !app.shell_state_.editor_split;
+         app.persist_shell_state();
+         return {};
+       }},
+      {"view.cycle-theme",
+       [](App &app) -> Result {
+         app.cycle_theme();
+         return {};
+       }},
+      {"view.toggle-high-contrast",
+       [](App &app) -> Result {
+         app.toggle_high_contrast();
+         return {};
+       }},
+      {"view.repository",
+       [](App &app) -> Result {
+         app.open_command_panel("view.repository");
+         return {};
+       }},
+      {"view.review",
+       [](App &app) -> Result {
+         app.open_command_panel("view.review");
+         return {};
+       }},
+      {"view.multiplayer",
+       [](App &app) -> Result {
+         app.open_command_panel("view.multiplayer");
+         return {};
+       }},
+      {"panel.diagnostics",
+       [](App &app) -> Result {
+         app.open_command_panel("panel.diagnostics");
+         return {};
+       }},
+      {"panel.build",
+       [](App &app) -> Result {
+         app.open_command_panel("panel.build");
+         return {};
+       }},
+      {"panel.assistant",
+       [](App &app) -> Result {
+         app.open_command_panel("panel.assistant");
+         return {};
+       }},
+      {"panel.plugins",
+       [](App &app) -> Result {
+         app.open_command_panel("panel.plugins");
+         return {};
+       }},
+      {"panel.reset-layout",
+       [](App &app) -> Result {
+         app.reset_panel_layout();
+         return {};
+       }},
+      {"go.definition",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.request_definition();
+         return {};
+       }},
+      {"go.hover",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.request_hover();
+         return {};
+       }},
+      {"go.completion",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.request_completion();
+         return {};
+       }},
+      {"go.quick-open",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::quick_open);
+         return {};
+       }},
+      {"go.symbol",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::symbol_search);
+         return {};
+       }},
+      {"go.references",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.invoke_navigation_action(NavigationAction::find_references);
+         return {};
+       }},
+      {"go.call-hierarchy",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.invoke_navigation_action(NavigationAction::call_hierarchy);
+         return {};
+       }},
+      {"go.breadcrumbs",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         app.invoke_navigation_action(NavigationAction::focus_breadcrumbs);
+         return {};
+       }},
+      {"go.open-recent",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::open_recent);
+         return {};
+       }},
+      {"go.back",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::back);
+         return {};
+       }},
+      {"go.forward",
+       [](App &app) -> Result {
+         app.invoke_navigation_action(NavigationAction::forward);
+         return {};
+       }},
+      {"repository.open",
+       [](App &app) -> Result {
+         if (app.repository_selection_.empty() ||
+             app.repository_selection_blob_.empty()) {
+           return "select a file in the repository tree first";
+         }
+         app.invoke_navigation_action(NavigationAction::open);
+         return {};
+       }},
+      {"repository.rename",
+       [](App &app) -> Result {
+         if (app.repository_selection_.empty()) {
+           return no_selection;
+         }
+         app.invoke_navigation_action(NavigationAction::rename);
+         return {};
+       }},
+      {"repository.move",
+       [](App &app) -> Result {
+         if (app.repository_selection_.empty()) {
+           return no_selection;
+         }
+         app.invoke_navigation_action(NavigationAction::move);
+         return {};
+       }},
+      {"repository.new-file",
+       [](App &app) -> Result {
+         if (app.repository_selection_.empty()) {
+           return no_selection;
+         }
+         app.invoke_navigation_action(NavigationAction::new_file);
+         return {};
+       }},
+      {"repository.reveal",
+       [](App &app) -> Result {
+         if (!app.options_.repository_path) {
+           return "open a repository first";
+         }
+         app.invoke_navigation_action(NavigationAction::reveal);
+         return {};
+       }},
+      {"refactor.rename",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.open_rename();
+         return {};
+       }},
+      {"refactor.extract-function",
+       [](App &app) -> Result {
+         if (!app.editor_) {
+           return no_file;
+         }
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.open_extract_function();
+         return {};
+       }},
+      {"run.build",
+       [](App &app) -> Result {
+         app.request_build();
+         return {};
+       }},
+      {"run.tests",
+       [](App &app) -> Result {
+         app.request_tests();
+         return {};
+       }},
+      {"run.push",
+       [](App &app) -> Result {
+         app.request_push();
+         return {};
+       }},
+      {"run.set-up-build",
+       [](App &app) -> Result {
+         app.open_build_setup();
+         return {};
+       }},
+      {"run.set-lake",
+       [](App &app) -> Result {
+         app.open_set_lake_dialog();
+         return {};
+       }},
+      {"change.cut",
+       [](App &app) -> Result {
+         app.open_cut_composer();
+         return {};
+       }},
+      {"review.next-hunk",
+       [](App &app) -> Result {
+         app.navigate_hunk(true);
+         return {};
+       }},
+      {"review.previous-hunk",
+       [](App &app) -> Result {
+         app.navigate_hunk(false);
+         return {};
+       }},
+      {"review.next-comment",
+       [](App &app) -> Result {
+         app.navigate_comment();
+         return {};
+       }},
+      {"review.new-comment",
+       [](App &app) -> Result {
+         app.begin_review_comment();
+         return {};
+       }},
+      {"review.approve",
+       [](App &app) -> Result {
+         if (!app.review_) {
+           return no_review;
+         }
+         app.review_->request_approve();
+         return {};
+       }},
+      {"review.request",
+       [](App &app) -> Result {
+         app.open_request_review();
+         return {};
+       }},
+      {"review.refresh",
+       [](App &app) -> Result {
+         if (!app.review_) {
+           return "this repository has no lake to review on";
+         }
+         if (app.review_->snapshot().review.selected) {
+           app.review_->request_refresh();
+         } else {
+           app.review_->request_list();
+         }
+         return {};
+       }},
+      {"assistant.ask",
+       [](App &app) -> Result {
+         app.request_assistant_context(AssistantAction::ask);
+         return {};
+       }},
+      {"assistant.explain-diagnostic",
+       [](App &app) -> Result {
+         app.request_assistant_context(AssistantAction::explain_diagnostic);
+         return {};
+       }},
+      {"assistant.propose-edit",
+       [](App &app) -> Result {
+         app.request_assistant_context(AssistantAction::propose_edit);
+         return {};
+       }},
+      {"assistant.accept-edit",
+       [](App &app) -> Result {
+         if (app.review_diff_open_) {
+           return read_only;
+         }
+         app.accept_assistant_edit();
+         return {};
+       }},
+      {"assistant.reject-edit",
+       [](App &app) -> Result {
+         if (!app.assistant_) {
+           return "the assistant is off for this repository";
+         }
+         app.assistant_->reject();
+         return {};
+       }},
+      {"assistant.toggle",
+       [](App &app) -> Result {
+         app.toggle_assistant();
+         return {};
+       }},
+      {"assistant.preview-context",
+       [](App &app) -> Result {
+         app.request_assistant_context(std::nullopt);
+         return {};
+       }},
+      {"help.version",
+       [](App &app) -> Result {
+         app.editor_status_ = "liquify " + std::string(version_string());
+         return {};
+       }},
+      {"help.command-reference",
+       [](App &) -> Result {
+         return "run `liquify docs commands` to generate it";
+       }},
+  });
+  return handlers;
 }
 
 bool App::init() {
@@ -2075,7 +2875,6 @@ bool App::init_window(bool high_pixel_density) {
   }
 #if defined(__APPLE__) && defined(__OBJC__)
   if (!screenshot_mode()) {
-    install_native_menu();
     install_native_accessibility(window_);
   }
 #endif
@@ -2105,10 +2904,19 @@ bool App::high_contrast_active() const {
 void App::load_font_atlas(float scale) {
   auto &io = ImGui::GetIO();
   io.Fonts->Clear();
+  // Basic Latin and Latin-1 are ImGui's default; liquify's own text also uses General Punctuation
+  // (the em dash, the ellipsis, curly quotes, the bullet), which IBM Plex has. Without it those
+  // characters drew as "?" (liquify#129).
+  static constexpr ImWchar glyph_ranges[] = {
+      0x0020, 0x00FF, // Basic Latin and Latin-1 Supplement
+      0x2010, 0x205E, // General Punctuation
+      0,
+  };
   auto add_font = [&](const auto &bytes, float size, std::string_view name) {
     auto config = ImFontConfig{};
     config.FontDataOwnedByAtlas = false;
     config.RasterizerDensity = scale;
+    config.GlyphRanges = glyph_ranges;
     std::snprintf(config.Name, sizeof(config.Name), "%.*s %.0f",
                   static_cast<int>(name.size()), name.data(), size);
     return io.Fonts->AddFontFromMemoryTTF(
@@ -2135,6 +2943,13 @@ void App::load_font_atlas(float scale) {
       heading_font_index_ = io.Fonts->Fonts.Size - 1;
     }
   }
+  // The type scale's emphasis faces: titles and headings are IBM Plex Sans SemiBold, as lake's.
+  title_font_index_ = -1;
+  section_font_index_ = -1;
+  add_font(design::ibm_plex_sans_semibold, design::text24, "IBM Plex Sans SemiBold");
+  title_font_index_ = io.Fonts->Fonts.Size - 1;
+  add_font(design::ibm_plex_sans_semibold, design::text16, "IBM Plex Sans SemiBold");
+  section_font_index_ = io.Fonts->Fonts.Size - 1;
   for (const auto size : {design::text12, design::text14, design::text16}) {
     add_font(design::ibm_plex_mono_regular, size, "IBM Plex Mono");
     const auto distance =
@@ -2216,7 +3031,10 @@ void App::apply_theme() {
   style.WindowBorderSize = border_width;
   style.ChildBorderSize = border_width;
   style.PopupBorderSize = border_width;
-  style.FrameBorderSize = high_contrast ? border_width : 0.0F;
+  // Controls follow lake's kit (liquify#101): fields, checkboxes and secondary buttons carry a
+  // hairline; the one primary action per surface is filled with the action role.
+  style.FrameBorderSize = border_width;
+  style.GrabMinSize = design::space4;
   style.TabBorderSize = high_contrast ? border_width : 0.0F;
 
   auto *colors = style.Colors;
@@ -2226,8 +3044,15 @@ void App::apply_theme() {
   colors[ImGuiCol_ChildBg] = imgui_color(palette.surface);
   colors[ImGuiCol_PopupBg] = imgui_color(palette.overlay);
   colors[ImGuiCol_Border] = imgui_color(palette.border_subtle);
+  // Compact tables with sticky headers, as lake's kit draws them: the header sits on the
+  // surface role, its labels in the muted ink role, with a hairline under it (liquify#109).
+  colors[ImGuiCol_TableHeaderBg] = imgui_color(palette.surface);
+  colors[ImGuiCol_TableBorderStrong] = imgui_color(palette.border_subtle);
+  colors[ImGuiCol_TableBorderLight] = imgui_color(palette.border_subtle);
+  colors[ImGuiCol_TableRowBg] = ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
+  colors[ImGuiCol_TableRowBgAlt] = imgui_color(palette.layer);
   colors[ImGuiCol_BorderShadow] = {0.0F, 0.0F, 0.0F, 0.0F};
-  colors[ImGuiCol_FrameBg] = imgui_color(palette.layer);
+  colors[ImGuiCol_FrameBg] = imgui_color(palette.surface);
   colors[ImGuiCol_FrameBgHovered] = imgui_color(palette.layer_hover);
   colors[ImGuiCol_FrameBgActive] = imgui_color(palette.selected);
   colors[ImGuiCol_TitleBg] = imgui_color(palette.surface);
@@ -2240,7 +3065,7 @@ void App::apply_theme() {
   colors[ImGuiCol_CheckMark] = imgui_color(palette.action);
   colors[ImGuiCol_SliderGrab] = imgui_color(palette.action);
   colors[ImGuiCol_SliderGrabActive] = imgui_color(palette.action_pressed);
-  colors[ImGuiCol_Button] = imgui_color(palette.layer);
+  colors[ImGuiCol_Button] = imgui_color(palette.surface);
   colors[ImGuiCol_ButtonHovered] = imgui_color(palette.layer_hover);
   colors[ImGuiCol_ButtonActive] = imgui_color(palette.selected);
   colors[ImGuiCol_Header] = imgui_color(palette.selected);
@@ -2259,6 +3084,13 @@ void App::apply_theme() {
   colors[ImGuiCol_TabDimmedSelected] = imgui_color(palette.surface);
   colors[ImGuiCol_TextSelectedBg] = imgui_color(palette.selection);
   colors[ImGuiCol_NavCursor] = imgui_color(palette.focus);
+  // The modal scrim (liquify#102): the theme's canvas, translucent, so a dialog dims the window
+  // in the theme's own direction instead of washing dark mode out with mid-grey.
+  {
+    auto scrim = imgui_color(palette.canvas);
+    scrim.w = dark ? 0.72F : 0.55F;
+    colors[ImGuiCol_ModalWindowDimBg] = scrim;
+  }
   applied_dark_theme_ = dark;
   applied_high_contrast_ = high_contrast;
 }
@@ -2303,6 +3135,7 @@ void App::apply_settings_live(bool rebuild_fonts) {
     fonts_rebuild_requested_ = true;
   }
   apply_theme();
+  apply_command_bindings();
 }
 
 void App::persist_settings() {
@@ -2314,7 +3147,10 @@ void App::persist_settings() {
       options_.repository_path) {
     path = repository_settings_path(*options_.repository_path);
   }
-  const auto saved = save_settings(path, settings_);
+  const auto scope = settings_scope_ == SettingsScope::repository && options_.repository_path
+                         ? SettingsScope::repository
+                         : SettingsScope::user;
+  const auto saved = save_settings(path, settings_, scope, settings_user_);
   if (!saved) {
     editor_status_ = saved.error().message;
     settings_diagnostics_ = {
@@ -2322,6 +3158,9 @@ void App::persist_settings() {
     return;
   }
   settings_diagnostics_.clear();
+  if (scope == SettingsScope::user) {
+    settings_user_ = settings_;
+  }
   editor_status_ = "settings applied";
 }
 
@@ -2574,6 +3413,8 @@ void App::open_editor(std::string path, std::string blob_id,
   if (found != open_buffers_.end() && found->second.buffer.get() == editor_) {
     repository_focused_ = false;
     editor_focused_ = true;
+    // The requested source is shown, not a panel sharing the editor area (liquify#33).
+    editor_area_panel_.reset();
     return;
   }
   if (found == open_buffers_.end()) {
@@ -3134,9 +3975,10 @@ void App::request_tests(std::string filter) {
   }
 }
 
-void App::request_deploy() {
+void App::request_push() {
   if (editor_graph_) {
-    editor_graph_->request_deploy();
+    editor_graph_->request_push(
+        repository_ ? std::string(repository_->lake_remote()) : std::string{});
   }
 }
 
@@ -3440,12 +4282,19 @@ void App::poll_editor_graph() {
         structural_accepted_files_.push_back(path);
       }
     }
-    structural_preview_open_ = true;
-    panels_.focus(PanelId::structural_editing);
-    persist_shell_state();
-    editor_status_ = structural_preview_.empty()
-                         ? "structural preview has diagnostics"
-                         : "structural preview ready";
+    // Opening a buffer also advances the generation, to drop a preview of the previous file.
+    // That carries no preview and must not take the editor area from the opened source with an
+    // empty Structural editing panel (liquify#33).
+    if (snapshot.rename_preview || snapshot.extract_preview) {
+      structural_preview_open_ = true;
+      panels_.focus(PanelId::structural_editing);
+      persist_shell_state();
+      editor_status_ = structural_preview_.empty()
+                           ? "structural preview has diagnostics"
+                           : "structural preview ready";
+    } else {
+      structural_preview_open_ = false;
+    }
   }
   if (snapshot.structural_result_generation != structural_result_generation_) {
     structural_result_generation_ = snapshot.structural_result_generation;
@@ -3477,7 +4326,13 @@ void App::poll_editor_graph() {
   }
   if (snapshot.definition_generation != definition_generation_) {
     definition_generation_ = snapshot.definition_generation;
-    if (snapshot.definition) {
+    // liquify#78: a definition opens only a path inside the repository.
+    if (snapshot.definition &&
+        (snapshot.definition->path.is_absolute() ||
+         std::ranges::any_of(snapshot.definition->path,
+                             [](const auto &part) { return part == ".."; }))) {
+      editor_status_ = "go to definition: the result is not a path inside the repository";
+    } else if (snapshot.definition) {
       const auto target = snapshot.definition->path.generic_string();
       if (pending_definition_origin_) {
         navigation_history_.replace_current(*pending_definition_origin_);
@@ -3500,6 +4355,12 @@ void App::poll_editor_graph() {
 void App::handle_text(std::string_view text) {
   if (!editor_ || !editor_focused_ || review_diff_open_ ||
       editor_->mode() == EditingMode::modal_command) {
+    return;
+  }
+  // A modal dialog owns the keyboard: its fields receive the text through ImGui, and the
+  // source it covers must not (liquify#39).
+  if (ImGui::GetCurrentContext() != nullptr &&
+      ImGui::GetTopMostPopupModal() != nullptr) {
     return;
   }
   if (!editor_mutation_allowed()) {
@@ -3630,166 +4491,77 @@ void App::handle_file_drop(const std::filesystem::path &source,
   editor_status_ = "imported " + destination.generic_string();
 }
 
+// A key press runs a command only through the registry's resolved bindings (liquify#34): there
+// is no shortcut outside it, so a rebind or an unbind in settings cannot be bypassed. A chord
+// whose command is out of scope falls through to the focused surface.
+auto App::command_scope_active(CommandScope scope) const -> bool {
+  const auto modal = ImGui::GetCurrentContext() != nullptr &&
+                     ImGui::GetTopMostPopupModal() != nullptr;
+  switch (scope) {
+  case CommandScope::global:
+    return true;
+  case CommandScope::editor:
+    return editor_ && editor_focused_ && !modal;
+  case CommandScope::repository:
+    return repository_focused_ && !modal;
+  }
+  return false;
+}
+
+auto App::dispatch_key_command(std::uint32_t key, std::uint16_t modifiers)
+    -> bool {
+  if (!commands_) {
+    return false;
+  }
+  const auto platform = commands_->platform();
+  const auto gui = (modifiers & SDL_KMOD_GUI) != 0;
+  const auto control = (modifiers & SDL_KMOD_CTRL) != 0;
+  const auto chord = key_chord_from_event(
+      SDL_GetKeyName(key), platform == CommandPlatform::macos ? gui : control,
+      control, (modifiers & SDL_KMOD_ALT) != 0,
+      (modifiers & SDL_KMOD_SHIFT) != 0, platform);
+  if (!chord) {
+    return false;
+  }
+  if (const auto *conflict = commands_->conflict_for(*chord)) {
+    const auto claimed = std::ranges::any_of(conflict->commands, [&](const auto &name) {
+      const auto *command = commands_->find(name);
+      return command != nullptr && command_scope_active(command->scope);
+    });
+    if (!claimed) {
+      return false;
+    }
+    auto owners = std::string{};
+    for (const auto &name : conflict->commands) {
+      owners += (owners.empty() ? "" : ", ") + name;
+    }
+    editor_status_ = conflict->binding + " is bound to " + owners +
+                     "; rebind one in Settings to use it";
+    return true;
+  }
+  const auto *command = commands_->command_for(*chord);
+  if (command == nullptr || !command_scope_active(command->scope)) {
+    return false;
+  }
+  static_cast<void>(invoke_command(std::string(command->name)));
+  return true;
+}
+
 void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
-  const auto primary = (modifiers & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0;
   const auto shift = (modifiers & SDL_KMOD_SHIFT) != 0;
-  const auto alt = (modifiers & SDL_KMOD_ALT) != 0;
-  if (command_matches(settings_, "file.close", "Primary+W", key, modifiers)) {
-    close_editor();
+  if (dispatch_key_command(key, modifiers)) {
     return;
   }
-  if (primary && key == SDLK_Q) {
-    request_quit();
-    return;
-  }
-  if (command_matches(settings_, "settings.open", "Primary+,", key,
-                      modifiers)) {
-    settings_open_ = true;
-    return;
-  }
-  if (primary && key == SDLK_B) {
-    shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
-    persist_shell_state();
-    return;
-  }
-  if (primary && key == SDLK_J) {
-    shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
-    persist_shell_state();
-    return;
-  }
-  if (primary && key == SDLK_BACKSLASH) {
-    shell_state_.editor_split = !shell_state_.editor_split;
-    persist_shell_state();
-    return;
-  }
-  if (primary && shift && key == SDLK_T) {
-    cycle_theme();
-    return;
-  }
-  if (command_matches(settings_, "palette.open", "Primary+Shift+P", key,
-                      modifiers)) {
-    command_palette_open_ = true;
-    return;
-  }
-  if (primary && key == SDLK_P) {
-    invoke_navigation_action(NavigationAction::quick_open);
-    return;
-  }
-  if (primary && key == SDLK_T) {
-    invoke_navigation_action(NavigationAction::symbol_search);
-    return;
-  }
-  if (primary && !alt && key == SDLK_R) {
-    invoke_navigation_action(NavigationAction::open_recent);
-    return;
-  }
-  if (alt && key == SDLK_LEFT) {
-    invoke_navigation_action(NavigationAction::back);
-    return;
-  }
-  if (alt && key == SDLK_RIGHT) {
-    invoke_navigation_action(NavigationAction::forward);
-    return;
-  }
-  if (primary && shift && key == SDLK_PERIOD) {
-    invoke_navigation_action(NavigationAction::focus_breadcrumbs);
-    return;
-  }
-  if (shift && key == SDLK_F12) {
-    invoke_navigation_action(NavigationAction::find_references);
-    return;
-  }
-  if (alt && key == SDLK_F12) {
-    invoke_navigation_action(NavigationAction::call_hierarchy);
-    return;
-  }
-  if (key == SDLK_F2) {
-    invoke_navigation_action(NavigationAction::rename);
-    return;
-  }
-  if (primary && shift && key == SDLK_M) {
-    invoke_navigation_action(NavigationAction::move);
-    return;
-  }
-  if (primary && key == SDLK_N) {
-    invoke_navigation_action(NavigationAction::new_file);
-    return;
-  }
-  if (primary && alt && key == SDLK_R) {
-    invoke_navigation_action(NavigationAction::reveal);
-    return;
-  }
-  if (repository_focused_ && (key == SDLK_RETURN || key == SDLK_KP_ENTER)) {
-    invoke_navigation_action(NavigationAction::open);
-    return;
-  }
-  if (command_matches(settings_, "build.run", "F7", key, modifiers)) {
-    request_build();
-    return;
-  }
-  if (command_matches(settings_, "tests.run", "F8", key, modifiers)) {
-    request_tests();
-    return;
-  }
-  if (command_matches(settings_, "deploy.run", "F9", key, modifiers)) {
-    request_deploy();
+  // A modal dialog owns Enter, Escape and the arrows: Quick Open's Down and Enter move and accept
+  // its result, never the source behind it (liquify#33, liquify#39). Commands scoped to the
+  // editor or the repository tree are already inactive under a modal (command_scope_active).
+  if (ImGui::GetCurrentContext() != nullptr && ImGui::GetTopMostPopupModal() != nullptr) {
     return;
   }
   if (!editor_) {
     return;
   }
   if (!editor_focused_) {
-    return;
-  }
-  if (primary && shift && key == SDLK_F) {
-    panels_.focus(PanelId::search);
-    panels_.clear_focus_request();
-    shell_state_.sidebar_visible = true;
-    persist_shell_state();
-    return;
-  }
-  if (primary && key == SDLK_F) {
-    find_open_ = true;
-    buffer_matches_ = editor_->find(find_query_, find_options_);
-    return;
-  }
-  if (primary && key == SDLK_Z) {
-    undo_editor(shift);
-    return;
-  }
-  if (primary && key == SDLK_L) {
-    editor_->select(SelectionKind::line);
-    return;
-  }
-  if (primary && alt && (key == SDLK_UP || key == SDLK_DOWN)) {
-    const auto cursor = editor_->cursor();
-    if (key == SDLK_UP && cursor.line > 0) {
-      editor_->add_cursor({cursor.line - 1, cursor.byte});
-    } else if (key == SDLK_DOWN && cursor.line + 1 < editor_->line_count()) {
-      editor_->add_cursor({cursor.line + 1, cursor.byte});
-    }
-    return;
-  }
-  if (primary && alt && key == SDLK_C) {
-    begin_review_comment();
-    return;
-  }
-  if (primary && alt && key == SDLK_A) {
-    if (review_) {
-      review_->request_approve();
-    }
-    return;
-  }
-  if (alt && key == SDLK_DOWN) {
-    navigate_hunk(true);
-    return;
-  }
-  if (alt && key == SDLK_UP) {
-    navigate_hunk(false);
-    return;
-  }
-  if (alt && key == SDLK_C) {
-    navigate_comment();
     return;
   }
   if (review_diff_open_) {
@@ -3801,88 +4573,6 @@ void App::handle_key(std::uint32_t key, std::uint16_t modifiers) {
       return;
     }
   }
-  if (primary && shift && key == SDLK_RIGHT) {
-    expand_structural_selection();
-    return;
-  }
-  if (primary && shift && key == SDLK_LEFT) {
-    shrink_structural_selection();
-    return;
-  }
-  if (primary && shift && key == SDLK_D) {
-    select_enclosing_definition();
-    return;
-  }
-  if (primary && shift && key == SDLK_R) {
-    open_rename();
-    return;
-  }
-  if (primary && shift && key == SDLK_X) {
-    open_extract_function();
-    return;
-  }
-  if (primary && shift && key == SDLK_L) {
-    toggle_assistant();
-    return;
-  }
-  if (primary && shift && key == SDLK_A) {
-    request_assistant_context(AssistantAction::ask);
-    return;
-  }
-  if (primary && shift && key == SDLK_E) {
-    request_assistant_context(AssistantAction::explain_diagnostic);
-    return;
-  }
-  if (primary && shift && key == SDLK_I) {
-    request_assistant_context(AssistantAction::propose_edit);
-    return;
-  }
-  if (primary && shift && key == SDLK_C) {
-    request_assistant_context(std::nullopt);
-    return;
-  }
-  if (primary && (key == SDLK_RETURN || key == SDLK_KP_ENTER)) {
-    accept_assistant_edit();
-    return;
-  }
-  if (primary && key == SDLK_BACKSPACE) {
-    if (assistant_) {
-      assistant_->reject();
-    }
-    return;
-  }
-  if (command_matches(settings_, "file.save", "Primary+S", key, modifiers)) {
-    if (review_diff_open_) {
-      editor_status_ = "review diffs are read-only";
-      return;
-    }
-    save_editor();
-    return;
-  }
-  if (key == SDLK_F12) {
-    request_definition();
-    return;
-  }
-  if (key == SDLK_F1) {
-    request_hover();
-    return;
-  }
-  if (primary && key == SDLK_SPACE) {
-    request_completion();
-    return;
-  }
-  if (primary && key == SDLK_A) {
-    editor_->select_all();
-    return;
-  }
-  if (primary && key == SDLK_M) {
-    const auto next = editor_->mode() == EditingMode::standard
-                          ? EditingMode::modal_command
-                          : EditingMode::standard;
-    editor_->set_mode(next);
-    return;
-  }
-
   if (editor_->mode() == EditingMode::modal_command) {
     if (key == SDLK_I) {
       editor_->set_mode(EditingMode::modal_insert);
@@ -4008,6 +4698,17 @@ void App::update_text_input_area() {
   if (!editor_ || !editor_visible_) {
     return;
   }
+  // The retained editor and ImGui's fields share one SDL text-input session (liquify#39). The
+  // ImGui SDL backend stops it when one of its fields loses focus, so the focused editor takes it
+  // back here; while a dialog or an ImGui field owns the keyboard, the editor leaves it, and the
+  // IME rectangle, to them.
+  if (!editor_focused_ || ImGui::GetTopMostPopupModal() != nullptr ||
+      ImGui::GetIO().WantTextInput) {
+    return;
+  }
+  if (!SDL_TextInputActive(window_)) {
+    SDL_StartTextInput(window_);
+  }
   const auto cursor = editor_->cursor();
   const auto row = cursor.line >= scroll_line_ ? cursor.line - scroll_line_ : 0;
   const auto &layout = layouts_->line(cursor.line, editor_->line(cursor.line));
@@ -4078,23 +4779,33 @@ void App::draw_repository_tree() {
   }
   ImGui::Separator();
   if (!repository_->error().empty()) {
-    ImGui::TextWrapped("Could not open this repository: %s",
-                       std::string(repository_->error()).c_str());
+    draw_user_error({.kind = FailureKind::local,
+                     .summary = "This repository could not be opened",
+                     .next_step = "Reopen it from the front door.",
+                     .details = without_absolute_paths(repository_->error(),
+                                                       repository_->path())},
+                    "repository-failure");
     return;
   }
   repository_->poll();
   if (repository_->navigation_loading()) {
-    ImGui::TextDisabled("Indexing paths and symbols...");
+    draw_panel_state("Indexing paths and symbols...");
   } else if (!repository_->navigation_error().empty()) {
-    ImGui::TextWrapped("Navigation index: %s",
-                       std::string(repository_->navigation_error()).c_str());
+    // The tree works without the index, so its failure is a quiet warning, not a red block.
+    draw_user_error(describe_index_failure(repository_->navigation_error(),
+                                           repository_->path()),
+                    "index-failure",
+                    [this] {
+                      repository_->retry_navigation();
+                      request_repaint();
+                    },
+                    {.tone = NoticeTone::warning, .quiet = true});
   }
   if (!repository_->mutation_status().empty()) {
-    ImGui::TextWrapped("%s",
-                       std::string(repository_->mutation_status()).c_str());
+    draw_panel_state(repository_->mutation_status());
   }
   if (repository_->entries().empty()) {
-    ImGui::TextWrapped("This repository has no files.");
+    draw_panel_state("This repository has no files.");
     return;
   }
   draw_repository_entries({});
@@ -4102,16 +4813,26 @@ void App::draw_repository_tree() {
 
 void App::draw_review_panel() {
   ImGui::TextUnformatted("Reviews");
-  if (!options_.lake_url) {
-    ImGui::TextDisabled("Configure with --lake <repository-url>");
-    return;
-  }
   if (!review_) {
-    ImGui::TextWrapped("%s", editor_status_.c_str());
+    ImGui::PushTextWrapPos(0.0F);
+    ImGui::TextUnformatted(
+        "A review asks people to read a change on lake before it lands. "
+        "Reviews live on the lake this repository pushes to, and it has none "
+        "yet.");
+    ImGui::PopTextWrapPos();
+    if (repository_ && kit_button("Set lake", ButtonKind::primary)) {
+      open_set_lake_dialog();
+    }
+    frame_layout_.controls["review/set-lake"] = item_rectangle();
     return;
   }
   const auto snapshot = review_->snapshot();
-  if (ImGui::SmallButton("Refresh reviews")) {
+  if (kit_button("Request review", ButtonKind::secondary, ButtonSize::compact)) {
+    open_request_review();
+  }
+  frame_layout_.controls["review/request"] = item_rectangle();
+  ImGui::SameLine();
+  if (kit_button("Refresh reviews", ButtonKind::secondary, ButtonSize::compact)) {
     if (snapshot.review.selected) {
       review_->request_refresh();
     } else {
@@ -4120,10 +4841,16 @@ void App::draw_review_panel() {
   }
   if (snapshot.busy) {
     ImGui::SameLine();
-    ImGui::TextDisabled("loading...");
+    draw_panel_state("Loading...");
   }
   if (!snapshot.error.empty()) {
-    ImGui::TextWrapped("Could not load reviews: %s", snapshot.error.c_str());
+    draw_user_error(
+        {.kind = FailureKind::other,
+         .summary = "Lake did not complete the review request",
+         .next_step = "Reviews need the change on lake: push it, then refresh "
+                      "or request the review again.",
+         .details = without_absolute_paths(snapshot.error, repository_path())},
+        "review-failure");
   }
   for (const auto &item : snapshot.review.reviews) {
     const auto label =
@@ -4137,8 +4864,15 @@ void App::draw_review_panel() {
   if (!snapshot.review.selected) {
     if (!snapshot.busy && snapshot.error.empty() &&
         snapshot.review.reviews.empty()) {
-      ImGui::TextWrapped(
-          "%s", panels_.descriptor(PanelId::review).empty_state.data());
+      ImGui::PushTextWrapPos(0.0F);
+      ImGui::TextUnformatted(
+          "No reviews yet. A review asks people to read a change before it "
+          "lands: cut your work as a change, push it, then request a review.");
+      ImGui::PopTextWrapPos();
+      if (kit_button("Request review", ButtonKind::primary)) {
+        open_request_review();
+      }
+      frame_layout_.controls["review/request-empty"] = item_rectangle();
     }
     return;
   }
@@ -4146,15 +4880,15 @@ void App::draw_review_panel() {
   ImGui::TextWrapped(
       "Review %s: %s", snapshot.review.selected->id.c_str(),
       std::string(review_state_name(snapshot.review.selected->state)).c_str());
-  if (ImGui::SmallButton("New comment")) {
+  if (kit_button("New comment", ButtonKind::secondary, ButtonSize::compact)) {
     begin_review_comment();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Approve")) {
+  if (kit_button("Approve", ButtonKind::secondary, ButtonSize::compact)) {
     review_->request_approve();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Request changes")) {
+  if (kit_button("Request changes", ButtonKind::secondary, ButtonSize::compact)) {
     review_->request_changes();
   }
 
@@ -4176,18 +4910,17 @@ void App::draw_review_panel() {
 
 void App::draw_review_comment_popup() {
   if (review_comment_popup_open_) {
-    ImGui::OpenPopup("Review comment");
+    ImGui::OpenPopup("Review Comment");
     review_comment_popup_open_ = false;
   }
-  if (!ImGui::BeginPopupModal("Review comment", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!begin_dialog("Review Comment", ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
   ImGui::TextUnformatted("Comment on the current cursor");
   ImGui::InputTextMultiline("##review-comment-body", &review_comment_body_,
                             ImVec2(520.0F, 140.0F));
   ImGui::BeginDisabled(review_comment_body_.empty());
-  if (ImGui::Button("Post comment")) {
+  if (kit_button("Post comment", ButtonKind::primary)) {
     submit_review_comment();
     if (review_comment_body_.empty()) {
       ImGui::CloseCurrentPopup();
@@ -4195,7 +4928,7 @@ void App::draw_review_comment_popup() {
   }
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel")) {
+  if (kit_button("Cancel", ButtonKind::secondary)) {
     review_comment_body_.clear();
     ImGui::CloseCurrentPopup();
   }
@@ -4259,11 +4992,14 @@ void App::draw_repository_entries(std::string_view directory) {
           repository_->request_directory(path, entry.ref);
         }
         if (repository_->directory_loading(path)) {
-          ImGui::TextDisabled("loading...");
+          draw_panel_state("Loading...");
         } else if (!repository_->directory_error(path).empty()) {
-          ImGui::TextWrapped(
-              "Unable to read directory: %s",
-              std::string(repository_->directory_error(path)).c_str());
+          // One unreadable folder leaves the rest of the tree working: a quiet warning.
+          draw_user_error(
+              describe_folder_failure(path, repository_->directory_error(path),
+                                      repository_->path()),
+              "folder-failure/" + path, {},
+              {.tone = NoticeTone::warning, .quiet = true});
         } else {
           draw_repository_entries(path);
         }
@@ -4290,7 +5026,7 @@ void App::draw_repository_entries(std::string_view directory) {
         repository_action_target_ = path;
         repository_move_open_ = true;
       }
-      if (ImGui::MenuItem("New file")) {
+      if (ImGui::MenuItem("New File")) {
         auto base = std::filesystem::path(path);
         if (entry.kind == liquid::node_kind::blob) {
           base = base.parent_path();
@@ -4307,6 +5043,24 @@ void App::draw_repository_entries(std::string_view directory) {
   }
 }
 
+// Up and Down move a search dialog's selected result while its query field keeps the keyboard
+// (liquify#33). Returns true when Enter accepts the selected result.
+static auto move_result_selection(std::size_t &selection, std::size_t count)
+    -> bool {
+  if (count == 0) {
+    selection = 0;
+    return false;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+    selection = (selection + 1) % count;
+  } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+    selection = (selection + count - 1) % count;
+  }
+  selection = std::min(selection, count - 1);
+  return ImGui::IsKeyPressed(ImGuiKey_Enter) ||
+         ImGui::IsKeyPressed(ImGuiKey_KeypadEnter);
+}
+
 void App::draw_navigation_popups() {
   const auto *screenshot =
       options_.screenshot_state
@@ -4315,19 +5069,30 @@ void App::draw_navigation_popups() {
   const auto navigation_screenshot =
       screenshot != nullptr && screenshot->view == ScreenshotView::navigation;
   if (quick_open_open_) {
-    ImGui::OpenPopup("Quick open");
+    ImGui::OpenPopup("Quick Open");
     quick_open_open_ = false;
+    quick_open_selection_ = 0;
   }
-  if (ImGui::BeginPopupModal("Quick open", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  // Quick Open and Symbol Search are keyboard-first (liquify#33): the query field takes focus
+  // when the dialog appears, Up and Down move the selected result while the field keeps the
+  // keyboard, Enter opens it and Escape closes. Result rows and Close are not navigation
+  // targets, so the arrows never move ImGui's focus out of the field.
+  if (begin_dialog("Quick Open", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
+    if (ImGui::IsWindowAppearing() && !navigation_screenshot) {
+      ImGui::SetKeyboardFocusHere();
+    }
     ImGui::SetNextItemWidth(620.0F);
     const auto quick_open_flags = navigation_screenshot
                                       ? ImGuiInputTextFlags_ReadOnly
                                       : ImGuiInputTextFlags_None;
-    ImGui::InputTextWithHint("##quick-open", "Type a path", &quick_open_query_,
-                             quick_open_flags);
+    if (ImGui::InputTextWithHint("##quick-open", "Type a path",
+                                 &quick_open_query_, quick_open_flags)) {
+      quick_open_selection_ = 0;
+    }
     frame_layout_.controls["quick-open/query"] = item_rectangle();
+    auto close = false;
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
     if (navigation_screenshot) {
       file_item("src/app.cpp", NavigationFileKind::cpp_source, true);
       file_item("src/app_state.cpp", NavigationFileKind::cpp_source);
@@ -4338,15 +5103,22 @@ void App::draw_navigation_popups() {
     } else if (repository_->navigation_loading()) {
       ImGui::TextDisabled("Indexing repository paths...");
     } else {
-      for (const auto &match :
-           rank_paths(repository_->navigation_paths(), quick_open_query_)) {
+      const auto matches =
+          rank_paths(repository_->navigation_paths(), quick_open_query_);
+      const auto accept =
+          move_result_selection(quick_open_selection_, matches.size());
+      for (std::size_t row = 0; row < matches.size(); ++row) {
+        const auto &match = matches[row];
         const auto &path = repository_->navigation_paths()[match.index];
         const auto label = icon_label(path.path.generic_string(), 0.0F) +
                            "##quick-" + std::to_string(match.index);
-        if (ImGui::Selectable(label.c_str())) {
+        const auto selected = row == quick_open_selection_;
+        if ((ImGui::Selectable(label.c_str(), selected) ||
+             (accept && selected)) &&
+            !close) {
           open_editor(path.path.generic_string(), path.blob_id);
           quick_open_query_.clear();
-          ImGui::CloseCurrentPopup();
+          close = true;
         }
         frame_layout_.controls["quick-open/" + path.path.generic_string()] =
             item_rectangle();
@@ -4354,55 +5126,77 @@ void App::draw_navigation_popups() {
         file_type_hint(path.kind);
       }
     }
-    if (ImGui::Button("Close")) {
-      ImGui::CloseCurrentPopup();
+    if (kit_button("Close", ButtonKind::secondary)) {
+      close = true;
     }
     frame_layout_.controls["quick-open/close"] = item_rectangle();
+    ImGui::PopItemFlag();
+    if (close || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+      ImGui::CloseCurrentPopup();
+    }
     ImGui::EndPopup();
   }
 
   if (symbol_search_open_) {
-    ImGui::OpenPopup("Symbol search");
+    ImGui::OpenPopup("Symbol Search");
     symbol_search_open_ = false;
+    symbol_search_selection_ = 0;
   }
-  if (ImGui::BeginPopupModal("Symbol search", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("Symbol Search", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
+    if (ImGui::IsWindowAppearing()) {
+      ImGui::SetKeyboardFocusHere();
+    }
     ImGui::SetNextItemWidth(620.0F);
-    ImGui::InputTextWithHint("##symbol-search", "Type a symbol",
-                             &symbol_search_query_);
+    if (ImGui::InputTextWithHint("##symbol-search", "Type a symbol",
+                                 &symbol_search_query_)) {
+      symbol_search_selection_ = 0;
+    }
+    frame_layout_.controls["symbol-search/query"] = item_rectangle();
+    auto close = false;
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
     if (!repository_) {
       ImGui::TextDisabled(
           "Open a repository to search libliquid symbol records.");
     } else if (repository_->navigation_loading()) {
       ImGui::TextDisabled("Indexing symbol records...");
     } else {
-      for (const auto &match : rank_symbols(repository_->navigation_symbols(),
-                                            symbol_search_query_)) {
-        const auto &symbol = repository_->navigation_symbols()[match.index];
+      const auto matches = rank_symbols(repository_->navigation_symbols(),
+                                        symbol_search_query_);
+      const auto accept =
+          move_result_selection(symbol_search_selection_, matches.size());
+      for (std::size_t row = 0; row < matches.size(); ++row) {
+        const auto &symbol =
+            repository_->navigation_symbols()[matches[row].index];
         const auto label = symbol.name + " — " + symbol.path.generic_string() +
                            ":" + std::to_string(symbol.range.start_line + 1) +
-                           "##symbol-" + std::to_string(match.index);
-        if (ImGui::Selectable(label.c_str())) {
+                           "##symbol-" + std::to_string(matches[row].index);
+        const auto selected = row == symbol_search_selection_;
+        if ((ImGui::Selectable(label.c_str(), selected) ||
+             (accept && selected)) &&
+            !close) {
           open_navigation_location({symbol.path, symbol.range.start_line,
                                     symbol.range.start_column});
           symbol_search_query_.clear();
-          ImGui::CloseCurrentPopup();
+          close = true;
         }
       }
     }
-    if (ImGui::Button("Close")) {
+    if (kit_button("Close", ButtonKind::secondary)) {
+      close = true;
+    }
+    ImGui::PopItemFlag();
+    if (close || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
   }
 
   if (open_recent_open_) {
-    ImGui::OpenPopup("Open recent");
+    ImGui::OpenPopup("Open Recent");
     open_recent_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Open recent", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("Open Recent", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
     if (navigation_history_.recent().empty()) {
       ImGui::TextDisabled("No recently opened paths.");
@@ -4418,7 +5212,7 @@ void App::draw_navigation_popups() {
         ImGui::CloseCurrentPopup();
       }
     }
-    if (ImGui::Button("Close")) {
+    if (kit_button("Close", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -4427,48 +5221,46 @@ void App::draw_navigation_popups() {
 
 void App::draw_repository_action_popup() {
   if (repository_move_open_) {
-    ImGui::OpenPopup("Move or rename path");
+    ImGui::OpenPopup("Move or Rename Path");
     repository_move_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Move or rename path", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("Move or Rename Path", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
     ImGui::Text("Source: %s", repository_action_source_.c_str());
     ImGui::SetNextItemWidth(520.0F);
-    ImGui::InputText("Destination", &repository_action_target_);
+    text_field("Destination", &repository_action_target_);
     ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
                          repository_->mutation_running());
-    if (ImGui::Button("Apply")) {
+    if (kit_button("Apply", ButtonKind::primary)) {
       repository_->request_move(repository_action_source_,
                                 repository_action_target_);
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
+    if (kit_button("Cancel", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
   }
 
   if (repository_new_file_open_) {
-    ImGui::OpenPopup("New file");
+    ImGui::OpenPopup("New File");
     repository_new_file_open_ = false;
   }
-  if (ImGui::BeginPopupModal("New file", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("New File", ImGuiWindowFlags_AlwaysAutoResize)) {
     editor_visible_ = false;
     ImGui::SetNextItemWidth(520.0F);
-    ImGui::InputText("Path", &repository_action_target_);
+    text_field("Path", &repository_action_target_);
     ImGui::BeginDisabled(!repository_ || repository_action_target_.empty() ||
                          repository_->mutation_running());
-    if (ImGui::Button("Create")) {
+    if (kit_button("Create", ButtonKind::primary)) {
       repository_->request_new_file(repository_action_target_);
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
+    if (kit_button("Cancel", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -4531,22 +5323,22 @@ void App::draw_assistant() {
   const auto snapshot = assistant_->snapshot();
   ImGui::Text("Assistant: %s", snapshot.status.c_str());
   ImGui::SameLine();
-  if (ImGui::SmallButton("What will be sent")) {
+  if (kit_button("What Will Be Sent", ButtonKind::secondary, ButtonSize::compact)) {
     request_assistant_context(std::nullopt);
   }
   ImGui::InputTextWithHint("##assistant-prompt",
                            "Ask about the selection or current definition",
                            &assistant_prompt_);
   ImGui::BeginDisabled(!snapshot.enabled || snapshot.running);
-  if (ImGui::Button("Ask")) {
+  if (kit_button("Ask", ButtonKind::primary)) {
     request_assistant_context(AssistantAction::ask);
   }
   ImGui::SameLine();
-  if (ImGui::Button("Explain diagnostic")) {
+  if (kit_button("Explain diagnostic", ButtonKind::secondary)) {
     request_assistant_context(AssistantAction::explain_diagnostic);
   }
   ImGui::SameLine();
-  if (ImGui::Button("Propose edit")) {
+  if (kit_button("Propose edit", ButtonKind::secondary)) {
     request_assistant_context(AssistantAction::propose_edit);
   }
   ImGui::EndDisabled();
@@ -4569,20 +5361,19 @@ void App::draw_assistant() {
     ImGui::Text("Proposed replacement for bytes %u..%u",
                 snapshot.proposal->start_byte, snapshot.proposal->old_end_byte);
     ImGui::TextWrapped("%s", snapshot.proposal->text.c_str());
-    if (ImGui::Button("Accept edit")) {
+    if (kit_button("Accept edit", ButtonKind::primary)) {
       accept_assistant_edit();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reject edit")) {
+    if (kit_button("Reject edit", ButtonKind::secondary)) {
       assistant_->reject();
     }
   }
   if (context_preview_open_) {
-    ImGui::OpenPopup("What will be sent");
+    ImGui::OpenPopup("What Will Be Sent");
     context_preview_open_ = false;
   }
-  if (ImGui::BeginPopupModal("What will be sent", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (begin_dialog("What Will Be Sent", ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::Text("Structured graph context: %zu bytes", context_preview_.size());
     if (!context_omissions_.empty()) {
       ImGui::TextWrapped("Omissions: %s", context_omissions_.front().c_str());
@@ -4590,90 +5381,53 @@ void App::draw_assistant() {
     ImGui::InputTextMultiline("##context-preview", &context_preview_,
                               ImVec2(720.0F, 420.0F),
                               ImGuiInputTextFlags_ReadOnly);
-    if (ImGui::Button("Close")) {
+    if (kit_button("Close", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
   }
 }
 
-void App::execute_panel_command(std::string_view command) {
-  if (command == "review.refresh") {
-    if (review_) {
-      const auto snapshot = review_->snapshot();
-      if (snapshot.review.selected) {
-        review_->request_refresh();
-      } else {
-        review_->request_list();
-      }
-    }
-  } else if (command == "review.next-hunk") {
-    navigate_hunk(true);
-  } else if (command == "review.previous-hunk") {
-    navigate_hunk(false);
-  } else if (command == "review.next-comment") {
-    navigate_comment();
-  } else if (command == "review.new-comment") {
-    begin_review_comment();
-  } else if (command == "review.approve") {
-    if (review_) {
-      review_->request_approve();
-    }
-  } else if (command == "build.start") {
-    request_build();
-  } else if (command == "build.test") {
-    request_tests();
-  } else if (command == "build.deploy") {
-    request_deploy();
-  } else if (command == "assistant.ask") {
-    request_assistant_context(AssistantAction::ask);
-  } else if (command == "assistant.explain") {
-    request_assistant_context(AssistantAction::explain_diagnostic);
-  } else if (command == "assistant.propose") {
-    request_assistant_context(AssistantAction::propose_edit);
-  } else if (command == "assistant.accept") {
-    accept_assistant_edit();
-  } else if (command == "assistant.reject") {
-    if (assistant_) {
-      assistant_->reject();
-    }
-  } else if (command == "assistant.toggle") {
-    toggle_assistant();
-  } else if (command == "assistant.context") {
-    request_assistant_context(std::nullopt);
-  } else if (command == "structural.expand") {
-    expand_structural_selection();
-  } else if (command == "structural.shrink") {
-    shrink_structural_selection();
-  } else if (command == "structural.definition") {
-    select_enclosing_definition();
-  } else if (command == "structural.references") {
-    select_symbol_references();
-  } else if (command == "structural.rename") {
-    open_rename();
-  } else if (command == "structural.extract") {
-    open_extract_function();
+// The view.* and panel.* commands open their panel where it is docked.
+void App::open_command_panel(std::string_view command) {
+  const auto panel = command_panel(command);
+  if (!panel) {
+    return;
   }
+  panels_.focus(*panel);
+  const auto placement = panels_.layout(*panel).placement;
+  if (placement == PanelPlacement::sidebar) {
+    shell_state_.sidebar_visible = true;
+  } else if (placement == PanelPlacement::bottom) {
+    shell_state_.bottom_panel_visible = true;
+  }
+  persist_shell_state();
 }
 
 void App::draw_command_palette() {
   command_palette_visible_ = false;
   if (command_palette_open_) {
-    ImGui::OpenPopup("Command palette");
+    ImGui::OpenPopup("Command Palette");
     command_palette_open_ = false;
+    command_palette_selection_ = 0;
   }
-  ImGui::SetNextWindowSize(ImVec2(760.0F, 520.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Command palette", nullptr,
-                              ImGuiWindowFlags_NoSavedSettings)) {
+  // lake's Go to (liquify#34): a titled dialog, a search field, then one compact list row per
+  // action with its group in secondary ink and its key as a small mono chip on the right. The
+  // selected row is on the selected role; Up and Down move it and Enter runs it.
+  ImGui::SetNextWindowSize(ImVec2(640.0F, 460.0F), ImGuiCond_Appearing);
+  if (!begin_dialog("Command Palette", ImGuiWindowFlags_NoSavedSettings)) {
     return;
   }
   command_palette_visible_ = true;
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
   if (ImGui::IsWindowAppearing()) {
     ImGui::SetKeyboardFocusHere();
   }
   ImGui::SetNextItemWidth(-1.0F);
   ImGui::InputTextWithHint("##command-search", "Search commands",
                            &command_palette_query_);
+  frame_layout_.controls["palette/search"] = item_rectangle();
   if (command_palette_query_ != command_palette_previous_query_) {
     command_palette_previous_query_ = command_palette_query_;
     command_palette_selection_ = 0;
@@ -4683,48 +5437,161 @@ void App::draw_command_palette() {
     return;
   }
   const auto matches = commands_->search(command_palette_query_);
-  auto pending = std::optional<std::string>{};
-  if (ImGui::BeginTable("command-results", 3,
-                        ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
-                            ImGuiTableFlags_SizingStretchProp,
-                        ImVec2(0.0F, -1.0F))) {
-    ImGui::TableSetupColumn("Command", ImGuiTableColumnFlags_WidthStretch,
-                            0.60F);
-    ImGui::TableSetupColumn("Group", ImGuiTableColumnFlags_WidthStretch, 0.20F);
-    ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthStretch, 0.20F);
-    ImGui::TableHeadersRow();
-    for (const auto &match : matches) {
-      const auto *definition = commands_->find(match.name);
-      if (definition == nullptr) {
-        continue;
-      }
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      const auto label = definition->title + "##" + definition->name;
-      if (ImGui::Selectable(label.c_str(), false,
-                            ImGuiSelectableFlags_SpanAllColumns)) {
-        pending = definition->name;
-      }
-      ImGui::TableSetColumnIndex(1);
-      ImGui::TextDisabled("%s", definition->group.c_str());
-      ImGui::TableSetColumnIndex(2);
-      const auto binding = commands_->binding_label(definition->name);
-      ImGui::TextDisabled("%s", binding.c_str());
+  auto moved = false;
+  if (!matches.empty()) {
+    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+      command_palette_selection_ =
+          (command_palette_selection_ + 1) % matches.size();
+      moved = true;
+    } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+      command_palette_selection_ =
+          (command_palette_selection_ + matches.size() - 1) % matches.size();
+      moved = true;
     }
-    ImGui::EndTable();
+    command_palette_selection_ =
+        std::min(command_palette_selection_, matches.size() - 1);
+  }
+  auto pending = std::optional<std::string>{};
+  if (!matches.empty() && (ImGui::IsKeyPressed(ImGuiKey_Enter) ||
+                           ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) {
+    pending = matches[command_palette_selection_].name;
+  }
+
+  // The list heading, as lake's palette groups its results: a label and the count.
+  ImGui::Dummy(ImVec2(0.0F, design::space1));
+  {
+    const auto top_left = ImGui::GetCursorScreenPos();
+    const auto width = ImGui::GetContentRegionAvail().x;
+    const auto heading = command_palette_query_.empty() &&
+                                 !commands_->recent().empty()
+                             ? std::string("Recent first")
+                             : std::string("Commands");
+    const auto count = std::to_string(matches.size());
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    ImGui::TextUnformatted(heading.c_str());
+    const auto count_width = ImGui::CalcTextSize(count.c_str()).x;
+    ImGui::SameLine(width - count_width);
+    ImGui::TextUnformatted(count.c_str());
+    ImGui::PopStyleColor();
+    const auto bottom = ImGui::GetItemRectMax().y + design::space1;
+    ImGui::GetWindowDrawList()->AddLine(
+        ImVec2(top_left.x, bottom), ImVec2(top_left.x + width, bottom),
+        packed_color(palette.border_subtle), design::border_width);
+    frame_layout_.controls["palette/header"] =
+        InputRectangle{top_left.x, top_left.y, width, bottom - top_left.y};
+    ImGui::Dummy(ImVec2(0.0F, design::space1));
+  }
+
+  const auto footer_height =
+      ImGui::GetTextLineHeightWithSpacing() *
+      static_cast<float>(1 + command_diagnostics_.size());
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+  ImGui::BeginChild("command-results", ImVec2(0.0F, -footer_height),
+                    ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened);
+  ImFont *chip_font = nullptr;
+  for (auto *font : ImGui::GetIO().Fonts->Fonts) {
+    if (font->ConfigData != nullptr &&
+        std::string_view(font->ConfigData->Name) == "IBM Plex Mono 12") {
+      chip_font = font;
+    }
+  }
+  const auto row_height =
+      ImGui::GetTextLineHeight() + design::space2 * 2.0F;
+  auto *draw = ImGui::GetWindowDrawList();
+  const auto mouse_moved = ImGui::GetIO().MouseDelta.x != 0.0F ||
+                           ImGui::GetIO().MouseDelta.y != 0.0F;
+  // Rows are not navigation targets: the search field keeps the keyboard, and Up/Down move the
+  // selection above instead of ImGui's focus.
+  ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+  ImGui::PushStyleColor(ImGuiCol_Header, imgui_color(palette.selected));
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                        imgui_color(palette.layer_hover));
+  ImGui::PushStyleColor(ImGuiCol_HeaderActive, imgui_color(palette.selected));
+  ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0F, 0.5F));
+  for (std::size_t index = 0; index < matches.size(); ++index) {
+    const auto *definition = commands_->find(matches[index].name);
+    if (definition == nullptr) {
+      continue;
+    }
+    const auto selected = index == command_palette_selection_;
+    const auto id = "##command-" + definition->name;
+    const auto origin = ImGui::GetCursorScreenPos();
+    const auto width = ImGui::GetContentRegionAvail().x;
+    if (selected) {
+      // The selected row keeps its role while the pointer hovers it.
+      ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                            imgui_color(palette.selected));
+    }
+    if (ImGui::Selectable(id.c_str(), selected, ImGuiSelectableFlags_None,
+                          ImVec2(width, row_height))) {
+      pending = definition->name;
+    }
+    if (selected) {
+      ImGui::PopStyleColor();
+      if (moved) {
+        ImGui::SetScrollHereY(0.5F);
+      }
+    }
+    if (ImGui::IsItemHovered() && mouse_moved) {
+      command_palette_selection_ = index;
+    }
+    frame_layout_.controls["palette/row/" + definition->name] =
+        item_rectangle();
+    const auto text_y = origin.y + design::space2;
+    const auto left = origin.x + design::space4;
+    draw->AddText(ImVec2(left, text_y), packed_color(palette.text_primary),
+                  definition->title.c_str());
+    const auto title_width = ImGui::CalcTextSize(definition->title.c_str()).x;
+    draw->AddText(ImVec2(left + title_width + design::space3, text_y),
+                  packed_color(palette.text_secondary),
+                  definition->group.c_str());
+    const auto binding = commands_->binding_label(definition->name);
+    if (!binding.empty()) {
+      auto *font = chip_font != nullptr ? chip_font : ImGui::GetFont();
+      const auto size = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0F,
+                                            binding.c_str());
+      const auto chip_padding = ImVec2(5.0F, 2.0F);
+      const auto chip_max =
+          ImVec2(origin.x + width - design::space4,
+                 origin.y + (row_height + size.y) * 0.5F + chip_padding.y);
+      const auto chip_min =
+          ImVec2(chip_max.x - size.x - chip_padding.x * 2.0F,
+                 chip_max.y - size.y - chip_padding.y * 2.0F);
+      draw->AddRectFilled(chip_min, chip_max, packed_color(palette.surface),
+                          design::panel_radius);
+      draw->AddRect(chip_min, chip_max, packed_color(palette.border_subtle),
+                    design::panel_radius, 0, design::border_width);
+      draw->AddText(font, font->FontSize,
+                    ImVec2(chip_min.x + chip_padding.x,
+                           chip_min.y + chip_padding.y),
+                    packed_color(palette.text_secondary), binding.c_str());
+    }
+  }
+  if (matches.empty()) {
+    ImGui::SetCursorPosX(design::space4);
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    ImGui::TextUnformatted("Nothing matches.");
+    ImGui::PopStyleColor();
+  }
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(3);
+  ImGui::PopItemFlag();
+  ImGui::EndChild();
+  ImGui::PopStyleColor();
+  ImGui::PopStyleVar();
+
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+  ImGui::TextUnformatted("Up and Down to move · Enter to run · Esc to close");
+  ImGui::PopStyleColor();
+  for (const auto &diagnostic : command_diagnostics_) {
+    ImGui::TextDisabled("%s", diagnostic.c_str());
   }
   if (pending) {
     invoke_command(*pending);
     ImGui::CloseCurrentPopup();
-  }
-  if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  } else if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     ImGui::CloseCurrentPopup();
-  }
-  if (command_palette_query_.empty()) {
-    ImGui::TextDisabled("Recent commands: %zu", commands_->recent().size());
-  }
-  for (const auto &diagnostic : command_diagnostics_) {
-    ImGui::TextDisabled("%s", diagnostic.c_str());
   }
   ImGui::EndPopup();
 }
@@ -4737,8 +5604,7 @@ void App::draw_settings() {
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
   ImGui::SetNextWindowSize(ImVec2(900.0F, 650.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Settings", nullptr,
-                              ImGuiWindowFlags_NoSavedSettings)) {
+  if (!begin_dialog("Settings", ImGuiWindowFlags_NoSavedSettings)) {
     settings_popup_visible_ = false;
     return;
   }
@@ -4751,7 +5617,7 @@ void App::draw_settings() {
   if (!options_.repository_path) {
     ImGui::BeginDisabled();
   }
-  if (ImGui::Checkbox("Repository overrides", &repository_scope)) {
+  if (checkbox("Repository overrides", &repository_scope)) {
     settings_scope_ =
         repository_scope ? SettingsScope::repository : SettingsScope::user;
   }
@@ -4784,11 +5650,21 @@ void App::draw_settings() {
          group == SettingsGroup::keymap);
     const auto flags = collapsed_for_proof ? ImGuiTreeNodeFlags_None
                                            : ImGuiTreeNodeFlags_DefaultOpen;
+    // Section headers sit on the neutral layer role, as lake's panel headers do; the selected
+    // blue is kept for selection.
+    const auto header_palette =
+        effective_palette(applied_dark_theme_, applied_high_contrast_);
+    ImGui::PushStyleColor(ImGuiCol_Header, imgui_color(header_palette.layer));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, imgui_color(header_palette.layer_hover));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, imgui_color(header_palette.layer_hover));
     const auto open =
         ImGui::CollapsingHeader(settings_group_name(group).data(), flags);
+    ImGui::PopStyleColor(3);
     if (open) {
-      ImGui::SameLine(ImGui::GetContentRegionAvail().x - 52.0F);
-      if (ImGui::SmallButton("Reset")) {
+      const auto reset_width =
+          ImGui::CalcTextSize("Reset").x + design::space2 * 2.0F;
+      ImGui::SameLine(ImGui::GetContentRegionAvail().x - reset_width);
+      if (kit_button("Reset", ButtonKind::quiet, ButtonSize::compact)) {
         reset_settings(group);
       }
     }
@@ -4803,7 +5679,8 @@ void App::draw_settings() {
     auto theme = static_cast<int>(settings_.theme);
     constexpr auto themes =
         std::array{"Follow operating system", "Light", "Dark"};
-    if (ImGui::Combo("Theme", &theme, themes.data(),
+    field_label("Theme");
+    if (ImGui::Combo("##theme", &theme, themes.data(),
                      static_cast<int>(themes.size()))) {
       settings_.theme = static_cast<ThemePreference>(theme);
       apply_settings_live();
@@ -4813,7 +5690,7 @@ void App::draw_settings() {
     ImGui::SameLine(150.0F);
     ImGui::TextUnformatted(settings_.fonts.ui_family.c_str());
     auto ui_size = static_cast<int>(settings_.fonts.ui_size);
-    if (ImGui::SliderInt("UI size", &ui_size, 11, 32)) {
+    if (slider_int("UI size", &ui_size, 11, 32)) {
       settings_.fonts.ui_size = static_cast<std::uint32_t>(ui_size);
       apply_settings_live(true);
       persist_settings();
@@ -4822,7 +5699,7 @@ void App::draw_settings() {
     ImGui::SameLine(150.0F);
     ImGui::TextUnformatted(settings_.fonts.editor_family.c_str());
     auto editor_size = static_cast<int>(settings_.fonts.editor_size);
-    if (ImGui::SliderInt("Editor size", &editor_size, 12, 16)) {
+    if (slider_int("Editor size", &editor_size, 12, 16)) {
       settings_.fonts.editor_size = static_cast<std::uint32_t>(editor_size);
       apply_settings_live(true);
       persist_settings();
@@ -4832,9 +5709,9 @@ void App::draw_settings() {
 
   if (begin_group(SettingsGroup::editor)) {
     auto changed = false;
-    changed |= ImGui::Checkbox("Wrap long lines", &settings_.editor.wrap);
-    changed |= ImGui::Checkbox("Show whitespace", &settings_.editor.whitespace);
-    changed |= ImGui::Checkbox("Format .liquid files on save",
+    changed |= checkbox("Wrap long lines", &settings_.editor.wrap);
+    changed |= checkbox("Show whitespace", &settings_.editor.whitespace);
+    changed |= checkbox("Format .liquid files on save",
                                &settings_.editor.format_on_save);
     if (changed) {
       apply_settings_live();
@@ -4844,35 +5721,56 @@ void App::draw_settings() {
   end_group();
 
   if (begin_group(SettingsGroup::keymap)) {
-    ImGui::TextDisabled("Command palette leaf overrides");
+    ImGui::TextDisabled("Key bindings for these commands; the full keymap is in "
+                        "your .liquid settings file.");
+    // Each field shows the registry's resolved binding and rebinds it live: keys, the palette
+    // and the native menus follow as you type (liquify#34). Several chords: "F6, Cmd+K".
     constexpr auto commands = std::array{
-        std::pair{"settings.open", "Cmd+,"},
-        std::pair{"build.run", "F7"},
-        std::pair{"tests.run", "F8"},
-        std::pair{"deploy.run", "F9"},
+        "edit.command-palette", "go.quick-open", "settings.open",
+        "run.build",            "run.tests",     "run.push",
     };
-    for (const auto &[command, default_binding] : commands) {
-      auto &binding = settings_.keymap[command];
-      if (binding.empty()) {
-        binding = default_binding;
+    for (const auto *command : commands) {
+      const auto *definition = commands_ ? commands_->find(command) : nullptr;
+      if (definition == nullptr) {
+        continue;
       }
+      const auto stored = std::ranges::find_if(settings_.keymap, [&](const auto &entry) {
+        const auto *other = commands_->find(entry.first);
+        return other != nullptr && other->name == definition->name;
+      });
+      auto binding = stored != settings_.keymap.end()
+                         ? stored->second
+                         : commands_->binding_label(definition->name);
+      const auto title = definition->title;
       ImGui::PushID(command);
-      ImGui::SetNextItemWidth(180.0F);
-      if (ImGui::InputText(command, &binding)) {
-        persist_settings();
+      if (text_field(title.c_str(), &binding)) {
+        static_cast<void>(set_keymap_binding(command, binding));
       }
+      frame_layout_.controls[std::string("settings/keymap/") + command] =
+          item_rectangle();
       ImGui::PopID();
     }
   }
   end_group();
 
   if (begin_group(SettingsGroup::ai)) {
-    if (ImGui::Checkbox("Enable AI surface", &settings_.ai.enabled)) {
-      apply_settings_live();
-      persist_settings();
+    // Per user and per repository, never a settings file (liquify#75): with no repository open
+    // there is nothing to turn it on for.
+    ImGui::BeginDisabled(!options_.repository_path.has_value());
+    if (checkbox("Enable AI for this repository", &settings_.ai.enabled) &&
+        options_.repository_path) {
+      if (const auto saved =
+              set_repository_ai_enabled(*options_.repository_path, settings_.ai.enabled);
+          !saved) {
+        settings_.ai.enabled = !settings_.ai.enabled;
+        editor_status_ = saved.error().message;
+      } else {
+        apply_settings_live();
+      }
     }
+    ImGui::EndDisabled();
     ImGui::Text("Provider: %s", settings_.ai.provider.c_str());
-    if (ImGui::InputText("Model", &settings_.ai.model)) {
+    if (text_field("Model", &settings_.ai.model)) {
       apply_settings_live();
       persist_settings();
     }
@@ -4886,7 +5784,7 @@ void App::draw_settings() {
                                &provider_token_input_,
                                ImGuiInputTextFlags_Password);
       ImGui::SameLine();
-      if (ImGui::Button("Store token") && !provider_token_input_.empty()) {
+      if (kit_button("Store token", ButtonKind::primary) && !provider_token_input_.empty()) {
         const auto stored = store_anthropic_api_key(provider_token_input_);
         std::ranges::fill(provider_token_input_, '\0');
         provider_token_input_.clear();
@@ -4911,13 +5809,13 @@ void App::draw_settings() {
       ImGui::PushID(static_cast<int>(index));
       ImGui::Text("%s", account.name.c_str());
       ImGui::SameLine();
-      if (ImGui::SmallButton("Remove")) {
+      if (kit_button("Remove", ButtonKind::secondary, ButtonSize::compact)) {
         remove = index;
       }
       if (screenshot_mode()) {
         ImGui::TextDisabled("%s", account.url.c_str());
       } else {
-        if (ImGui::InputText("URL", &account.url)) {
+        if (text_field("URL", &account.url)) {
           persist_settings();
         }
       }
@@ -4931,7 +5829,7 @@ void App::draw_settings() {
                                  &lake_token_input_,
                                  ImGuiInputTextFlags_Password);
         ImGui::SameLine();
-        if (ImGui::Button("Store token") && !lake_token_input_.empty()) {
+        if (kit_button("Store token", ButtonKind::primary) && !lake_token_input_.empty()) {
           const auto stored =
               store_lake_account_token(account.name, lake_token_input_);
           std::ranges::fill(lake_token_input_, '\0');
@@ -4956,7 +5854,7 @@ void App::draw_settings() {
       ImGui::InputTextWithHint("##lake-url", "https://lake.example",
                                &lake_account_url_);
       ImGui::SameLine();
-      if (ImGui::Button("Add") && !lake_account_name_.empty() &&
+      if (kit_button("Add", ButtonKind::primary) && !lake_account_name_.empty() &&
           !lake_account_url_.empty()) {
         settings_.lake_accounts.push_back(
             {lake_account_name_, lake_account_url_});
@@ -4969,7 +5867,7 @@ void App::draw_settings() {
   end_group();
 
   if (begin_group(SettingsGroup::telemetry)) {
-    if (ImGui::Checkbox("Enable telemetry", &settings_.telemetry)) {
+    if (checkbox("Enable telemetry", &settings_.telemetry)) {
       persist_settings();
     }
     ImGui::TextDisabled(
@@ -4978,7 +5876,7 @@ void App::draw_settings() {
   end_group();
 
   ImGui::EndChild();
-  if (ImGui::Button("Close")) {
+  if (kit_button("Close", ButtonKind::secondary)) {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
@@ -5003,21 +5901,20 @@ void App::draw_structural_editing() {
       ImGui::BulletText("replace function_definition bytes 3812..4059");
       ImGui::TextDisabled("1 file selected · fingerprint verified");
       ImGui::Separator();
-      ImGui::Button("Accept selected file");
+      kit_button("Accept selected file", ButtonKind::primary);
       ImGui::SameLine();
-      ImGui::Button("Dismiss");
+      kit_button("Dismiss", ButtonKind::secondary);
     }
     ImGui::End();
     return;
   }
   if (rename_open_) {
-    ImGui::OpenPopup("Rename symbol");
+    ImGui::OpenPopup("Rename Symbol");
     rename_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Rename symbol", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::InputText("New name", &structural_name_);
-    if (ImGui::Button("Preview") && editor_graph_ && editor_) {
+  if (begin_dialog("Rename Symbol", ImGuiWindowFlags_AlwaysAutoResize)) {
+    text_field("New name", &structural_name_);
+    if (kit_button("Preview", ButtonKind::primary) && editor_graph_ && editor_) {
       const auto byte = editor_->byte_offset(editor_->cursor());
       if (byte <= std::numeric_limits<std::uint32_t>::max()) {
         editor_graph_->request_rename(
@@ -5028,20 +5925,19 @@ void App::draw_structural_editing() {
       }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
+    if (kit_button("Cancel", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
   }
 
   if (extract_function_open_) {
-    ImGui::OpenPopup("Extract function");
+    ImGui::OpenPopup("Extract Function");
     extract_function_open_ = false;
   }
-  if (ImGui::BeginPopupModal("Extract function", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::InputText("Function name", &structural_name_);
-    if (ImGui::Button("Preview") && editor_graph_ && editor_) {
+  if (begin_dialog("Extract Function", ImGuiWindowFlags_AlwaysAutoResize)) {
+    text_field("Function name", &structural_name_);
+    if (kit_button("Preview", ButtonKind::primary) && editor_graph_ && editor_) {
       if (const auto selection = editor_->selection()) {
         const auto range = SourceRange{
             static_cast<std::uint32_t>(editor_->byte_offset(selection->begin)),
@@ -5058,7 +5954,7 @@ void App::draw_structural_editing() {
       }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
+    if (kit_button("Cancel", ButtonKind::secondary)) {
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -5067,9 +5963,7 @@ void App::draw_structural_editing() {
 
 void App::draw_structural_panel() {
   if (structural_references_.empty() && !structural_preview_open_) {
-    ImGui::TextWrapped(
-        "%s",
-        panels_.descriptor(PanelId::structural_editing).empty_state.data());
+    draw_panel_state(panels_.descriptor(PanelId::structural_editing).empty_state);
     return;
   }
   if (!structural_references_.empty()) {
@@ -5114,7 +6008,7 @@ void App::draw_structural_panel() {
     auto accepted = std::ranges::find(structural_accepted_files_, path) !=
                     structural_accepted_files_.end();
     const auto label = path + "##structural-file";
-    if (ImGui::Checkbox(label.c_str(), &accepted)) {
+    if (checkbox(label.c_str(), &accepted)) {
       const auto found = std::ranges::find(structural_accepted_files_, path);
       if (accepted && found == structural_accepted_files_.end()) {
         structural_accepted_files_.push_back(path);
@@ -5134,26 +6028,28 @@ void App::draw_structural_panel() {
     }
   }
   if (!structural_preview_.empty()) {
-    if (ImGui::Button("Accept selected files")) {
+    if (kit_button("Accept selected files", ButtonKind::primary)) {
       apply_structural_preview(false);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Accept all")) {
+    if (kit_button("Accept all", ButtonKind::secondary)) {
       apply_structural_preview(true);
     }
   }
   ImGui::SameLine();
-  if (ImGui::Button("Dismiss")) {
+  if (kit_button("Dismiss", ButtonKind::secondary)) {
     structural_preview_open_ = false;
     structural_preview_.clear();
   }
 }
 
+// The command runs on its plugin's worker (liquify#149); poll_plugins reports how it ended.
 void App::invoke_plugin_command(std::string_view name) {
-  if (!plugin_host_) {
+  if (!plugin_dispatcher_) {
     return;
   }
-  auto invoked = plugin_host_->invoke_command(name, plugin_empty_map_cbor());
+  auto invoked =
+      plugin_dispatcher_->invoke_command(name, plugin_empty_map_cbor());
   if (!invoked) {
     editor_status_ = invoked.error().message;
     if (!invoked.error().context.empty()) {
@@ -5161,15 +6057,30 @@ void App::invoke_plugin_command(std::string_view name) {
     }
     return;
   }
-  editor_status_ = "plugin command completed: " + std::string(name);
+  editor_status_ = "plugin command running: " + std::string(name);
 }
 
+// Reads what the plugins have answered and asks for the next refresh. Never waits for a
+// plugin: a panel still being asked keeps its last answer, or its loading state.
 void App::poll_plugins() {
-  const auto now = std::chrono::steady_clock::now();
-  if (!plugin_host_ || now < next_plugin_refresh_) {
+  if (!plugin_dispatcher_) {
     return;
   }
-  plugin_panels_ = plugin_host_->panels(plugin_null_cbor());
+  for (auto &outcome : plugin_dispatcher_->take_command_outcomes()) {
+    editor_status_ = outcome.error.empty()
+                         ? "plugin command completed: " + outcome.name
+                         : std::move(outcome.error);
+  }
+  const auto generation = plugin_dispatcher_->generation();
+  if (generation != plugin_generation_) {
+    plugin_generation_ = generation;
+    plugin_panels_ = plugin_dispatcher_->panels();
+  }
+  const auto now = std::chrono::steady_clock::now();
+  if (now < next_plugin_refresh_) {
+    return;
+  }
+  plugin_dispatcher_->refresh_panels(plugin_null_cbor());
   next_plugin_refresh_ = now + std::chrono::milliseconds(500);
 }
 
@@ -5302,7 +6213,11 @@ void App::sync_panel_system() {
   }
   panels_.set_panel_state(
       PanelId::plugins,
-      {.message = std::to_string(plugin_panels_.size()) + " plugin panels",
+      {.message = std::to_string(plugin_panels_.size()) + " plugin panels" +
+                  (plugin_untrusted_.empty()
+                       ? std::string{}
+                       : ", " + std::to_string(plugin_untrusted_.size()) +
+                             " not trusted"),
        .error = std::move(plugin_error)});
   panels_.set_panel_state(PanelId::structural_editing,
                           {.message = structural_preview_open_
@@ -5353,16 +6268,16 @@ void App::poll_multiplayer() {
       editor_status_ = refreshed.error().message;
     } else {
       multiplayer_ = std::move(*refreshed);
-      if (plugin_host_) {
+      if (plugin_dispatcher_) {
         for (const auto &value : multiplayer_->presence) {
-          plugin_host_->publish_presence(value);
+          plugin_dispatcher_->publish_presence(value);
         }
         for (const auto &value : multiplayer_->leases) {
-          plugin_host_->publish_lease(value);
+          plugin_dispatcher_->publish_lease(value);
         }
-        plugin_host_->publish_attribution(editor_->display_path(),
-                                          multiplayer_->change,
-                                          multiplayer_->attribution);
+        plugin_dispatcher_->publish_attribution(editor_->display_path(),
+                                                multiplayer_->change,
+                                                multiplayer_->attribution);
       }
     }
   }
@@ -5427,11 +6342,24 @@ bool App::editor_mutation_allowed() const {
 }
 
 void App::draw_plugin_panels() {
-  if (plugin_failures_.empty() && plugin_panels_.empty()) {
+  if (plugin_failures_.empty() && plugin_untrusted_.empty() &&
+      plugin_panels_.empty()) {
     return;
   }
   ImGui::Separator();
   ImGui::TextUnformatted("Plugins");
+  // A repository-named plugin that the user has not trusted is listed and
+  // never loaded. Trust is granted outside the IDE, so nothing the repository
+  // contains can grant it.
+  for (const auto &untrusted : plugin_untrusted_) {
+    ImGui::TextColored(ImVec4(0.80F, 0.55F, 0.10F, 1.0F),
+                       "%s: not trusted (%s)",
+                       untrusted.path.generic_string().c_str(),
+                       untrusted.digest.c_str());
+    ImGui::TextWrapped("Named by %s. To load it: liquify plugin trust \"%s\"",
+                       untrusted.repository.generic_string().c_str(),
+                       untrusted.path.generic_string().c_str());
+  }
   for (const auto &failure : plugin_failures_) {
     const auto path = failure.path.empty() ? std::string("configuration")
                                            : failure.path.generic_string();
@@ -5440,6 +6368,10 @@ void App::draw_plugin_panels() {
   }
   for (const auto &panel : plugin_panels_) {
     const auto panel_name = panel.plugin + "/" + panel.name;
+    if (panel.loading) {
+      ImGui::TextDisabled("%s: loading...", panel_name.c_str());
+      continue;
+    }
     if (!panel.error.empty()) {
       ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F), "%s: %s",
                          panel_name.c_str(), panel.error.c_str());
@@ -5458,7 +6390,7 @@ void App::draw_plugin_panels() {
 
 void App::draw_editor_modes() {
   const auto mode = editing_mode_name(editor_->mode());
-  if (ImGui::Button(mode.data())) {
+  if (kit_button(mode.data(), ButtonKind::quiet)) {
     ImGui::OpenPopup("editor-mode");
   }
   if (ImGui::BeginPopup("editor-mode")) {
@@ -5474,7 +6406,7 @@ void App::draw_editor_modes() {
   }
   ImGui::SameLine();
   ImGui::BeginDisabled(!analysis_buffer_open_);
-  if (ImGui::Button("Structural")) {
+  if (kit_button("Structural", ButtonKind::quiet)) {
     ImGui::OpenPopup("structural-actions");
   }
   if (ImGui::BeginPopup("structural-actions")) {
@@ -5490,7 +6422,7 @@ void App::draw_editor_modes() {
     if (ImGui::MenuItem("Rename")) {
       open_rename();
     }
-    if (ImGui::MenuItem("Extract function")) {
+    if (ImGui::MenuItem("Extract Function")) {
       open_extract_function();
     }
     ImGui::EndPopup();
@@ -5498,83 +6430,89 @@ void App::draw_editor_modes() {
   ImGui::EndDisabled();
   if (assistant_) {
     ImGui::SameLine();
-    if (ImGui::Button(assistant_->snapshot().enabled ? "AI: on" : "AI: off")) {
+    if (kit_button(assistant_->snapshot().enabled ? "AI on" : "AI off",
+                   assistant_->snapshot().enabled ? ButtonKind::toggle : ButtonKind::quiet)) {
       toggle_assistant();
     }
   }
 }
 
 void App::draw_editor_toolbar() {
+  // One compact row (liquify#101): Save is the surface's primary action; the rest are
+  // secondary buttons in groups divided by hairlines, each explained by a tooltip.
   const auto origin = ImGui::GetCursorScreenPos();
   const auto available = ImGui::GetContentRegionAvail();
-  // A group caption sits above buttons whose own text is inset by the frame
-  // padding, so aligning the caption to the frame leaves it hanging to the
-  // left of everything it labels. Indent it by the same padding and tighten
-  // the gap beneath it, so the caption reads as belonging to its row.
-  const auto group_caption = [](const char *name) {
-    const auto &style = ImGui::GetStyle();
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + style.FramePadding.x);
-    ImGui::TextDisabled("%s", name);
-    ImGui::GetCurrentWindow()->DC.CursorPos.y -=
-        style.ItemSpacing.y - design::space1;
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto divider = [&] {
+    ImGui::SameLine(0.0F, design::space3);
+    const auto at = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddLine(
+        ImVec2(at.x, at.y + design::space2),
+        ImVec2(at.x, at.y + design::control_sm - design::space2),
+        packed_color(palette.border_subtle), 1.0F);
+    ImGui::Dummy(ImVec2(1.0F, design::control_sm));
+    ImGui::SameLine(0.0F, design::space3);
   };
-  const auto next_group = [&group_caption](const char *name, float width) {
-    ImGui::EndGroup();
-    const auto end = ImGui::GetItemRectMax().x;
-    const auto right =
-        ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-    if (end + width + design::space4 < right) {
-      ImGui::SameLine(0, design::space6);
+  const auto tooltip = [](const char *text) {
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+      ImGui::SetTooltip("%s", text);
     }
-    ImGui::BeginGroup();
-    group_caption(name);
   };
   ImGui::BeginGroup();
   const auto first_vertex = ImGui::GetWindowDrawList()->VtxBuffer.Size;
-  group_caption("File");
-  frame_layout_.toolbar_text = text_geometry(first_vertex);
   ImGui::BeginDisabled(review_diff_open_);
-  if (ImGui::Button("Save")) {
+  if (kit_button("Save", ButtonKind::primary)) {
     save_editor();
     editor_focused_ = true;
   }
+  frame_layout_.toolbar_text = text_geometry(first_vertex);
+  tooltip("Save this file as a drip (Primary+S)");
   ImGui::EndDisabled();
-  next_group("Build", 270.0F);
-  if (ImGui::Button("Build (F7)")) {
+  divider();
+  if (kit_button("Build (F7)", ButtonKind::secondary)) {
     request_build();
   }
+  tooltip("Build the repository with its recorded command");
   ImGui::SameLine();
-  if (ImGui::Button("Tests (F8)")) {
+  if (kit_button("Tests (F8)", ButtonKind::secondary)) {
     request_tests();
   }
+  tooltip("Run every test the build defines");
   ImGui::SameLine();
-  if (ImGui::Button("Deploy (F9)")) {
-    request_deploy();
+  if (kit_button("Push (F9)", ButtonKind::secondary)) {
+    request_push();
   }
-  next_group("View", 180.0F);
-  if (ImGui::Button(shell_state_.editor_split ? "Unsplit" : "Split")) {
+  tooltip("Push your changes to lake");
+  divider();
+  if (kit_button(shell_state_.editor_split ? "Unsplit" : "Split",
+                 ButtonKind::quiet)) {
     shell_state_.editor_split = !shell_state_.editor_split;
     persist_shell_state();
   }
+  tooltip("Show a second view of this file");
   ImGui::SameLine();
-  if (ImGui::Button(shell_state_.bottom_panel_visible ? "Hide panel"
-                                                      : "Show panel")) {
+  if (kit_button(shell_state_.bottom_panel_visible ? "Hide panel"
+                                                   : "Show panel",
+                 ButtonKind::quiet)) {
     shell_state_.bottom_panel_visible = !shell_state_.bottom_panel_visible;
     persist_shell_state();
   }
-  next_group("Mode", 260.0F);
+  tooltip("Show or hide the bottom panel (Primary+J)");
+  divider();
   ImGui::BeginDisabled(review_diff_open_);
   draw_editor_modes();
   ImGui::EndDisabled();
   ImGui::EndGroup();
-  ImGui::Separator();
+  // The hairline under the toolbar belongs to the editor chrome (draw_editor), drawn once the
+  // lines under the toolbar are known.
   const auto end = ImGui::GetItemRectMax();
   frame_layout_.toolbar = {origin.x, origin.y, available.x, end.y - origin.y};
 }
 
 void App::draw_multiplayer_details() {
   if (!multiplayer_) {
-    ImGui::TextDisabled("Open a repository file to inspect collaboration.");
+    draw_panel_state("Open a repository file to inspect collaboration.");
     return;
   }
   auto count = std::size_t{};
@@ -5590,7 +6528,7 @@ void App::draw_multiplayer_details() {
     ImGui::PopID();
   }
   if (count == 0) {
-    ImGui::TextDisabled("No other active sessions");
+    draw_panel_state("No other active sessions.");
   }
   if (ImGui::CollapsingHeader("Leases")) {
     for (const auto &value : multiplayer_->leases) {
@@ -5668,7 +6606,13 @@ void App::draw_repository_details(const EditorGraphSnapshot &snapshot) {
     const auto state = StatusBarInput{
         .repository_open = true,
         .daemon_running = snapshot.daemon_running,
-        .daemon_available = editor_graph_ != nullptr,
+        .daemon_available = snapshot.daemon_state == DaemonState::running ||
+                            snapshot.daemon_state == DaemonState::stopped,
+        .daemon_starting = snapshot.daemon_state == DaemonState::starting,
+        .daemon_problem = snapshot.daemon_state == DaemonState::start_failed ||
+                                  snapshot.daemon_state == DaemonState::disconnected
+                              ? std::string(daemon_state_name(snapshot.daemon_state))
+                              : std::string{},
         .sync_running = sync_was_running_,
         .hydration_running = hydration_was_running_,
         .build_running = snapshot.build_running,
@@ -5710,68 +6654,18 @@ auto App::panel_label(PanelId id) const -> std::string {
 }
 
 void App::draw_editor() {
-  const auto path = std::string(editor_->display_path());
   const auto graph_snapshot =
       editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
-  auto symbol_name = std::optional<std::string_view>{};
-  if (const auto *symbol = navigation_symbol_at_cursor()) {
-    symbol_name = symbol->name;
-  } else if (screenshot_mode()) {
-    symbol_name = "greeting";
-  }
-  const auto path_breadcrumbs = breadcrumbs(path, symbol_name);
-  if (breadcrumb_focus_requested_) {
-    ImGui::SetKeyboardFocusHere();
-    breadcrumb_focus_requested_ = false;
-  }
-  for (std::size_t index = 0; index < path_breadcrumbs.size(); ++index) {
-    const auto &breadcrumb = path_breadcrumbs[index];
-    const auto label =
-        breadcrumb.label + "##breadcrumb-" + std::to_string(index);
-    if (ImGui::SmallButton(label.c_str()) && !breadcrumb.symbol &&
-        breadcrumb.path == std::filesystem::path(path)) {
-      editor_focused_ = true;
-    }
-    if (index + 1 < path_breadcrumbs.size()) {
-      ImGui::SameLine();
-      ImGui::TextDisabled(">");
-      ImGui::SameLine();
-    }
-  }
-  if (editor_->dirty()) {
-    ImGui::SameLine();
-    ImGui::TextUnformatted("*");
-  }
-  if (review_diff_open_) {
-    ImGui::SameLine();
-    ImGui::TextDisabled("read-only text diff");
-  }
-  ImGui::SameLine();
-  if (ImGui::SmallButton("...##file-actions")) {
-    ImGui::OpenPopup("file-actions");
-  }
-  if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("File actions and lease controls");
-  }
-  if (ImGui::BeginPopup("file-actions")) {
-    ImGui::BeginDisabled(review_diff_open_ || !options_.repository_path);
-    if (ImGui::MenuItem("Take lease")) {
-      take_editor_lease();
-    }
-    if (ImGui::MenuItem("Release lease")) {
-      release_editor_lease();
-    }
-    ImGui::EndDisabled();
-    if (ImGui::MenuItem("Collaboration details")) {
-      panels_.focus(PanelId::multiplayer);
-      shell_state_.sidebar_visible = true;
-      persist_shell_state();
-    }
-    ImGui::EndPopup();
-  }
+  // The toolbar and the lines under it keep the row's left edge; the text surface reaches the
+  // region's edges.
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto region_left = ImGui::GetWindowPos().x;
+  ImGui::SetCursorPosY(ImGui::GetCursorPosY() + design::space2);
+  ImGui::Indent(design::space3);
   draw_editor_toolbar();
   if (!editor_mutation_allowed()) {
-    ImGui::TextColored(ImVec4(0.75F, 0.20F, 0.15F, 1.0F),
+    ImGui::TextColored(imgui_color(palette.danger),
                        "Read-only: another person holds a lease");
   }
   if (graph_snapshot.hover) {
@@ -5781,7 +6675,6 @@ void App::draw_editor() {
     }
   }
   if (find_open_) {
-    ImGui::Separator();
     ImGui::SetNextItemWidth(220.0F);
     if (ImGui::InputTextWithHint("##find-buffer", "Find in buffer",
                                  &find_query_)) {
@@ -5791,17 +6684,17 @@ void App::draw_editor() {
     ImGui::SetNextItemWidth(180.0F);
     ImGui::InputTextWithHint("##replace-buffer", "Replace", &replace_query_);
     ImGui::SameLine();
-    if (ImGui::Checkbox("Regex", &find_options_.regular_expression)) {
+    if (checkbox("Regex", &find_options_.regular_expression)) {
       buffer_matches_ = editor_->find(find_query_, find_options_);
     }
     ImGui::SameLine();
-    if (ImGui::Checkbox("Case", &find_options_.case_sensitive)) {
+    if (checkbox("Case", &find_options_.case_sensitive)) {
       buffer_matches_ = editor_->find(find_query_, find_options_);
     }
     ImGui::SameLine();
     ImGui::TextDisabled("%zu matches", buffer_matches_.size());
     ImGui::SameLine();
-    if (ImGui::Button("Next") && !buffer_matches_.empty()) {
+    if (kit_button("Next", ButtonKind::secondary) && !buffer_matches_.empty()) {
       const auto &match =
           buffer_matches_[find_match_index_++ % buffer_matches_.size()];
       editor_->set_cursor(match.range.begin);
@@ -5809,7 +6702,7 @@ void App::draw_editor() {
       ensure_cursor_visible();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Replace all") && !review_diff_open_) {
+    if (kit_button("Replace all", ButtonKind::secondary) && !review_diff_open_) {
       const auto change =
           editor_->replace_all(find_query_, replace_query_, find_options_);
       if (change) {
@@ -5819,11 +6712,22 @@ void App::draw_editor() {
       }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Close")) {
+    if (kit_button("Close", ButtonKind::secondary)) {
       find_open_ = false;
     }
   }
+  ImGui::Unindent(design::space3);
 
+  // One hairline closes the chrome, space2 under its last line, across the region.
+  const auto chrome_bottom = ImGui::GetItemRectMax().y + design::space2;
+  const auto region_right = region_left + ImGui::GetWindowSize().x;
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(region_left, chrome_bottom + 0.5F),
+                                      ImVec2(region_right, chrome_bottom + 0.5F),
+                                      packed_color(applied_high_contrast_
+                                                       ? palette.border_strong
+                                                       : palette.border_subtle),
+                                      1.0F);
+  ImGui::SetCursorScreenPos(ImVec2(region_left, chrome_bottom + 1.0F));
   const auto available = ImGui::GetContentRegionAvail();
   const auto size =
       ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F));
@@ -5834,8 +6738,6 @@ void App::draw_editor() {
                          ImGuiButtonFlags_MouseButtonLeft);
   const auto hovered = ImGui::IsItemHovered();
   auto *draw_list = ImGui::GetWindowDrawList();
-  const auto palette =
-      effective_palette(applied_dark_theme_, applied_high_contrast_);
   draw_list->AddRectFilled(position,
                            ImVec2(position.x + size.x, position.y + size.y),
                            packed_color(palette.surface));
@@ -5870,11 +6772,12 @@ void App::draw_editor() {
   } else if (ImGui::IsAnyItemFocused()) {
     editor_focused_ = false;
   }
-  if (editor_focused_ || input_.drop_target() == DropTarget::editor) {
-    const auto thickness =
-        input_.drop_target() == DropTarget::editor ? 3.0F : 2.0F;
-    draw_list->AddLine(position, ImVec2(position.x + size.x, position.y),
-                       packed_color(palette.focus), thickness);
+  // Focus is the caret and the current line's band, not a rule across the editor
+  // (liquify#127). A file dragged over the editor outlines it in the focus role.
+  if (input_.drop_target() == DropTarget::editor) {
+    draw_list->AddRect(ImVec2(position.x + 0.5F, position.y + 0.5F),
+                       ImVec2(position.x + size.x - 0.5F, position.y + size.y - 0.5F),
+                       packed_color(palette.focus), 0.0F, 0, 1.0F);
   }
 
   if (hovered) {
@@ -5965,7 +6868,7 @@ void App::draw_editor() {
 }
 
 void App::draw_diagnostics_panel(const EditorGraphSnapshot &graph_snapshot) {
-  ImGui::Checkbox("Repository details", &repository_details_open_);
+  checkbox("Repository details", &repository_details_open_);
   draw_repository_details(graph_snapshot);
   for (const auto &diagnostic : structural_diagnostics_) {
     detail_text(diagnostic);
@@ -5987,8 +6890,9 @@ void App::draw_diagnostics_panel(const EditorGraphSnapshot &graph_snapshot) {
                              graph_snapshot.build_diagnostics.begin(),
                              graph_snapshot.build_diagnostics.end());
   if (!graph_snapshot.query_error.empty()) {
-    ImGui::TextWrapped("Could not update diagnostics: %s",
-                       graph_snapshot.query_error.c_str());
+    draw_user_error(describe_query_failure(graph_query_failure(graph_snapshot),
+                                           repository_path()),
+                    "query-failure");
   }
   for (std::size_t index = 0; index < visible_diagnostics.size(); ++index) {
     const auto &diagnostic = visible_diagnostics[index];
@@ -6035,8 +6939,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
   const auto available = ImGui::GetContentRegionAvail();
   ImGui::BeginChild(
       "build-panel",
-      ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F)),
-      ImGuiChildFlags_Border);
+      ImVec2(std::max(available.x, 1.0F), std::max(available.y, 1.0F)));
   if (screenshot_mode()) {
     const auto palette =
         effective_palette(applied_dark_theme_, applied_high_contrast_);
@@ -6050,28 +6953,29 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
     ImGui::TextDisabled("requires liquify-core");
     ImGui::Separator();
     ImGui::TextUnformatted("Tests 49 passed · 0 failed");
-    ImGui::TextDisabled("Deploy: no saved drips pending");
+    ImGui::TextDisabled("Push: nothing waiting");
     ImGui::EndChild();
     return;
   }
-  if (ImGui::SmallButton("Build repository")) {
+  if (kit_button("Build repository", ButtonKind::secondary, ButtonSize::compact)) {
     request_build();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Run tests")) {
+  if (kit_button("Run tests", ButtonKind::secondary, ButtonSize::compact)) {
     request_tests();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Deploy saved drips")) {
-    request_deploy();
+  if (kit_button("Push", ButtonKind::secondary, ButtonSize::compact)) {
+    request_push();
   }
-  if (!snapshot.query_error.empty()) {
-    ImGui::TextWrapped("Could not complete the operation: %s",
-                       snapshot.query_error.c_str());
+  if (snapshot.build_error) {
+    draw_user_error(
+        describe_build_failure(*snapshot.build_error, repository_path()),
+        "build-failure", [this] { request_build(); });
   }
   if (snapshot.build_running) {
     ImGui::SameLine();
-    ImGui::TextDisabled("running");
+    draw_panel_state("Running...");
   } else if (!snapshot.build_result.empty()) {
     ImGui::SameLine();
     ImGui::TextUnformatted(snapshot.build_result.c_str());
@@ -6083,7 +6987,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
     ImGui::Text("%s: %s", opaque ? "Build action" : action.identity.c_str(),
                 build_action_state_name(action.state).data());
     ImGui::SameLine();
-    if (ImGui::SmallButton("Details")) {
+    if (kit_button("Details", ButtonKind::secondary, ButtonSize::compact)) {
       ImGui::OpenPopup("action-details");
     }
     if (ImGui::BeginPopup("action-details")) {
@@ -6112,7 +7016,7 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
     ImGui::Text("Tests (%zu)", snapshot.tests.size());
     for (const auto &test : snapshot.tests) {
       ImGui::PushID(test.name.c_str());
-      if (ImGui::SmallButton("Run")) {
+      if (kit_button("Run", ButtonKind::secondary, ButtonSize::compact)) {
         request_tests(test.name);
       }
       ImGui::SameLine();
@@ -6128,24 +7032,27 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
       ImGui::TextWrapped("%s", result.output.c_str());
     }
   }
-  if (snapshot.deploy.running || !snapshot.deploy.error.empty() ||
+  if (snapshot.deploy.running || snapshot.deploy.failure ||
       !snapshot.deploy.references.empty()) {
     ImGui::Separator();
     if (snapshot.deploy.running) {
-      ImGui::TextUnformatted("Deploying saved drips...");
+      draw_panel_state("Pushing...");
     }
-    if (!snapshot.deploy.error.empty()) {
-      ImGui::TextColored(ImVec4(0.75F, 0.12F, 0.12F, 1.0F), "%s",
-                         snapshot.deploy.error.c_str());
+    if (snapshot.deploy.failure) {
+      draw_user_error(describe_push_failure(*snapshot.deploy.failure,
+                                            snapshot.deploy.remote,
+                                            repository_path()),
+                      "push-failure", [this] { request_push(); });
     }
     if (!snapshot.deploy.references.empty()) {
-      ImGui::Text("Transferred %llu objects, %llu bytes",
+      ImGui::Text("Pushed to %s: %llu objects, %llu bytes",
+                  lake_host(snapshot.deploy.remote).c_str(),
                   static_cast<unsigned long long>(snapshot.deploy.objects),
                   static_cast<unsigned long long>(snapshot.deploy.bytes));
     }
     for (const auto &reference : snapshot.deploy.references) {
       ImGui::Text("%s: %s", reference.name.c_str(),
-                  deploy_outcome_name(reference.outcome).data());
+                  push_outcome_name(reference.outcome).data());
       if (!reference.reason.empty()) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", reference.reason.c_str());
@@ -6155,10 +7062,9 @@ void App::draw_build_panel(const EditorGraphSnapshot &snapshot) {
   if (!snapshot.build_running && snapshot.build_result.empty() &&
       snapshot.build_actions.empty() && snapshot.tests.empty() &&
       snapshot.test_results.empty() && !snapshot.deploy.running &&
-      snapshot.deploy.error.empty() && snapshot.deploy.references.empty() &&
-      snapshot.query_error.empty()) {
-    ImGui::TextWrapped("%s",
-                       panels_.descriptor(PanelId::build).empty_state.data());
+      !snapshot.deploy.failure && snapshot.deploy.references.empty() &&
+      !snapshot.build_error) {
+    draw_panel_state(panels_.descriptor(PanelId::build).empty_state);
   }
   ImGui::EndChild();
 }
@@ -6172,13 +7078,27 @@ void App::draw_activity_bar() {
                            shell_state_.sidebar_visible) &&
                           (placement != PanelPlacement::bottom ||
                            shell_state_.bottom_panel_visible);
+    // lake's navigation: no frame, a light fill on hover, and the current item on the selected
+    // fill with an action-coloured bar on its left edge.
+    const auto palette =
+        effective_palette(applied_dark_theme_, applied_high_contrast_);
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          imgui_color(selected ? palette.selected
+                                               : design::Rgba{0.0F, 0.0F, 0.0F, 0.0F}));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                          imgui_color(selected ? palette.selected : palette.layer_hover));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+    const auto activated = ImGui::Button(
+        ("##activity-" + std::string(panel_id_name(id))).c_str(),
+        ImVec2(activity_bar_width - design::space2, design::control_md));
+    ImGui::PopStyleColor(3);
     if (selected) {
-      ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::GetStyleColorVec4(ImGuiCol_Header));
+      const auto min = ImGui::GetItemRectMin();
+      const auto max = ImGui::GetItemRectMax();
+      ImGui::GetWindowDrawList()->AddRectFilled(min, ImVec2(min.x + 2.0F, max.y),
+                                                packed_color(palette.action));
     }
-    if (ImGui::Button(
-            ("##activity-" + std::string(panel_id_name(id))).c_str(),
-            ImVec2(activity_bar_width - design::space2, design::control_md))) {
+    if (activated) {
       if (selected && placement == PanelPlacement::sidebar) {
         shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
       } else if (selected && placement == PanelPlacement::bottom) {
@@ -6195,9 +7115,6 @@ void App::draw_activity_bar() {
     }
     item_icon(panel_icon(id),
               (activity_bar_width - design::space2 - 16.0F) * 0.5F);
-    if (selected) {
-      ImGui::PopStyleColor();
-    }
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("%s", descriptor.title.data());
     }
@@ -6246,10 +7163,11 @@ void App::draw_panel_header(PanelId id) {
   }
   ImGui::PushID(panel_id_name(id).data());
   const auto label = icon_label(panel_label(id), 0.0F);
-  ImGui::TextUnformatted(label.c_str());
+  type_heading(label, std::string("panel/") + std::string(panel_id_name(id)) +
+                          "/title");
   item_icon(panel_icon(id));
   ImGui::SameLine();
-  if (ImGui::SmallButton("...")) {
+  if (kit_button("...", ButtonKind::quiet, ButtonSize::compact)) {
     ImGui::OpenPopup("panel-placement");
   }
   if (ImGui::BeginPopup("panel-placement")) {
@@ -6287,23 +7205,24 @@ void App::draw_panel(PanelId id) {
     } else if (repository_) {
       draw_repository_tree();
     } else {
-      ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
+      draw_panel_state(panels_.descriptor(id).empty_state);
     }
     break;
   case PanelId::search:
-    if (ImGui::Button("Quick open", ImVec2(-1.0F, 0.0F))) {
+    if (kit_button("Quick open", ButtonKind::secondary)) {
       invoke_navigation_action(NavigationAction::quick_open);
     }
-    if (ImGui::Button("Symbol search", ImVec2(-1.0F, 0.0F))) {
+    ImGui::SameLine();
+    if (kit_button("Symbol search", ButtonKind::secondary)) {
       invoke_navigation_action(NavigationAction::symbol_search);
     }
     ImGui::Separator();
-    ImGui::InputTextWithHint("##repository-search", "Search this repository",
-                             &sidebar_search_);
-    ImGui::InputTextWithHint("##repository-replace", "Replace with",
-                             &replace_query_);
-    ImGui::Checkbox("Regular expression", &find_options_.regular_expression);
-    if (ImGui::Button("Find", ImVec2(-1.0F, 0.0F))) {
+    text_field("Search", &sidebar_search_, "Text or /regular expression/");
+    frame_layout_.controls["search/query"] = item_rectangle();
+    text_field("Replace with", &replace_query_);
+    frame_layout_.controls["search/replace"] = item_rectangle();
+    checkbox("Regular expression", &find_options_.regular_expression);
+    if (kit_button("Find", ButtonKind::primary)) {
       if (editor_graph_) {
         const auto query = find_options_.regular_expression
                                ? "/" + sidebar_search_ + "/"
@@ -6311,8 +7230,8 @@ void App::draw_panel(PanelId id) {
         editor_graph_->request_search(query);
       }
     }
-    if (ImGui::Button("Replace all in repository", ImVec2(-1.0F, 0.0F)) &&
-        editor_graph_) {
+    ImGui::SameLine();
+    if (kit_button("Replace all", ButtonKind::secondary) && editor_graph_) {
       editor_graph_->request_replace(sidebar_search_, replace_query_,
                                      find_options_.regular_expression);
     }
@@ -6323,7 +7242,7 @@ void App::draw_panel(PanelId id) {
       ImGui::Selectable("src/app.cpp:7  repository");
       ImGui::Selectable("docs/ui/editor.md:18  repository configuration");
     } else if (!repository_) {
-      ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
+      draw_panel_state(panels_.descriptor(id).empty_state);
     } else {
       const auto snapshot = editor_graph_->snapshot();
       if (!snapshot.search.error.empty()) {
@@ -6351,12 +7270,13 @@ void App::draw_panel(PanelId id) {
     }
     ImGui::Separator();
     ImGui::TextUnformatted("Symbols");
+    ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##repository-symbol-filter", "Filter symbols",
                              &symbol_search_query_);
     if (!repository_) {
-      ImGui::TextDisabled("Open a repository to search symbols.");
+      draw_panel_state("Open a repository to search symbols.");
     } else if (repository_->navigation_loading()) {
-      ImGui::TextDisabled("Indexing libliquid symbol records...");
+      draw_panel_state("Indexing symbols...");
     } else {
       for (const auto &match : rank_symbols(repository_->navigation_symbols(),
                                             symbol_search_query_, 12)) {
@@ -6380,9 +7300,9 @@ void App::draw_panel(PanelId id) {
       ImGui::Selectable("src/app.cpp:584  Active");
       ImGui::Selectable("docs/ui/app-shell.md:12  Moved");
       ImGui::Spacing();
-      ImGui::Button("Approve");
+      kit_button("Approve", ButtonKind::primary);
       ImGui::SameLine();
-      ImGui::Button("Request changes");
+      kit_button("Request changes", ButtonKind::secondary);
     } else {
       draw_review_panel();
     }
@@ -6404,23 +7324,24 @@ void App::draw_panel(PanelId id) {
       ImGui::InputTextWithHint("##demo-assistant",
                                "Ask about the current definition",
                                &assistant_prompt_);
-      ImGui::Button("Ask");
+      kit_button("Ask", ButtonKind::primary);
       ImGui::SameLine();
-      ImGui::Button("Explain diagnostic");
+      kit_button("Explain diagnostic", ButtonKind::secondary);
       ImGui::SameLine();
-      ImGui::Button("Propose edit");
+      kit_button("Propose edit", ButtonKind::secondary);
     } else if (assistant_) {
       draw_assistant();
     } else {
-      ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
+      draw_panel_state(panels_.descriptor(id).empty_state);
     }
     break;
   case PanelId::plugins:
     if (screenshot_mode()) {
       ImGui::TextUnformatted("orama.sample/status: Sample plugin");
       ImGui::TextDisabled("Index and formatter commands ready.");
-    } else if (plugin_failures_.empty() && plugin_panels_.empty()) {
-      ImGui::TextWrapped("%s", panels_.descriptor(id).empty_state.data());
+    } else if (plugin_failures_.empty() && plugin_untrusted_.empty() &&
+               plugin_panels_.empty()) {
+      draw_panel_state(panels_.descriptor(id).empty_state);
     } else {
       draw_plugin_panels();
     }
@@ -6465,95 +7386,279 @@ void App::draw_editor_area() {
   const auto has_visible_panel = std::ranges::any_of(
       editor_panels, [this](PanelId id) { return panels_.layout(id).visible; });
   if (!editor_ && !has_visible_panel) {
+    // Centered as one block: title, supporting copy, the next step.
     const auto available = ImGui::GetContentRegionAvail();
-    ImGui::SetCursorPosY(std::max(available.y * 0.28F, design::space8));
-    ImGui::SetCursorPosX(std::max(available.x * 0.16F, design::space8));
-    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[heading_font_index_]);
-    ImGui::TextUnformatted("liquify");
+    const auto origin = ImGui::GetCursorPos();
+    const auto hint = std::string_view{"Select a file in the repository sidebar to "
+                                       "start editing."};
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[title_font_index_]);
+    const auto title_width = ImGui::CalcTextSize("liquify").x;
+    const auto title_height = ImGui::GetTextLineHeightWithSpacing();
     ImGui::PopFont();
-    ImGui::TextDisabled("The IDE for liquid");
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Open a repository, then select a file from the "
-                           "repository sidebar.");
+    const auto hint_width =
+        ImGui::CalcTextSize(hint.data(), hint.data() + hint.size()).x;
+    const auto top = origin.y +
+                     std::max((available.y - title_height -
+                               ImGui::GetTextLineHeightWithSpacing() * 2.0F) *
+                                  0.42F,
+                              design::space8);
+    ImGui::SetCursorPos(
+        ImVec2(origin.x + std::max((available.x - title_width) * 0.5F, 0.0F), top));
+    type_title("liquify", "editor/empty-title");
+    const auto copy = std::string_view{"The IDE for liquid"};
+    ImGui::SetCursorPosX(origin.x + std::max((available.x -
+                                              ImGui::CalcTextSize(copy.data(), copy.data() + copy.size()).x) *
+                                                 0.5F,
+                                             0.0F));
+    ImGui::TextDisabled("%s", copy.data());
+    ImGui::SetCursorPosX(origin.x +
+                         std::max((available.x - hint_width) * 0.5F, 0.0F));
+    ImGui::TextUnformatted(hint.data(), hint.data() + hint.size());
     return;
   }
 
-  if (ImGui::BeginTabBar("editor-tabs", ImGuiTabBarFlags_Reorderable)) {
-    if (editor_) {
-      const auto path = std::string(editor_->display_path());
-      const auto label =
-          path + (editor_->dirty() ? " *" : "") + "###active-editor";
-      if (ImGui::BeginTabItem(label.c_str())) {
-        if (shell_state_.editor_split) {
-          const auto available = ImGui::GetContentRegionAvail();
-          const auto content_width = std::max(available.x - divider_size, 1.0F);
-          const auto primary_width =
-              content_width * shell_state_.editor_split_ratio;
-          ImGui::BeginChild("primary-editor",
-                            ImVec2(primary_width, available.y));
-          draw_editor();
-          ImGui::EndChild();
-          ImGui::SameLine(0.0F, 0.0F);
-          ImGui::InvisibleButton("editor-split-divider",
-                                 ImVec2(divider_size, available.y));
-          if (ImGui::IsItemActive()) {
-            const auto change = ImGui::GetIO().MouseDelta.x / content_width;
-            shell_state_.editor_split_ratio = std::clamp(
-                shell_state_.editor_split_ratio + change, 0.25F, 0.75F);
-          }
-          if (ImGui::IsItemDeactivatedAfterEdit()) {
-            persist_shell_state();
-          }
-          ImGui::SameLine(0.0F, 0.0F);
-          ImGui::BeginChild(
-              "secondary-editor",
-              ImVec2(std::max(content_width - primary_width, 1.0F),
-                     available.y),
-              ImGuiChildFlags_Border);
-          draw_split_editor();
-          ImGui::EndChild();
-        } else {
-          draw_editor();
-        }
-        ImGui::EndTabItem();
-      }
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  auto visible_panels = std::vector<PanelId>{};
+  for (const auto id : editor_panels) {
+    if (panels_.layout(id).visible) {
+      visible_panels.push_back(id);
     }
-    for (const auto id : editor_panels) {
-      if (!panels_.layout(id).visible) {
-        continue;
-      }
-      auto open = true;
-      const auto label =
-          icon_label(panel_label(id), ImGui::GetStyle().FramePadding.x) +
-          "###panel-" + std::string(panel_id_name(id));
-      const auto flags =
-          panels_.focus_requested(id) ? ImGuiTabItemFlags_SetSelected : 0;
-      const auto selected = ImGui::BeginTabItem(label.c_str(), &open, flags);
-      frame_layout_.panels[id].tab = item_rectangle();
-      frame_layout_.panels[id].selected = selected;
-      item_icon(panel_icon(id));
-      if (ImGui::BeginPopupContextItem()) {
-        draw_panel_menu(id);
-        ImGui::EndPopup();
-      }
-      if (panels_.focus_requested(id)) {
-        panels_.clear_focus_request();
-      }
-      if (ImGui::IsItemActivated()) {
-        panels_.focus(id);
-        panels_.clear_focus_request();
-        persist_shell_state();
-      }
-      if (selected) {
-        draw_panel(id);
-        ImGui::EndTabItem();
-      }
-      if (!open) {
+  }
+  // Which tab is shown: a newly opened file takes the row, a panel asked for takes it back.
+  const auto path = editor_ ? std::string(editor_->display_path()) : std::string{};
+  if (path != editor_area_path_) {
+    editor_area_path_ = path;
+    if (editor_) {
+      editor_area_panel_.reset();
+    }
+  }
+  for (const auto id : visible_panels) {
+    if (panels_.focus_requested(id)) {
+      editor_area_panel_ = id;
+      panels_.clear_focus_request();
+    }
+  }
+  if (editor_area_panel_ && !std::ranges::contains(visible_panels, *editor_area_panel_)) {
+    editor_area_panel_.reset();
+  }
+  if (!editor_ && !editor_area_panel_ && !visible_panels.empty()) {
+    editor_area_panel_ = visible_panels.front();
+  }
+
+  // One row carries the file (liquify#127): lake's tabs when a panel shares the editor area,
+  // then the breadcrumb and the file menu. With only the file open, the breadcrumb is the row.
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(design::space1, 0.0F));
+  const auto row = ImGui::GetCursorScreenPos();
+  const auto row_width = ImGui::GetContentRegionAvail().x;
+  const auto tabs_shown = !visible_panels.empty();
+  // The first label's ink lines up with the toolbar's left edge (space3): a tab centres its
+  // label in space2 of padding, a quiet breadcrumb button pads it by space2.
+  ImGui::SetCursorScreenPos(ImVec2(row.x + design::space3 - design::space2, row.y));
+  const auto tab = [&](const std::string &label, const char *id, bool selected,
+                       std::optional<ShellIcon> icon) {
+    ImGui::PushID(id);
+    // The label is centred in space2 of padding; an icon sits in the first space2 + 16 of it.
+    const auto shown = icon ? icon_label(label, design::space2, design::space2) : label;
+    const auto width = ImGui::CalcTextSize(shown.c_str()).x + design::space4;
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.5F, 0.5F));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(selected ? palette.text_primary
+                                                              : palette.text_secondary));
+    const auto clicked =
+        ImGui::Selectable(shown.c_str(), selected, 0, ImVec2(width, design::control_sm));
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar();
+    if (icon) {
+      item_icon(*icon, design::space2);
+    }
+    if (selected) {
+      const auto min = ImGui::GetItemRectMin();
+      const auto max = ImGui::GetItemRectMax();
+      ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(min.x, max.y - 2.0F), max,
+                                                packed_color(palette.action));
+    }
+    ImGui::PopID();
+    return clicked;
+  };
+  if (tabs_shown && editor_) {
+    const auto name = std::filesystem::path(path).filename().generic_string();
+    if (tab(name + (editor_->dirty() ? " *" : ""), "editor-file-tab", !editor_area_panel_,
+            std::nullopt)) {
+      editor_area_panel_.reset();
+      editor_focused_ = true;
+    }
+    frame_layout_.controls["editor/file-tab"] = item_rectangle();
+    ImGui::SameLine();
+  }
+  for (const auto id : visible_panels) {
+    const auto selected = editor_area_panel_ == id;
+    if (tab(panel_label(id), panel_id_name(id).data(), selected, panel_icon(id))) {
+      editor_area_panel_ = id;
+      panels_.focus(id);
+      panels_.clear_focus_request();
+      persist_shell_state();
+    }
+    frame_layout_.panels[id].tab = item_rectangle();
+    frame_layout_.panels[id].selected = selected;
+    if (ImGui::BeginPopupContextItem()) {
+      if (ImGui::MenuItem("Close tab")) {
         panels_.set_visible(id, false);
         persist_shell_state();
       }
+      ImGui::Separator();
+      draw_panel_menu(id);
+      ImGui::EndPopup();
     }
-    ImGui::EndTabBar();
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("%s · Right-click to close or move",
+                        panels_.descriptor(id).title.data());
+    }
+    ImGui::SameLine();
+  }
+  if (editor_ && !editor_area_panel_) {
+    if (tabs_shown) {
+      ImGui::SameLine(0.0F, design::space4);
+    }
+    draw_editor_file_row(tabs_shown);
+  } else {
+    ImGui::Dummy(ImVec2(0.0F, design::control_sm));
+  }
+  ImGui::PopStyleVar();
+  const auto row_bottom = row.y + design::control_sm;
+  hairline(row.x, row_bottom + 0.5F, row.x + row_width, row_bottom + 0.5F);
+  ImGui::SetCursorScreenPos(ImVec2(row.x, row_bottom + 1.0F));
+
+  if (editor_ && !editor_area_panel_) {
+    if (shell_state_.editor_split) {
+      const auto available = ImGui::GetContentRegionAvail();
+      const auto content_width = std::max(available.x - divider_size, 1.0F);
+      const auto primary_width = content_width * shell_state_.editor_split_ratio;
+      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+      ImGui::BeginChild("primary-editor", ImVec2(primary_width, available.y));
+      draw_editor();
+      ImGui::EndChild();
+      ImGui::PopStyleVar();
+      ImGui::SameLine(0.0F, 0.0F);
+      ImGui::InvisibleButton("editor-split-divider", ImVec2(divider_size, available.y));
+      if (ImGui::IsItemActive()) {
+        const auto change = ImGui::GetIO().MouseDelta.x / content_width;
+        shell_state_.editor_split_ratio =
+            std::clamp(shell_state_.editor_split_ratio + change, 0.25F, 0.75F);
+      }
+      if (ImGui::IsItemDeactivatedAfterEdit()) {
+        persist_shell_state();
+      }
+      ImGui::SameLine(0.0F, 0.0F);
+      ImGui::BeginChild("secondary-editor",
+                        ImVec2(std::max(content_width - primary_width, 1.0F), available.y),
+                        ImGuiChildFlags_Border);
+      draw_split_editor();
+      ImGui::EndChild();
+    } else {
+      draw_editor();
+    }
+  } else if (editor_area_panel_) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(design::space3, design::space3));
+    ImGui::BeginChild("editor-tab-panel", ImVec2(0.0F, 0.0F),
+                      ImGuiChildFlags_AlwaysUseWindowPadding);
+    draw_panel(*editor_area_panel_);
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+  }
+}
+
+// The file's row right of any tabs: the breadcrumb (path, then the enclosing symbol), the
+// unsaved mark, and the file menu at the row's right edge. Tabs already name the file, so with
+// tabs the breadcrumb starts at the folder.
+void App::draw_editor_file_row(bool tabs_shown) {
+  const auto path = std::string(editor_->display_path());
+  auto symbol_name = std::optional<std::string_view>{};
+  if (const auto *symbol = navigation_symbol_at_cursor()) {
+    symbol_name = symbol->name;
+  } else if (screenshot_mode()) {
+    symbol_name = "greeting";
+  }
+  auto path_breadcrumbs = breadcrumbs(path, symbol_name);
+  if (tabs_shown) {
+    std::erase_if(path_breadcrumbs, [&](const auto &item) {
+      return !item.symbol && item.path == std::filesystem::path(path);
+    });
+  }
+  const auto row_y = ImGui::GetCursorScreenPos().y;
+  const auto compact_y = row_y + (design::control_sm - design::space6) * 0.5F;
+  // Drawn, not laid out as text: same-line text after a framed button takes the frame's
+  // baseline offset and would sit below the labels.
+  const auto separator = [&] {
+    ImGui::SameLine();
+    const auto at = ImGui::GetCursorScreenPos();
+    const auto width = ImGui::CalcTextSize("/").x;
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(at.x, row_y + (design::control_sm - ImGui::GetTextLineHeight()) * 0.5F),
+        ImGui::GetColorU32(ImGuiCol_TextDisabled), "/");
+    ImGui::Dummy(ImVec2(width, 1.0F));
+    ImGui::SameLine();
+  };
+  if (breadcrumb_focus_requested_) {
+    ImGui::SetKeyboardFocusHere();
+    breadcrumb_focus_requested_ = false;
+  }
+  for (std::size_t index = 0; index < path_breadcrumbs.size(); ++index) {
+    const auto &breadcrumb = path_breadcrumbs[index];
+    const auto label = breadcrumb.label + "##breadcrumb-" + std::to_string(index);
+    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, compact_y));
+    if (kit_button(label.c_str(), ButtonKind::quiet, ButtonSize::compact) && !breadcrumb.symbol &&
+        breadcrumb.path == std::filesystem::path(path)) {
+      editor_focused_ = true;
+    }
+    if (!breadcrumb.symbol && breadcrumb.path == std::filesystem::path(path)) {
+      frame_layout_.controls["editor/file-tab"] = item_rectangle();
+    }
+    if (index + 1 < path_breadcrumbs.size()) {
+      separator();
+    }
+  }
+  const auto row_text = [&](const char *text, ImGuiCol color) {
+    ImGui::SameLine(0.0F, design::space2);
+    const auto at = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(at.x, row_y + (design::control_sm - ImGui::GetTextLineHeight()) * 0.5F),
+        ImGui::GetColorU32(color), text);
+    ImGui::Dummy(ImVec2(ImGui::CalcTextSize(text).x, 1.0F));
+  };
+  if (editor_->dirty() && !tabs_shown) {
+    row_text("*", ImGuiCol_Text);
+  }
+  if (review_diff_open_) {
+    row_text("read-only text diff", ImGuiCol_TextDisabled);
+  }
+  // The file menu sits at the row's right edge, space3 in, like the toolbar's left edge.
+  ImGui::SameLine();
+  const auto menu_width = ImGui::CalcTextSize("...").x + design::space2 * 2.0F;
+  const auto right = ImGui::GetWindowPos().x + ImGui::GetWindowSize().x - design::space3;
+  ImGui::SetCursorScreenPos(
+      ImVec2(std::max(ImGui::GetCursorScreenPos().x, right - menu_width), compact_y));
+  if (kit_button("...##file-actions", ButtonKind::quiet, ButtonSize::compact)) {
+    ImGui::OpenPopup("file-actions");
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("File actions and lease controls");
+  }
+  if (ImGui::BeginPopup("file-actions")) {
+    ImGui::BeginDisabled(review_diff_open_ || !options_.repository_path);
+    if (ImGui::MenuItem("Take lease")) {
+      take_editor_lease();
+    }
+    if (ImGui::MenuItem("Release lease")) {
+      release_editor_lease();
+    }
+    ImGui::EndDisabled();
+    if (ImGui::MenuItem("Collaboration details")) {
+      panels_.focus(PanelId::multiplayer);
+      shell_state_.sidebar_visible = true;
+      persist_shell_state();
+    }
+    ImGui::EndPopup();
   }
 }
 
@@ -6565,19 +7670,46 @@ void App::draw_bottom_panel() {
       continue;
     }
     const auto label = icon_label(panel_label(id), 0.0F);
-    const auto width = ImGui::CalcTextSize(label.c_str()).x + 16.0F;
+    const auto width = ImGui::CalcTextSize(label.c_str()).x + design::space4;
     if (!first && ImGui::GetContentRegionAvail().x > width) {
-      ImGui::SameLine();
+      ImGui::SameLine(0.0F, design::space1);
     }
     first = false;
-    if (ImGui::Selectable(label.c_str(), active == id, 0,
-                          ImVec2(width, 24.0F))) {
+    // lake's tabs: the label centred on the row with its icon, the selected one marked by an
+    // action-coloured underline instead of a filled box.
+    const auto palette =
+        effective_palette(applied_dark_theme_, applied_high_contrast_);
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0F, 0.5F));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(active == id ? palette.text_primary
+                                                                  : palette.text_secondary));
+    // The hit rectangle is the drawn tab: no half-spacing pad into the neighbours, and a height
+    // that follows the UI font, so pointer, keyboard focus and paint agree at every size
+    // (liquify#35).
+    const auto height = std::max(design::control_sm, ImGui::GetFontSize() + design::space4);
+    const auto clicked = ImGui::Selectable(label.c_str(), active == id,
+                                           ImGuiSelectableFlags_NoPadWithHalfSpacing,
+                                           ImVec2(width, height));
+    const auto focused = ImGui::IsItemFocused();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar();
+    if (active == id) {
+      const auto min = ImGui::GetItemRectMin();
+      const auto max = ImGui::GetItemRectMax();
+      ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(min.x, max.y - 2.0F), max,
+                                                packed_color(palette.action));
+    }
+    if (clicked) {
       panels_.focus(id);
       panels_.clear_focus_request();
       persist_shell_state();
+      // A clicked tab holds keyboard focus. ImGui hides its focus cursor after a click, so the
+      // editor would otherwise keep the keys and indent on the next Tab (liquify#35).
+      editor_focused_ = false;
     }
     frame_layout_.panels[id].tab = item_rectangle();
     frame_layout_.panels[id].selected = active == id;
+    frame_layout_.panels[id].tab_focused = focused;
     item_icon(panel_icon(id));
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("%s · Right-click for panel placement",
@@ -6617,7 +7749,7 @@ void App::draw_floating_panels() {
     const auto title =
         panel_label(id) + "###floating-" + std::string(panel_id_name(id));
     if (ImGui::Begin(title.c_str(), &open, ImGuiWindowFlags_NoSavedSettings)) {
-      if (ImGui::SmallButton("...##floating-placement")) {
+      if (kit_button("...##floating-placement", ButtonKind::quiet, ButtonSize::compact)) {
         ImGui::OpenPopup("floating-placement");
       }
       if (ImGui::BeginPopup("floating-placement")) {
@@ -6640,269 +7772,1668 @@ void App::draw_floating_panels() {
   }
 }
 
-void App::draw_clone_dialog() {
-  if (clone_dialog_open_) {
-    ImGui::OpenPopup("Clone from lake");
-    clone_dialog_open_ = false;
+auto App::repository_path() const -> std::filesystem::path {
+  return repository_ ? repository_->path() : std::filesystem::path{};
+}
+
+// The failure the status bar names, and the panel that shows it. Build and push failures live
+// in the Build panel; code-analysis failures in Diagnostics.
+auto App::status_failure(const EditorGraphSnapshot &graph) const
+    -> std::optional<StatusFailure> {
+  if (graph.build_error) {
+    return StatusFailure{
+        describe_build_failure(*graph.build_error, repository_path()).summary,
+        PanelId::build};
+  }
+  if (graph.deploy.failure) {
+    return StatusFailure{describe_push_failure(*graph.deploy.failure,
+                                               graph.deploy.remote,
+                                               repository_path())
+                             .summary,
+                         PanelId::build};
+  }
+  // The build service's own state, which a later successful query does not clear (liquify#36).
+  // The wording matches the Build panel's for a build that found no service.
+  if (graph.daemon_state == DaemonState::start_failed) {
+    return StatusFailure{"The build service is not running for this repository",
+                         PanelId::diagnostics};
+  }
+  if (graph.daemon_state == DaemonState::disconnected) {
+    return StatusFailure{"The build service stopped answering", PanelId::diagnostics};
+  }
+  if (!graph.query_error.empty()) {
+    return StatusFailure{
+        describe_query_failure(graph_query_failure(graph), repository_path())
+            .summary,
+        PanelId::diagnostics};
+  }
+  return std::nullopt;
+}
+
+// Actions a failure can offer besides Retry, which the caller supplies. An action liquify
+// cannot perform yet is not drawn: a button that does nothing is worse than none.
+auto App::error_action_available(ErrorAction action) const -> bool {
+  return (action == ErrorAction::set_sync_remote ||
+          action == ErrorAction::set_up_build) &&
+         repository_ != nullptr;
+}
+
+void App::run_error_action(ErrorAction action) {
+  if (action == ErrorAction::set_sync_remote) {
+    open_set_lake_dialog();
+  } else if (action == ErrorAction::set_up_build) {
+    open_build_setup();
+  }
+}
+
+void App::open_build_setup() {
+  if (!repository_) {
+    editor_status_ = "Open a repository to set up its build";
+    return;
+  }
+  auto names = std::vector<std::string>{};
+  for (const auto &entry : repository_->entries()) {
+    names.push_back(entry.name);
+  }
+  build_proposal_ = propose_build_command(names);
+  build_setup_command_ = build_proposal_.command;
+  build_setup_failure_ = {};
+  build_setup_requested_ = true;
+}
+
+void App::poll_build_setup() {
+  if (!build_setup_operation_ ||
+      build_setup_operation_->wait_for(std::chrono::milliseconds::zero()) !=
+          std::future_status::ready) {
+    return;
+  }
+  build_setup_failure_ = build_setup_operation_->get();
+  build_setup_operation_.reset();
+  if (build_setup_failure_.empty()) {
+    build_setup_close_requested_ = true;
+    editor_status_ = "Build recorded: " + build_setup_command_;
+    request_build();
+  }
+}
+
+void App::draw_build_setup_dialog() {
+  poll_build_setup();
+  if (build_setup_requested_) {
+    ImGui::OpenPopup("Set Up Build");
+    build_setup_requested_ = false;
   }
   const auto center = ImGui::GetMainViewport()->GetCenter();
   ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
-  ImGui::SetNextWindowSize(ImVec2(560.0F, 0.0F), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Clone from lake", nullptr,
-                              ImGuiWindowFlags_AlwaysAutoResize)) {
+  ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
+  if (!begin_dialog("Set Up Build", ImGuiWindowFlags_AlwaysAutoResize)) {
     return;
   }
-  ImGui::TextWrapped(
-      "Clone a lake repository through liquid's drive client. Offline failures "
-      "remain available for retry.");
-  ImGui::Spacing();
-  ImGui::InputTextWithHint("Lake repository", "https://lake.example/repository",
-                           &clone_remote_);
-  ImGui::InputTextWithHint("Local folder", "/path/to/new-folder", &clone_path_);
-  ImGui::Spacing();
-  const auto ready = !clone_remote_.empty() && !clone_path_.empty();
-  ImGui::BeginDisabled(!ready);
-  if (ImGui::Button("Clone repository")) {
-    begin_clone_repository(clone_remote_, clone_path_);
+  if (build_setup_close_requested_) {
+    build_setup_close_requested_ = false;
     ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return;
   }
+  ImGui::PushTextWrapPos(580.0F);
+  ImGui::TextUnformatted(
+      "liquid records the command that builds this repository once, by "
+      "running it, then F7 builds with it.");
+  ImGui::TextDisabled("%s", build_proposal_.reason.c_str());
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Build command");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(580.0F);
+  ImGui::InputText("##build-command", &build_setup_command_);
+  frame_layout_.controls["build-setup/command"] = item_rectangle();
+  ImGui::TextDisabled("Runs in the repository folder with /bin/sh.");
+  if (!build_setup_failure_.empty()) {
+    draw_user_error(build_setup_failure_, "build-setup-failure");
+  }
+  ImGui::Spacing();
+  ImGui::BeginDisabled(build_setup_command_.empty() ||
+                       build_setup_operation_.has_value());
+  if (kit_button(build_setup_operation_ ? "Recording..." : "Record and build",
+                 ButtonKind::primary)) {
+    build_setup_failure_ = {};
+    build_setup_operation_.emplace(std::async(
+        std::launch::async,
+        [path = repository_path(), command = build_setup_command_] {
+          return record_build_command(path, command);
+        }));
+    request_repaint();
+  }
+  frame_layout_.controls["build-setup/submit"] = item_rectangle();
   ImGui::EndDisabled();
   ImGui::SameLine();
-  if (ImGui::Button("Cancel")) {
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
 }
 
-void App::draw_welcome() {
-  const auto available = ImGui::GetContentRegionAvail();
-  const auto card_width = std::min(available.x - design::space8 * 2.0F, 920.0F);
-  ImGui::SetCursorPosX(
-      std::max((available.x - card_width) * 0.5F, design::space4));
-  ImGui::SetCursorPosY(design::space8);
-  ImGui::BeginChild(
-      "first-run-card",
-      ImVec2(card_width, std::max(available.y - design::space8 * 2.0F, 1.0F)),
-      ImGuiChildFlags_Border, ImGuiWindowFlags_AlwaysUseWindowPadding);
-  ImGui::TextUnformatted("Welcome to liquify");
-  ImGui::TextDisabled(
-      "Build software locally. Collaborate through lake when it is reachable.");
+void App::open_set_lake_dialog() {
+  if (!repository_) {
+    editor_status_ = "Open a repository to choose its lake";
+    return;
+  }
+  set_lake_requested_ = true;
+  set_lake_failure_ = {};
+  set_lake_url_ = options_.lake_url.value_or(std::string{});
+}
+
+void App::draw_set_lake_dialog() {
+  if (set_lake_requested_) {
+    ImGui::OpenPopup("Set Lake");
+    set_lake_requested_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(600.0F, 0.0F), ImGuiCond_Appearing);
+  if (!begin_dialog("Set Lake", ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::PushTextWrapPos(580.0F);
+  ImGui::TextUnformatted(
+      "Choose the lake repository this one pushes to and is reviewed on. Copy "
+      "its address from the repository's page on lake.");
+  ImGui::PopTextWrapPos();
   ImGui::Spacing();
+  ImGui::TextUnformatted("Lake repository address");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(580.0F);
+  ImGui::InputTextWithHint("##set-lake-url",
+                           "https://lake.example/v1/repositories/…",
+                           &set_lake_url_);
+  frame_layout_.controls["set-lake/url"] = item_rectangle();
+  if (!set_lake_failure_.empty()) {
+    draw_user_error(set_lake_failure_, "set-lake-failure");
+  }
+  ImGui::Spacing();
+  ImGui::BeginDisabled(set_lake_url_.empty());
+  if (kit_button("Set lake", ButtonKind::primary)) {
+    set_lake_failure_ = record_lake_remote(repository_path(), set_lake_url_);
+    if (set_lake_failure_.empty()) {
+      options_.lake_url = set_lake_url_;
+      lake_url_from_repository_ = true;
+      repository_->set_lake_remote(set_lake_url_);
+      review_.reset();
+      configure_review();
+      editor_status_ = "Pushes to " + lake_host(set_lake_url_);
+      ImGui::CloseCurrentPopup();
+    }
+  }
+  frame_layout_.controls["set-lake/submit"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
+// The controls kit (liquify#101), mirroring lake's: button kinds, a checkbox that shows its
+// state, labels above full-width fields, and sliders with one handle shape.
+auto App::kit_button(const char *label, ButtonKind kind, ButtonSize size,
+                     float width) -> bool {
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto compact = size == ButtonSize::compact;
+  // The kit's heights, grown with an enlarged UI font so the label is never clipped (liquify#36).
+  const auto height = std::max(compact ? design::space6 : design::control_sm,
+                               ImGui::GetFontSize() + design::space2);
+  const auto padding =
+      ImVec2(compact ? design::space2 : design::space3,
+             std::max(0.0F, (height - ImGui::GetFontSize()) * 0.5F));
+  // ImGui colours a button's text once, before it knows the button is hovered. lake turns a
+  // secondary button's text white on its filled hover, so the hover is worked out first from the
+  // rectangle the button will occupy.
+  const auto label_size = ImGui::CalcTextSize(label, nullptr, true);
+  const auto extent =
+      ImVec2(width > 0.0F ? width : label_size.x + padding.x * 2.0F, height);
+  const auto origin = ImGui::GetCursorScreenPos();
+  const auto hovered =
+      (ImGui::GetCurrentContext()->CurrentItemFlags & ImGuiItemFlags_Disabled) == 0 &&
+      ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
+                             ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+      ImGui::IsMouseHoveringRect(origin, ImVec2(origin.x + extent.x, origin.y + extent.y));
+
+  const auto clear = design::Rgba{0.0F, 0.0F, 0.0F, 0.0F};
+  const auto white = design::Rgba{1.0F, 1.0F, 1.0F, 1.0F};
+  auto pushed = 0;
+  const auto push = [&pushed](ImGuiCol slot, design::Rgba color) {
+    ImGui::PushStyleColor(slot, imgui_color(color));
+    ++pushed;
+  };
+  switch (kind) {
+  case ButtonKind::primary:
+    push(ImGuiCol_Button, palette.action);
+    push(ImGuiCol_ButtonHovered, palette.action_hover);
+    push(ImGuiCol_ButtonActive, palette.action_pressed);
+    push(ImGuiCol_Border, palette.action);
+    push(ImGuiCol_Text, white);
+    break;
+  case ButtonKind::secondary:
+    push(ImGuiCol_Button, clear);
+    push(ImGuiCol_ButtonHovered, palette.action_hover);
+    push(ImGuiCol_ButtonActive, palette.action_pressed);
+    push(ImGuiCol_Border, hovered ? palette.action_hover : palette.border_interactive);
+    push(ImGuiCol_Text, hovered ? white : palette.action);
+    break;
+  case ButtonKind::quiet:
+    push(ImGuiCol_Button, clear);
+    push(ImGuiCol_ButtonHovered, palette.layer_hover);
+    push(ImGuiCol_ButtonActive, palette.selected);
+    push(ImGuiCol_Border, clear);
+    push(ImGuiCol_Text, hovered ? palette.text_primary : palette.text_secondary);
+    break;
+  case ButtonKind::quiet_danger:
+    push(ImGuiCol_Button, clear);
+    push(ImGuiCol_ButtonHovered, palette.layer_hover);
+    push(ImGuiCol_ButtonActive, palette.selected);
+    push(ImGuiCol_Border, clear);
+    push(ImGuiCol_Text, palette.danger);
+    break;
+  case ButtonKind::destructive:
+    push(ImGuiCol_Button, palette.danger);
+    push(ImGuiCol_ButtonHovered, palette.danger);
+    push(ImGuiCol_ButtonActive, palette.danger);
+    push(ImGuiCol_Border, palette.danger);
+    push(ImGuiCol_Text, white);
+    break;
+  case ButtonKind::toggle:
+    push(ImGuiCol_Button, palette.action_soft);
+    push(ImGuiCol_ButtonHovered, palette.action_soft);
+    push(ImGuiCol_ButtonActive, palette.selected);
+    push(ImGuiCol_Border, palette.border_interactive);
+    push(ImGuiCol_Text, palette.action);
+    break;
+  }
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, padding);
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, design::control_radius);
+  ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5F, 0.5F));
+  const auto pressed = ImGui::Button(label, extent);
+  ImGui::PopStyleVar(3);
+  ImGui::PopStyleColor(pushed);
+  return pressed;
+}
+
+auto App::checkbox(const char *label, bool *value) -> bool {
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto checked = *value;
+  ImGui::PushStyleColor(ImGuiCol_Border, imgui_color(checked ? palette.action
+                                                             : palette.border_strong));
+  // A compact box, as lake's: the frame padding sets the square's size.
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                      ImVec2(ImGui::GetStyle().FramePadding.x, design::space1 * 0.5F));
+  ImGui::PushStyleColor(ImGuiCol_FrameBg,
+                        imgui_color(checked ? palette.action : palette.surface));
+  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered,
+                        imgui_color(checked ? palette.action_hover : palette.layer_hover));
+  ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(1.0F, 1.0F, 1.0F, 1.0F));
+  const auto changed = ImGui::Checkbox(label, value);
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(4);
+  return changed;
+}
+
+void App::field_label(const char *label) {
+  ImGui::TextUnformatted(label);
+  ImGui::SetNextItemWidth(-FLT_MIN);
+}
+
+auto App::text_field(const char *label, std::string *value, const char *hint) -> bool {
+  field_label(label);
+  const auto id = std::string("##") + label;
+  return hint == nullptr ? ImGui::InputText(id.c_str(), value)
+                         : ImGui::InputTextWithHint(id.c_str(), hint, value);
+}
+
+// One handle shape for every slider: an integer slider's grab otherwise widens with a small
+// range, which is why the two size sliders in Settings looked different.
+auto App::slider_int(const char *label, int *value, int minimum, int maximum) -> bool {
+  field_label(label);
+  auto fraction = static_cast<float>(*value);
+  const auto id = std::string("##") + label;
+  if (!ImGui::SliderFloat(id.c_str(), &fraction, static_cast<float>(minimum),
+                          static_cast<float>(maximum), "%.0f")) {
+    return false;
+  }
+  const auto rounded = static_cast<int>(std::lround(fraction));
+  if (rounded == *value) {
+    return false;
+  }
+  *value = rounded;
+  return true;
+}
+
+// The type scale (liquify#100), from the design tokens lake uses: a title (24, semibold), a
+// section heading (16, semibold), body (the UI size) and captions (disabled ink).
+void App::type_title(std::string_view text, std::string_view id) {
+  ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[title_font_index_]);
+  ImGui::TextUnformatted(text.data(), text.data() + text.size());
+  ImGui::PopFont();
+  if (!id.empty()) {
+    frame_layout_.controls[std::string(id)] = item_rectangle();
+  }
+}
+
+void App::type_heading(std::string_view text, std::string_view id) {
+  ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[section_font_index_]);
+  ImGui::TextUnformatted(text.data(), text.data() + text.size());
+  ImGui::PopFont();
+  if (!id.empty()) {
+    frame_layout_.controls[std::string(id)] = item_rectangle();
+  }
+}
+
+// A modal dialog whose title bar uses the heading face. Every dialog title is Title Case.
+auto App::begin_dialog(const char *title, int flags) -> bool {
+  ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[section_font_index_]);
+  const auto open = ImGui::BeginPopupModal(title, nullptr, flags);
+  ImGui::PopFont();
+  return open;
+}
+
+void App::draw_user_error(const UserError &failure, std::string_view id,
+                          const std::function<void()> &retry, NoticeLook look) {
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto tone = look.tone.value_or(failure.offline() ? NoticeTone::warning
+                                                         : NoticeTone::danger);
+  const auto role = tone == NoticeTone::danger    ? palette.danger
+                    : tone == NoticeTone::warning ? palette.warning
+                                                  : palette.info;
+  const auto soft = tone == NoticeTone::danger    ? palette.danger_soft
+                    : tone == NoticeTone::warning ? palette.warning_soft
+                                                  : palette.info_soft;
+  const auto key = std::string(id);
+  ImGui::PushID(id.data(), id.data() + id.size());
+
+  const auto has_action =
+      !failure.action_label.empty() &&
+      (failure.action == ErrorAction::retry
+           ? static_cast<bool>(retry)
+           : error_action_available(failure.action));
+  const auto has_details = !failure.details.empty();
+  auto *open = has_details ? &error_details_open_[key] : nullptr;
+
+  // lake's notice: 8 pixels above and below, 12 at the sides (8 for a quiet one), the dot and
+  // the text 8 apart (6 when quiet), the buttons 12 from the text.
+  const auto origin = ImGui::GetCursorScreenPos();
+  const auto width = std::max(ImGui::GetContentRegionAvail().x, design::space6 * 4.0F);
+  const auto side = look.quiet ? design::space2 : design::space3;
+  const auto dot = 6.0F;
+  const auto text_x = origin.x + side + dot + (look.quiet ? 6.0F : design::space2);
+  const auto right = origin.x + width - side;
+  const auto room = right - text_x;
+  const auto line = ImGui::GetTextLineHeight();
+  const auto local_x = [](float screen_x) {
+    return screen_x - ImGui::GetWindowPos().x + ImGui::GetScrollX();
+  };
+  const auto button_width = [](const char *label) {
+    return ImGui::CalcTextSize(label, nullptr, true).x + design::space2 * 2.0F;
+  };
+  const auto action_width = has_action ? button_width(failure.action_label.c_str()) : 0.0F;
+  // Details is measured with its longer label, so opening it never changes the layout.
+  const auto details_width =
+      has_details ? std::max(button_width("Details"), button_width("Hide details")) : 0.0F;
+  const auto summary_width = ImGui::CalcTextSize(failure.summary.c_str()).x;
+  const auto next_width =
+      failure.next_step.empty() ? 0.0F : ImGui::CalcTextSize(failure.next_step.c_str()).x;
+  const auto row_width = [&](bool with_next, bool with_details) {
+    auto buttons = action_width;
+    if (with_details && has_details) {
+      buttons += (buttons > 0.0F ? design::space2 : 0.0F) + details_width;
+    }
+    return summary_width + (with_next ? design::space2 + next_width : 0.0F) +
+           (buttons > 0.0F ? design::space3 + buttons : 0.0F);
+  };
+  // A quiet notice that has no room for Details makes its sentence the Details control.
+  const auto details_button =
+      has_details && (!look.quiet || row_width(false, true) <= room);
+  const auto summary_toggles = has_details && !details_button;
+  auto buttons = action_width;
+  if (details_button) {
+    buttons += (buttons > 0.0F ? design::space2 : 0.0F) + details_width;
+  }
+  const auto next_inline = !look.quiet && !failure.next_step.empty() &&
+                           row_width(true, details_button) <= room;
+  const auto buttons_inline = row_width(next_inline, details_button) <= room;
+  const auto first_row = buttons > 0.0F && buttons_inline ? design::space6 : line;
+  const auto top = origin.y + design::space2;
+  const auto text_y = top + (first_row - line) * 0.5F;
+
+  auto *draw = ImGui::GetWindowDrawList();
+  draw->ChannelsSplit(2);
+  draw->ChannelsSetCurrent(1);
+
+  ImGui::SetCursorScreenPos(ImVec2(text_x, text_y));
+  ImGui::PushTextWrapPos(
+      local_x(buttons_inline && buttons > 0.0F ? right - buttons - design::space3 : right));
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_primary));
+  ImGui::TextUnformatted(failure.summary.c_str());
+  ImGui::PopStyleColor();
+  ImGui::PopTextWrapPos();
+  frame_layout_.controls[key + "/summary"] = item_rectangle();
+  const auto summary_min = ImGui::GetItemRectMin();
+  const auto summary_max = ImGui::GetItemRectMax();
+  auto bottom = std::max(top + first_row, summary_max.y);
+  auto summary_hovered = false;
+  if (summary_toggles) {
+    ImGui::SetCursorScreenPos(summary_min);
+    if (ImGui::InvisibleButton("details", ImVec2(summary_max.x - summary_min.x,
+                                                 summary_max.y - summary_min.y))) {
+      *open = !*open;
+    }
+    frame_layout_.controls[key + "/details"] = item_rectangle();
+    summary_hovered = ImGui::IsItemHovered();
+    if (summary_hovered) {
+      draw->AddLine(ImVec2(summary_min.x, summary_max.y),
+                    ImVec2(summary_max.x, summary_max.y),
+                    packed_color(palette.text_secondary), 1.0F);
+      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    }
+  }
+
+  if (!look.quiet && !failure.next_step.empty()) {
+    ImGui::SetCursorScreenPos(next_inline
+                                  ? ImVec2(summary_max.x + design::space2, text_y)
+                                  : ImVec2(text_x, bottom + 2.0F));
+    ImGui::PushTextWrapPos(local_x(next_inline && buttons > 0.0F
+                                       ? right - buttons - design::space3
+                                       : right));
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    ImGui::TextUnformatted(failure.next_step.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+    bottom = std::max(bottom, ImGui::GetItemRectMax().y);
+  }
+
+  if (buttons > 0.0F) {
+    // On the line, the buttons sit against the right edge at their drawn width.
+    auto drawn = action_width;
+    if (details_button) {
+      drawn += (drawn > 0.0F ? design::space2 : 0.0F) +
+               button_width(*open ? "Hide details" : "Details");
+    }
+    auto x = buttons_inline ? right - drawn : text_x;
+    const auto y = buttons_inline ? top : bottom + design::space2 * 0.5F;
+    if (has_action) {
+      ImGui::SetCursorScreenPos(ImVec2(x, y));
+      if (kit_button(failure.action_label.c_str(), ButtonKind::secondary,
+                     ButtonSize::compact)) {
+        if (failure.action == ErrorAction::retry) {
+          retry();
+        } else {
+          run_error_action(failure.action);
+        }
+      }
+      frame_layout_.controls[key + "/action"] = item_rectangle();
+      x = ImGui::GetItemRectMax().x + design::space2;
+    }
+    if (details_button) {
+      ImGui::SetCursorScreenPos(ImVec2(x, y));
+      if (kit_button(*open ? "Hide details" : "Details", ButtonKind::quiet,
+                     ButtonSize::compact)) {
+        *open = !*open;
+      }
+      frame_layout_.controls[key + "/details"] = item_rectangle();
+    }
+    bottom = std::max(bottom, y + design::space6);
+  }
+
+  if (open != nullptr && *open) {
+    ImGui::SetCursorScreenPos(ImVec2(text_x, bottom + design::space2 * 0.5F));
+    ImGui::PushTextWrapPos(local_x(right));
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    ImGui::TextUnformatted(failure.details.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+    bottom = std::max(bottom, ImGui::GetItemRectMax().y);
+  }
+
+  const auto maximum = ImVec2(origin.x + width, bottom + design::space2);
+  auto border = role;
+  border.alpha = applied_high_contrast_ ? 1.0F : 0.45F;
+  draw->ChannelsSetCurrent(0);
+  draw->AddRectFilled(origin, maximum, packed_color(soft), design::panel_radius);
+  draw->AddRect(origin, maximum, packed_color(border), design::panel_radius, 0, 1.0F);
+  draw->AddCircleFilled(ImVec2(origin.x + side + dot * 0.5F, text_y + line * 0.5F),
+                        dot * 0.5F, packed_color(role));
+  draw->ChannelsMerge();
+
+  ImGui::SetCursorScreenPos(origin);
+  ImGui::Dummy(ImVec2(width, maximum.y - origin.y));
+  frame_layout_.controls[key + "/notice"] = item_rectangle();
+  // A quiet notice keeps its next step, and how to see Details, in its tooltip.
+  if (look.quiet && ImGui::IsItemHovered() &&
+      (summary_hovered || !ImGui::IsAnyItemHovered())) {
+    auto tip = failure.next_step;
+    if (summary_toggles) {
+      tip += tip.empty() ? "" : "\n";
+      tip += *open ? "Select to hide details." : "Select to show details.";
+    }
+    if (!tip.empty()) {
+      ImGui::SetTooltip("%s", tip.c_str());
+    }
+  }
+  ImGui::PopID();
+}
+
+void App::draw_panel_state(std::string_view text) {
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  ImGui::PushTextWrapPos(0.0F);
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::TextUnformatted(text.data(), text.data() + text.size());
+  ImGui::PopStyleColor();
+  ImGui::PopTextWrapPos();
+}
+
+void App::open_cut_composer() {
+  if (!repository_) {
+    editor_status_ = "Open a repository to cut a change";
+    return;
+  }
+  cut_composer_requested_ = true;
+  cut_restore_editor_focus_ = editor_focused_;
+  editor_focused_ = false;
+  cut_message_.clear();
+  cut_result_.reset();
+  cut_failure_ = {};
+  cut_pending_.reset();
+  cut_preview_.emplace(std::async(
+      std::launch::async,
+      [path = repository_->path()] { return load_pending_change(path); }));
+  request_repaint();
+}
+
+void App::poll_cut_composer() {
+  if (cut_preview_ &&
+      cut_preview_->wait_for(std::chrono::milliseconds::zero()) ==
+          std::future_status::ready) {
+    cut_pending_ = cut_preview_->get();
+    cut_preview_.reset();
+  }
+  if (cut_operation_ &&
+      cut_operation_->wait_for(std::chrono::milliseconds::zero()) ==
+          std::future_status::ready) {
+    auto result = cut_operation_->get();
+    cut_operation_.reset();
+    if (!result.failure.empty()) {
+      cut_failure_ = std::move(result.failure);
+      return;
+    }
+    cut_result_ = result.change;
+    const auto summary = cut_message_summary(cut_message_);
+    editor_status_ = "Cut change: " + summary;
+    cut_close_requested_ = true;
+    if (editor_graph_) {
+      editor_graph_->refresh_status();
+    }
+  }
+}
+
+void App::draw_cut_composer() {
+  poll_cut_composer();
+  if (cut_composer_requested_) {
+    ImGui::OpenPopup("Cut Change");
+    cut_composer_requested_ = false;
+  }
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::SetNextWindowSize(ImVec2(620.0F, 0.0F), ImGuiCond_Appearing);
+  if (!begin_dialog("Cut Change", ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  if (cut_close_requested_) {
+    cut_close_requested_ = false;
+    editor_focused_ = cut_restore_editor_focus_;
+    ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return;
+  }
+  ImGui::PushTextWrapPos(600.0F);
+  ImGui::TextUnformatted(
+      "A change names the drips you saved since the last change. Push sends "
+      "changes to lake, where they can be reviewed.");
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  if (!cut_pending_) {
+    ImGui::TextDisabled("Reading saved drips...");
+  } else if (!cut_pending_->failure.empty()) {
+    draw_user_error(cut_pending_->failure, "cut-pending-failure");
+  } else {
+    if (cut_pending_->base.empty()) {
+      ImGui::TextDisabled("This will be the repository's first change.");
+    } else {
+      ImGui::TextDisabled("Builds on change %s", cut_pending_->base.c_str());
+    }
+    if (cut_pending_->drips.empty()) {
+      ImGui::TextUnformatted(
+          "Nothing to cut yet. Each save is a drip; save an edit first.");
+    } else {
+      ImGui::Text("Gathers %zu %s touching %zu %s:", cut_pending_->drips.size(),
+                  cut_pending_->drips.size() == 1 ? "drip" : "drips",
+                  cut_pending_->paths.size(),
+                  cut_pending_->paths.size() == 1 ? "file" : "files");
+      for (const auto &path : cut_pending_->paths) {
+        ImGui::BulletText("%s", path.c_str());
+      }
+      if (ImGui::TreeNode("Drips")) {
+        for (const auto &drip : cut_pending_->drips) {
+          auto files = std::string{};
+          for (const auto &path : drip.paths) {
+            files += (files.empty() ? "" : ", ") + path;
+          }
+          ImGui::TextDisabled("%s · %s · %s", drip.id.c_str(),
+                              std::format("{:%Y-%m-%d %H:%M}", drip.at).c_str(),
+                              files.c_str());
+        }
+        ImGui::TreePop();
+      }
+    }
+  }
+  if (editor_ && editor_->dirty()) {
+    ImGui::TextColored(
+        imgui_color(effective_palette(applied_dark_theme_,
+                                      applied_high_contrast_)
+                        .warning),
+        "%s has unsaved edits, which are not in this change. Save first to "
+        "include them.",
+        std::string(editor_->display_path()).c_str());
+  }
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Message");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::InputTextMultiline("##cut-message", &cut_message_,
+                            ImVec2(600.0F, ImGui::GetTextLineHeight() * 4.0F));
+  frame_layout_.controls["cut/message"] = item_rectangle();
+  ImGui::TextDisabled("The first line is the change's title.");
+  if (!cut_failure_.empty()) {
+    draw_user_error(cut_failure_, "cut-failure");
+  }
+  ImGui::Spacing();
+  const auto ready = cut_pending_ && cut_pending_->failure.empty() &&
+                     !cut_pending_->drips.empty() &&
+                     !cut_message_summary(cut_message_).empty() &&
+                     !cut_operation_;
+  ImGui::BeginDisabled(!ready);
+  if (kit_button(cut_operation_ ? "Cutting..." : "Cut change", ButtonKind::primary)) {
+    cut_failure_ = {};
+    cut_operation_.emplace(std::async(
+        std::launch::async,
+        [path = repository_path(), message = cut_message_,
+         session = multiplayer_session_]() mutable {
+          return cut_change(path, std::move(message), session);
+        }));
+    request_repaint();
+  }
+  frame_layout_.controls["cut/submit"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    editor_focused_ = cut_restore_editor_focus_;
+    ImGui::CloseCurrentPopup();
+  }
+  frame_layout_.controls["cut/cancel"] = item_rectangle();
+  ImGui::EndPopup();
+}
+
+// The front door's dialogs (liquify#126) are laid out as lake's forms: supporting copy in the
+// secondary ink, each label above its full-width field, hints as captions under the field, and
+// the buttons at the bottom right with the one primary last.
+namespace {
+
+constexpr float front_door_dialog_width = 560.0F;
+
+void dialog_copy(const design::Palette &palette, const char *text) {
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + front_door_dialog_width);
+  ImGui::TextUnformatted(text);
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
+}
+
+void dialog_caption(const design::Palette &palette, const char *text) {
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + front_door_dialog_width);
+  ImGui::TextUnformatted(text);
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
+}
+
+// Puts the next buttons, whose widths are given, flush with the dialog's right edge.
+void dialog_buttons_right(std::initializer_list<const char *> labels) {
+  auto width = 0.0F;
+  for (const auto *label : labels) {
+    width += ImGui::CalcTextSize(label, nullptr, true).x + design::space3 * 2.0F;
+  }
+  width += design::space2 * static_cast<float>(labels.size() - 1);
+  ImGui::Dummy(ImVec2(0.0F, design::space2));
+  ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                       std::max(0.0F, front_door_dialog_width - width));
+}
+
+} // namespace
+
+void App::draw_clone_dialog() {
+  if (clone_dialog_open_) {
+    ImGui::OpenPopup("Clone from Lake");
+    clone_dialog_open_ = false;
+  }
+  const auto palette = effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(design::space6, design::space6));
+  const auto open = begin_dialog("Clone from Lake", ImGuiWindowFlags_AlwaysAutoResize);
+  ImGui::PopStyleVar();
+  if (!open) {
+    return;
+  }
+  dialog_copy(palette,
+              "Copy a repository from lake into a new folder on this computer. Paste its "
+              "address from the repository's page on lake.");
+  ImGui::Dummy(ImVec2(0.0F, design::space2));
+  ImGui::TextUnformatted("Lake repository address");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(front_door_dialog_width);
+  ImGui::InputTextWithHint("##clone-remote", "https://lake.example/v1/repositories/...",
+                           &clone_remote_);
+  frame_layout_.controls["clone/remote"] = item_rectangle();
+  ImGui::Dummy(ImVec2(0.0F, design::space1));
+  ImGui::TextUnformatted("New folder");
+  ImGui::SetNextItemWidth(front_door_dialog_width);
+  ImGui::InputTextWithHint("##clone-folder", "/Users/you/projects/name", &clone_path_);
+  frame_layout_.controls["clone/folder"] = item_rectangle();
+  dialog_caption(palette, "The folder must not exist yet, or be empty.");
+  dialog_buttons_right({"Cancel", "Clone"});
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  frame_layout_.controls["clone/cancel"] = item_rectangle();
+  ImGui::SameLine();
+  const auto ready = !clone_remote_.empty() && !clone_path_.empty();
+  ImGui::BeginDisabled(!ready);
+  if (kit_button("Clone", ButtonKind::primary)) {
+    begin_clone_repository(clone_remote_, clone_path_);
+    ImGui::CloseCurrentPopup();
+  }
+  frame_layout_.controls["clone/submit"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::EndPopup();
+}
+
+void App::begin_create_repository(std::filesystem::path path) {
+  if (repository_operation_) {
+    return;
+  }
+  first_run_.begin_open(path);
+  repository_operation_is_clone_ = false;
+  request_repaint();
+  repository_operation_.emplace(
+      std::async(std::launch::async, [path = std::move(path)] {
+        {
+          auto created =
+              liquid::runtime::block_on(liquid::repository::create(path));
+          if (!created) {
+            throw std::runtime_error(
+                created.error().code == liquid::errc::already_exists
+                    ? std::string{"this folder is already a liquid "
+                                  "repository; open it instead"}
+                    : without_absolute_paths(created.error().message, path));
+          }
+        }
+        return std::make_unique<RepositoryView>(RepositoryView::open(path));
+      }));
+}
+
+void App::draw_new_repository_dialog() {
+  if (new_repository_dialog_open_) {
+    ImGui::OpenPopup("New Repository");
+    new_repository_dialog_open_ = false;
+  }
+  const auto palette = effective_palette(applied_dark_theme_, applied_high_contrast_);
+  const auto center = ImGui::GetMainViewport()->GetCenter();
+  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(design::space6, design::space6));
+  const auto open = begin_dialog("New Repository", ImGuiWindowFlags_AlwaysAutoResize);
+  ImGui::PopStyleVar();
+  if (!open) {
+    return;
+  }
+  dialog_copy(palette,
+              "Start a liquid repository in a new or empty folder. Every save becomes a drip; "
+              "cut drips into changes and push them to lake when you are ready.");
+  ImGui::Dummy(ImVec2(0.0F, design::space2));
+  ImGui::TextUnformatted("Folder");
+  if (ImGui::IsWindowAppearing()) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  const auto choose_width =
+      ImGui::CalcTextSize("Choose...").x + design::space3 * 2.0F + design::space2;
+  ImGui::SetNextItemWidth(front_door_dialog_width - choose_width);
+  ImGui::InputTextWithHint("##new-repository-folder", "/Users/you/projects/name",
+                           &new_repository_path_);
+  frame_layout_.controls["new-repository/folder"] = item_rectangle();
+  ImGui::SameLine(0.0F, design::space2);
+  if (kit_button("Choose...", ButtonKind::secondary)) {
+    SDL_ShowOpenFolderDialog(
+        [](void *userdata, const char *const *files, int) {
+          auto *app = static_cast<App *>(userdata);
+          if (files != nullptr && files[0] != nullptr) {
+            app->new_repository_path_ = files[0];
+          }
+        },
+        this, window_, nullptr, false);
+  }
+  dialog_caption(palette, "The folder must be new, or empty.");
+  dialog_buttons_right({"Cancel", "Create repository"});
+  if (kit_button("Cancel", ButtonKind::secondary) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::SameLine();
+  ImGui::BeginDisabled(new_repository_path_.empty());
+  if (kit_button("Create repository", ButtonKind::primary)) {
+    begin_create_repository(new_repository_path_);
+    ImGui::CloseCurrentPopup();
+  }
+  frame_layout_.controls["new-repository/submit"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::EndPopup();
+}
+
+namespace {
+
+// A recent repository's last-change date, as lake shows times: "Today", "Yesterday",
+// "3 days ago", then the date. Anything that is not a YYYY-MM-DD date is shown as it is.
+auto relative_day(std::string_view value) -> std::string {
+  auto year = 0;
+  auto month = 0U;
+  auto day = 0U;
+  if (value.size() != 10 ||
+      std::sscanf(std::string(value).c_str(), "%d-%u-%u", &year, &month, &day) != 3) {
+    return std::string(value);
+  }
+  const auto date = std::chrono::year_month_day{
+      std::chrono::year{year}, std::chrono::month{month}, std::chrono::day{day}};
+  if (!date.ok()) {
+    return std::string(value);
+  }
+  const auto today = std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now());
+  const auto days = (today - std::chrono::sys_days{date}).count();
+  if (days == 0) {
+    return "Today";
+  }
+  if (days == 1) {
+    return "Yesterday";
+  }
+  if (days > 1 && days < 7) {
+    return std::to_string(days) + " days ago";
+  }
+  static constexpr std::array<const char *, 12> months{
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  auto text = std::string(months[month - 1]) + " " + std::to_string(day);
+  if (std::chrono::year_month_day{today}.year() != date.year()) {
+    text += ", " + std::to_string(year);
+  }
+  return text;
+}
+
+// Shortens text to a width with a trailing ellipsis, removing whole UTF-8 code points.
+auto fit_text(std::string value, float width) -> std::string {
+  if (ImGui::CalcTextSize(value.c_str()).x <= width) {
+    return value;
+  }
+  constexpr std::string_view ellipsis = "...";
+  while (!value.empty() &&
+         ImGui::CalcTextSize((value + std::string(ellipsis)).c_str()).x > width) {
+    auto last = value.size() - 1;
+    while (last > 0 && (static_cast<unsigned char>(value[last]) & 0xc0) == 0x80) {
+      --last;
+    }
+    value.resize(last);
+  }
+  return value + std::string(ellipsis);
+}
+
+auto font_of_size(float size) -> ImFont * {
+  for (auto *font : ImGui::GetIO().Fonts->Fonts) {
+    if (font->FontSize == size) {
+      return font;
+    }
+  }
+  return ImGui::GetFont();
+}
+
+// An icon on a 32-pixel tile: filled with `action` for the front door's primary way in, the
+// soft action tint for the others.
+void icon_tile(const design::Palette &palette, ShellIcon icon, ImVec2 origin, bool primary) {
+  auto *draw = ImGui::GetWindowDrawList();
+  const auto size = design::control_sm;
+  draw->AddRectFilled(origin, ImVec2(origin.x + size, origin.y + size),
+                      packed_color(primary ? palette.action : palette.action_soft),
+                      design::panel_radius);
+  ImGui::PushStyleColor(ImGuiCol_Text,
+                        imgui_color(primary ? design::Rgba{1.0F, 1.0F, 1.0F, 1.0F}
+                                            : palette.action));
+  draw_shell_icon(icon, ImVec2(origin.x + (size - icon_box) * 0.5F,
+                               origin.y + (size - icon_box) * 0.5F));
+  ImGui::PopStyleColor();
+}
+
+// liquify's mark: a white drop on an `action` tile, the way lake's mark sits in its top bar.
+void wordmark_tile(const design::Palette &palette, ImVec2 origin, float size) {
+  auto *draw = ImGui::GetWindowDrawList();
+  draw->AddRectFilled(origin, ImVec2(origin.x + size, origin.y + size),
+                      packed_color(palette.action), design::control_radius * 2.0F);
+  const auto white = IM_COL32_WHITE;
+  const auto cx = origin.x + size * 0.5F;
+  const auto radius = size * 0.22F;
+  const auto cy = origin.y + size * 0.6F;
+  draw->AddCircleFilled(ImVec2(cx, cy), radius, white, 24);
+  draw->AddTriangleFilled(ImVec2(cx, origin.y + size * 0.18F),
+                          ImVec2(cx - radius * 0.96F, cy - radius * 0.3F),
+                          ImVec2(cx + radius * 0.96F, cy - radius * 0.3F), white);
+}
+
+// A panel in lake's style: the surface role on the canvas, a hairline border and rounded corners.
+// Its contents are drawn first on a channel above the background, so the panel takes its height
+// from them in the same frame (a child window would size itself a frame late).
+struct FrontDoorPanel {
+  ImDrawListSplitter splitter;
+  ImVec2 origin;
+  float width{};
+  ImVec2 padding;
+};
+
+void begin_front_door_panel(FrontDoorPanel &panel, float width, ImVec2 padding) {
+  panel.origin = ImGui::GetCursorScreenPos();
+  panel.width = width;
+  panel.padding = padding;
+  panel.splitter.Split(ImGui::GetWindowDrawList(), 2);
+  panel.splitter.SetCurrentChannel(ImGui::GetWindowDrawList(), 1);
+  ImGui::SetCursorScreenPos(ImVec2(panel.origin.x + padding.x, panel.origin.y + padding.y));
+  ImGui::BeginGroup();
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width - padding.x * 2.0F);
+}
+
+void end_front_door_panel(FrontDoorPanel &panel, const design::Palette &palette,
+                          bool high_contrast) {
+  ImGui::PopTextWrapPos();
+  ImGui::EndGroup();
+  const auto bottom = ImGui::GetItemRectMax().y + panel.padding.y;
+  auto *draw = ImGui::GetWindowDrawList();
+  panel.splitter.SetCurrentChannel(draw, 0);
+  const auto max = ImVec2(panel.origin.x + panel.width, bottom);
+  draw->AddRectFilled(panel.origin, max, packed_color(palette.surface), design::panel_radius);
+  panel.splitter.Merge(draw);
+  // The border goes over the contents, so a table's header row cannot cover it.
+  draw->AddRect(panel.origin, max,
+                packed_color(high_contrast ? palette.border_strong : palette.border_subtle),
+                design::panel_radius);
+  ImGui::SetCursorScreenPos(panel.origin);
+  ImGui::Dummy(ImVec2(panel.width, bottom - panel.origin.y));
+}
+
+} // namespace
+
+// The front door (liquify#126), laid out as lake's pages are: on the canvas, a column with the
+// mark, an eyebrow, one title and its copy, then the ways in as large rows in a panel, with the
+// identity and a new window as quiet actions under it; beside it, Recent Repositories as a
+// compact table in a panel, or an empty state that says what will appear and how to start.
+void App::draw_welcome() {
+  const auto palette = effective_palette(applied_dark_theme_, applied_high_contrast_);
+  {
+    const auto min = ImGui::GetWindowPos();
+    const auto size = ImGui::GetWindowSize();
+    ImGui::GetWindowDrawList()->AddRectFilled(min, ImVec2(min.x + size.x, min.y + size.y),
+                                              packed_color(palette.canvas));
+  }
+  const auto available = ImGui::GetContentRegionAvail();
+  const auto margin = available.x >= 900.0F ? design::space8 * 1.5F : design::space6;
+  const auto content_width = std::min(available.x - margin * 2.0F, 1180.0F);
+  const auto left_x = std::max((available.x - content_width) * 0.5F, margin);
+  const auto stacked = content_width < 760.0F;
+  const auto gutter = design::space8 + design::space2;
+  const auto column_width =
+      stacked ? content_width : std::clamp(content_width * 0.36F, 340.0F, 420.0F);
+  const auto recent_width = stacked ? content_width : content_width - column_width - gutter;
+
+  // The block is centred vertically while it fits, from last frame's height.
+  auto *storage = ImGui::GetStateStorage();
+  const auto height_key = ImGui::GetID("front-door/content-height");
+  const auto last_height = storage->GetFloat(height_key, 0.0F);
+  const auto top = std::max(design::space8 + design::space2,
+                            last_height > 0.0F ? (available.y - last_height) * 0.4F : 0.0F);
+  ImGui::SetCursorPos(ImVec2(left_x, top));
+  const auto block_top = ImGui::GetCursorScreenPos().y;
+
+  const auto transparent = ImVec4(0.0F, 0.0F, 0.0F, 0.0F);
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, transparent);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  // The columns are transparent child windows so wrapped text stops at their edge. They are as
+  // tall as the page below the block's top, or as their content was last frame.
+  const auto column_height =
+      std::max({available.y - top, last_height, 1.0F});
+  ImGui::BeginChild("front-door/column", ImVec2(column_width, column_height),
+                    ImGuiChildFlags_None,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(design::space2, design::space2));
+
+  // The mark and the product name, then lake's heading block: eyebrow, title, copy.
+  {
+    const auto origin = ImGui::GetCursorScreenPos();
+    const auto mark = design::space6;
+    wordmark_tile(palette, origin, mark);
+    ImGui::SetCursorScreenPos(ImVec2(origin.x + mark + design::space2, origin.y));
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[section_font_index_]);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (mark - ImGui::GetTextLineHeight()) * 0.5F);
+    ImGui::TextUnformatted("liquify");
+    ImGui::PopFont();
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + mark + design::space6));
+  }
+  ImGui::PushFont(font_of_size(design::text12));
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+  ImGui::TextUnformatted("THE IDE FOR LIQUID");
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  frame_layout_.controls["welcome/eyebrow"] = item_rectangle();
+  type_title("Welcome to liquify", "welcome/title");
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::PushTextWrapPos(0.0F);
+  ImGui::TextUnformatted(
+      "Build software locally. Collaborate through lake when it is reachable.");
+  ImGui::PopTextWrapPos();
+  frame_layout_.controls["welcome/copy"] = item_rectangle();
+  ImGui::PopStyleColor();
+  ImGui::Dummy(ImVec2(0.0F, design::space2));
 
   const auto phase = first_run_.phase();
   if (phase == RepositoryLifecyclePhase::unreadable) {
-    ImGui::TextUnformatted("Repository could not be opened");
-    ImGui::TextWrapped("%s", first_run_.pending_path().string().c_str());
-    ImGui::TextWrapped("%s", first_run_.error().c_str());
-    if (ImGui::Button("Retry")) {
+    draw_user_error(
+        {.kind = FailureKind::local,
+         .summary = "This folder could not be opened as a repository",
+         .next_step = "Retry, or choose another folder.",
+         .details = without_absolute_paths(first_run_.error(), first_run_.pending_path())},
+        "open-failure");
+    ImGui::TextDisabled("%s", fit_text(first_run_.pending_path().string(), column_width).c_str());
+    if (kit_button("Retry", ButtonKind::primary)) {
       begin_open_repository(first_run_.pending_path());
     }
     ImGui::SameLine();
-    if (ImGui::Button("Choose another folder")) {
+    if (kit_button("Choose another folder", ButtonKind::secondary)) {
       show_folder_dialog();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Back")) {
+    if (kit_button("Back", ButtonKind::quiet)) {
       first_run_.return_to_welcome();
     }
-    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0F, design::space2));
   } else if (phase == RepositoryLifecyclePhase::offline ||
              phase == RepositoryLifecyclePhase::failed) {
-    ImGui::TextUnformatted(phase == RepositoryLifecyclePhase::offline
-                               ? "Lake is unreachable - offline is normal"
-                               : "Repository was not cloned");
-    ImGui::TextWrapped("%s", first_run_.error().c_str());
-    if (ImGui::Button("Retry clone")) {
-      begin_clone_repository(first_run_.clone_remote(),
-                             first_run_.pending_path());
+    draw_user_error(first_run_.clone_failure(), "clone-failure");
+    if (kit_button("Retry clone", ButtonKind::primary)) {
+      begin_clone_repository(first_run_.clone_remote(), first_run_.pending_path());
     }
+    frame_layout_.controls["clone-failure/retry"] = item_rectangle();
     ImGui::SameLine();
-    if (ImGui::Button("Back")) {
+    if (kit_button("Back", ButtonKind::quiet)) {
       first_run_.return_to_welcome();
     }
-    ImGui::Separator();
+    frame_layout_.controls["clone-failure/back"] = item_rectangle();
+    ImGui::Dummy(ImVec2(0.0F, design::space2));
   } else if (phase == RepositoryLifecyclePhase::opening ||
              phase == RepositoryLifecyclePhase::cloning) {
     ImGui::TextUnformatted(phase == RepositoryLifecyclePhase::opening
                                ? "Opening repository..."
                                : "Cloning repository...");
-    ImGui::TextDisabled("%s", first_run_.pending_path().string().c_str());
-    ImGui::Separator();
+    ImGui::TextDisabled("%s", fit_text(first_run_.pending_path().string(), column_width).c_str());
+    ImGui::Dummy(ImVec2(0.0F, design::space2));
   }
 
-  ImGui::BeginDisabled(repository_operation_.has_value());
-  if (ImGui::Button("Open folder", ImVec2(150.0F, 38.0F))) {
-    show_folder_dialog();
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Clone from lake", ImVec2(150.0F, 38.0F))) {
-    clone_dialog_open_ = true;
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("New window", ImVec2(150.0F, 38.0F))) {
-    open_new_window();
+  // The ways in: one panel of large rows. Open a folder is the front door's primary action, so
+  // its tile is the filled one.
+  const auto busy = repository_operation_.has_value();
+  auto actions_panel = FrontDoorPanel{};
+  begin_front_door_panel(actions_panel, column_width, ImVec2(0.0F, 0.0F));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0F, 0.0F));
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, imgui_color(palette.layer_hover));
+  ImGui::PushStyleColor(ImGuiCol_HeaderActive, imgui_color(palette.selected));
+  struct Way {
+    const char *id;
+    const char *label;
+    const char *description;
+    ShellIcon icon;
+    bool primary;
+  };
+  const auto ways = std::array{
+      Way{"front-door/open", "Open a folder", "Work in a liquid repository on this computer.",
+          ShellIcon::folder, true},
+      Way{"front-door/new", "New repository", "Start one in a new or empty folder.",
+          ShellIcon::new_folder, false},
+      Way{"front-door/clone", "Clone from lake", "Copy a repository from lake to this computer.",
+          ShellIcon::clone, false},
+  };
+  const auto row_height = design::control_lg + design::space4;
+  ImGui::BeginDisabled(busy);
+  for (std::size_t index = 0; index < ways.size(); ++index) {
+    const auto &way = ways[index];
+    const auto origin = ImGui::GetCursorScreenPos();
+    const auto width = column_width;
+    ImGui::PushID(way.id);
+    const auto clicked =
+        ImGui::Selectable("##way", false, ImGuiSelectableFlags_None, ImVec2(width, row_height));
+    const auto hovered = ImGui::IsItemHovered();
+    frame_layout_.controls[way.id] = item_rectangle();
+    ImGui::PopID();
+    if (hovered) {
+      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    }
+    auto *draw = ImGui::GetWindowDrawList();
+    const auto tile_y = origin.y + (row_height - design::control_sm) * 0.5F;
+    icon_tile(palette, way.icon, ImVec2(origin.x + design::space4, tile_y), way.primary);
+    const auto text_x = origin.x + design::space4 + design::control_sm + design::space3;
+    const auto line = ImGui::GetTextLineHeight();
+    const auto text_y = origin.y + (row_height - line * 2.0F - design::space1) * 0.5F;
+    const auto label_color = busy ? palette.text_disabled
+                             : way.primary ? palette.action
+                                           : palette.text_primary;
+    draw->AddText(ImVec2(text_x, text_y), packed_color(label_color), way.label);
+    const auto description_width = origin.x + width - design::space4 - text_x;
+    draw->AddText(ImVec2(text_x, text_y + line + design::space1),
+                  packed_color(palette.text_secondary),
+                  fit_text(way.description, description_width).c_str());
+    if (index + 1 < ways.size()) {
+      draw->AddLine(ImVec2(origin.x, origin.y + row_height - 0.5F),
+                    ImVec2(origin.x + width, origin.y + row_height - 0.5F),
+                    packed_color(applied_high_contrast_ ? palette.border_strong
+                                                        : palette.border_subtle));
+    }
+    if (!clicked) {
+      continue;
+    }
+    if (index == 0) {
+      show_folder_dialog();
+    } else if (index == 1) {
+      new_repository_dialog_open_ = true;
+    } else {
+      clone_dialog_open_ = true;
+      clone_remote_.clear();
+      clone_path_.clear();
+    }
   }
   ImGui::EndDisabled();
-  ImGui::Spacing();
+  ImGui::PopStyleColor(2);
+  ImGui::PopStyleVar();
+  end_front_door_panel(actions_panel, palette, applied_high_contrast_);
 
+  // Quiet secondary actions. Your identity is this computer's own signing identity (TAAP), not
+  // a lake account: it signs every drip and change. Signing in to a lake comes with choosing
+  // one (liquify#96).
+  ImGui::Dummy(ImVec2(0.0F, design::space1));
+  // Quiet buttons with a leading stroke icon: the label reserves the icon's room.
+  const auto quiet_label = [](const char *label) {
+    return icon_label(label, design::space2, design::space2);
+  };
+  const auto quiet_icon = [&](ShellIcon icon) {
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+    item_icon(icon, design::space2);
+    ImGui::PopStyleColor();
+  };
   if (first_run_.session()) {
-    if (ImGui::SmallButton("Signed in to lake")) {
+    if (kit_button(quiet_label("Your identity##identity").c_str(), ButtonKind::quiet,
+                   ButtonSize::compact)) {
       ImGui::OpenPopup("identity-details");
     }
+    quiet_icon(ShellIcon::key);
+    frame_layout_.controls["front-door/identity"] = item_rectangle();
     if (ImGui::BeginPopup("identity-details")) {
+      ImGui::TextUnformatted("This computer signs your drips and changes with this identity.");
       identifier_detail("Identity", first_run_.session()->actor);
+      ImGui::TextDisabled("Key custody: %s", first_run_.session()->custody.c_str());
+      if (kit_button("Forget", ButtonKind::secondary, ButtonSize::compact)) {
+        first_run_.sign_out();
+        persist_first_run();
+        ImGui::CloseCurrentPopup();
+      }
       ImGui::EndPopup();
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("Local custody available");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Sign out")) {
-      first_run_.sign_out();
-      persist_first_run();
     }
   } else {
     ImGui::BeginDisabled(identity_operation_.has_value());
-    if (ImGui::Button(identity_operation_ ? "Signing in..."
-                                          : "Sign in to lake")) {
+    if (kit_button(quiet_label(identity_operation_ ? "Reading your identity...##identity"
+                                                   : "Your identity##identity")
+                       .c_str(),
+                   ButtonKind::quiet, ButtonSize::compact)) {
       begin_sign_in();
     }
+    quiet_icon(ShellIcon::key);
+    frame_layout_.controls["front-door/identity"] = item_rectangle();
     ImGui::EndDisabled();
   }
+  ImGui::SameLine(0.0F, design::space1);
+  ImGui::BeginDisabled(busy);
+  if (kit_button(quiet_label("New window").c_str(), ButtonKind::quiet, ButtonSize::compact)) {
+    open_new_window();
+  }
+  quiet_icon(ShellIcon::window);
+  frame_layout_.controls["front-door/new-window"] = item_rectangle();
+  ImGui::EndDisabled();
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+  ImGui::SetCursorPosX(ImGui::GetCursorPosX() + design::space2);
+  ImGui::PushTextWrapPos(0.0F);
+  ImGui::TextUnformatted(first_run_.session()
+                             ? "Your identity signs your drips and changes on this computer."
+                             : "Your identity is the key this computer signs your work with.");
+  ImGui::PopTextWrapPos();
+  ImGui::PopStyleColor();
   if (!identity_error_.empty()) {
-    ImGui::TextWrapped("Could not establish a session: %s",
-                       identity_error_.c_str());
+    draw_user_error({.kind = FailureKind::local,
+                     .summary = "Your identity could not be read",
+                     .next_step = "Try again. liquid keeps the key in this "
+                                  "computer's credential store.",
+                     .details = without_absolute_paths(identity_error_)},
+                    "identity-failure");
   }
-
-  ImGui::Spacing();
-  ImGui::SeparatorText("Recent repositories");
-  if (first_run_.recent().empty()) {
-    ImGui::TextDisabled("Repositories you open will appear here.");
-  } else if (ImGui::BeginTable("recent-repositories", 4,
-                               ImGuiTableFlags_RowBg |
-                                   ImGuiTableFlags_BordersInnerH |
-                                   ImGuiTableFlags_SizingStretchProp)) {
-    ImGui::TableSetupColumn("Repository", ImGuiTableColumnFlags_WidthStretch,
-                            1.4F);
-    ImGui::TableSetupColumn("Last change", ImGuiTableColumnFlags_WidthStretch,
-                            2.2F);
-    ImGui::TableSetupColumn("Branch", ImGuiTableColumnFlags_WidthStretch, 1.0F);
-    ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 86.0F);
-    ImGui::TableHeadersRow();
-    for (const auto &recent : first_run_.recent()) {
-      ImGui::PushID(recent.path.string().c_str());
-      ImGui::TableNextRow();
-      ImGui::TableSetColumnIndex(0);
-      if (ImGui::Selectable(recent.name.c_str(), false,
-                            ImGuiSelectableFlags_SpanAllColumns)) {
-        begin_open_repository(recent.path);
-      }
-      ImGui::TextDisabled("%s", recent.path.string().c_str());
-      ImGui::TableSetColumnIndex(1);
-      if (recent.last_change.starts_with("blake3:")) {
-        if (ImGui::SmallButton("Change details")) {
-          ImGui::OpenPopup("recent-change");
-        }
-        if (ImGui::BeginPopup("recent-change")) {
-          identifier_detail("Change", recent.last_change);
-          ImGui::EndPopup();
-        }
-      } else {
-        detail_text(recent.last_change);
-      }
-      ImGui::TextDisabled("%s", recent.last_changed_at.c_str());
-      ImGui::TableSetColumnIndex(2);
-      ImGui::TextUnformatted(recent.branch.c_str());
-      ImGui::TableSetColumnIndex(3);
-      if (ImGui::SmallButton("New window")) {
-        open_new_window(recent.path);
-      }
-      ImGui::PopID();
-    }
-    ImGui::EndTable();
-  }
+  auto block_bottom = ImGui::GetCursorScreenPos().y;
+  ImGui::PopStyleVar();
   ImGui::EndChild();
+
+  // Recent Repositories, beside the column (under it in a narrow window).
+  if (stacked) {
+    ImGui::SetCursorScreenPos(
+        ImVec2(ImGui::GetWindowPos().x + left_x, block_bottom + design::space4));
+  } else {
+    ImGui::SetCursorScreenPos(
+        ImVec2(ImGui::GetWindowPos().x + left_x + column_width + gutter, block_top));
+  }
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, transparent);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  ImGui::BeginChild("front-door/recent", ImVec2(recent_width, column_height), ImGuiChildFlags_None,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(design::space2, design::space2));
+  // Align the heading with the column's title block rather than its mark.
+  if (!stacked) {
+    ImGui::Dummy(ImVec2(0.0F, design::space6 + design::space6 - design::space2));
+  }
+  type_heading("Recent Repositories", "welcome/recent-heading");
+  const auto &recent = first_run_.recent();
+  ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+  ImGui::TextUnformatted(recent.empty() ? "Nothing opened on this computer yet."
+                                        : "Newest first. Click one to open it here.");
+  ImGui::PopStyleColor();
+  ImGui::Dummy(ImVec2(0.0F, design::space1));
+
+  if (recent.empty()) {
+    auto empty_panel = FrontDoorPanel{};
+    begin_front_door_panel(empty_panel, recent_width, ImVec2(design::space6, design::space8));
+    const auto width = recent_width - design::space6 * 2.0F;
+    const auto centred = [&](const char *text, design::Rgba color) {
+      const auto size = ImGui::CalcTextSize(text, nullptr, false, width);
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0F, (width - size.x) * 0.5F));
+      ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(color));
+      ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + size.x + 1.0F);
+      ImGui::TextUnformatted(text);
+      ImGui::PopTextWrapPos();
+      ImGui::PopStyleColor();
+    };
+    {
+      const auto origin = ImGui::GetCursorScreenPos();
+      icon_tile(palette, ShellIcon::folder,
+                ImVec2(origin.x + (width - design::control_sm) * 0.5F, origin.y), false);
+      ImGui::Dummy(ImVec2(width, design::control_sm + design::space2));
+    }
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[section_font_index_]);
+    centred("No recent repositories", palette.text_primary);
+    ImGui::PopFont();
+    frame_layout_.controls["front-door/recent-empty"] = item_rectangle();
+    centred("Repositories you open, create or clone appear here, so you can come back to them "
+            "in one click.",
+            palette.text_secondary);
+    centred("Open a folder that holds a liquid repository, or clone one from lake, to start.",
+            palette.text_secondary);
+    ImGui::Dummy(ImVec2(0.0F, design::space2));
+    {
+      ImGui::PushFont(editor_font_index_ >= 0 ? ImGui::GetIO().Fonts->Fonts[editor_font_index_]
+                                              : ImGui::GetFont());
+      constexpr const char *command = "liquify ~/projects/name";
+      const auto size = ImGui::CalcTextSize(command);
+      const auto origin = ImGui::GetCursorScreenPos();
+      const auto x = origin.x + std::max(0.0F, (width - size.x) * 0.5F);
+      ImGui::GetWindowDrawList()->AddRectFilled(
+          ImVec2(x - design::space2, origin.y),
+          ImVec2(x + size.x + design::space2, origin.y + size.y + design::space2),
+          packed_color(palette.layer), design::control_radius);
+      ImGui::GetWindowDrawList()->AddText(ImVec2(x, origin.y + design::space1),
+                                          packed_color(palette.text_primary), command);
+      ImGui::Dummy(ImVec2(width, size.y + design::space2));
+      ImGui::PopFont();
+    }
+    centred("From a terminal, the same opens a repository directly.", palette.text_tertiary);
+    end_front_door_panel(empty_panel, palette, applied_high_contrast_);
+  } else {
+    auto list_panel = FrontDoorPanel{};
+    begin_front_door_panel(list_panel, recent_width, ImVec2(0.0F, 0.0F));
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(design::space4, design::space2));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, imgui_color(palette.layer_hover));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, imgui_color(palette.selected));
+    ImGui::PushStyleColor(ImGuiCol_TableBorderLight,
+                          imgui_color(applied_high_contrast_ ? palette.border_strong
+                                                             : palette.border_subtle));
+    const auto new_window_label = "Open in new window";
+    const auto action_width =
+        ImGui::CalcTextSize(new_window_label).x + design::space2 * 2.0F;
+    if (ImGui::BeginTable("recent-repositories", 5,
+                          ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp |
+                              ImGuiTableFlags_PadOuterX,
+                          ImVec2(recent_width, 0.0F))) {
+      ImGui::TableSetupColumn("Repository", ImGuiTableColumnFlags_WidthStretch, 1.3F);
+      ImGui::TableSetupColumn("Branch", ImGuiTableColumnFlags_WidthStretch, 0.9F);
+      ImGui::TableSetupColumn("Last change", ImGuiTableColumnFlags_WidthStretch, 1.6F);
+      ImGui::TableSetupColumn("Updated", ImGuiTableColumnFlags_WidthFixed,
+                              ImGui::CalcTextSize("Yesterday__").x);
+      ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, action_width);
+      table_headers(palette, frame_layout_, "recent-repositories");
+      const auto line = ImGui::GetTextLineHeight();
+      const auto row_content = line + design::space3 * 2.0F - design::space2 * 2.0F;
+      const auto centre_text = [&] {
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (row_content - line) * 0.5F);
+      };
+      auto *table = ImGui::GetCurrentTable();
+      ImGui::BeginDisabled(busy);
+      for (const auto &entry : recent) {
+        ImGui::PushID(entry.path.string().c_str());
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        const auto origin = ImGui::GetCursorScreenPos();
+        const auto clicked = ImGui::Selectable(
+            "##row", false,
+            ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap,
+            ImVec2(0.0F, row_content));
+        const auto row_min = ImGui::GetItemRectMin();
+        const auto row_max = ImGui::GetItemRectMax();
+        if (ImGui::IsItemHovered()) {
+          ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+          ImGui::SetTooltip("%s", entry.path.string().c_str());
+        }
+        frame_layout_.controls["front-door/recent/" + entry.name] = item_rectangle();
+        if (clicked) {
+          begin_open_repository(entry.path);
+        }
+        const auto row_hovered =
+            !busy && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+            ImGui::IsMouseHoveringRect(
+                ImVec2(table != nullptr ? table->OuterRect.Min.x : row_min.x,
+                       row_min.y - design::space2),
+                ImVec2(table != nullptr ? table->OuterRect.Max.x : row_max.x,
+                       row_max.y + design::space2),
+                false);
+        const auto column = ImGui::GetContentRegionAvail().x;
+        ImGui::SetCursorScreenPos(
+            ImVec2(origin.x, origin.y + (row_content - icon_box) * 0.5F));
+        ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+        draw_shell_icon(ShellIcon::folder, ImGui::GetCursorScreenPos());
+        ImGui::PopStyleColor();
+        ImGui::SetCursorScreenPos(ImVec2(origin.x + icon_box + design::space2,
+                                         origin.y + (row_content - line) * 0.5F));
+        ImGui::TextUnformatted(
+            fit_text(entry.name, column - icon_box - design::space2).c_str());
+
+        ImGui::TableSetColumnIndex(1);
+        centre_text();
+        {
+          const auto at = ImGui::GetCursorScreenPos();
+          ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+          draw_shell_icon(ShellIcon::branch, ImVec2(at.x, at.y + (line - icon_box) * 0.5F));
+          ImGui::PopStyleColor();
+          ImGui::SetCursorScreenPos(ImVec2(at.x + icon_box + design::space1, at.y));
+          ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_secondary));
+          ImGui::TextUnformatted(
+              fit_text(entry.branch,
+                       ImGui::GetContentRegionAvail().x)
+                  .c_str());
+          ImGui::PopStyleColor();
+        }
+
+        ImGui::TableSetColumnIndex(2);
+        centre_text();
+        // The UI atlas has no U+2026 glyph, so the shortened identifier ends in three dots.
+        auto change = compact_identifiers(entry.last_change);
+        constexpr std::string_view unsupported = "\u2026";
+        for (auto at = change.find(unsupported); at != std::string::npos;
+             at = change.find(unsupported)) {
+          change.replace(at, unsupported.size(), "...");
+        }
+        ImGui::TextUnformatted(fit_text(change, ImGui::GetContentRegionAvail().x).c_str());
+        if (ImGui::IsItemHovered() && change != entry.last_change) {
+          ImGui::SetTooltip("%s", entry.last_change.c_str());
+        }
+
+        ImGui::TableSetColumnIndex(3);
+        centre_text();
+        ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+        ImGui::TextUnformatted(relative_day(entry.last_changed_at).c_str());
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered() && !entry.last_changed_at.empty()) {
+          ImGui::SetTooltip("Last change %s", entry.last_changed_at.c_str());
+        }
+
+        ImGui::TableSetColumnIndex(4);
+        if (row_hovered) {
+          ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (row_content - design::space6) * 0.5F);
+          if (kit_button(new_window_label, ButtonKind::quiet, ButtonSize::compact)) {
+            open_new_window(entry.path);
+          }
+          frame_layout_.controls["front-door/recent/" + entry.name + "/new-window"] =
+              item_rectangle();
+        }
+        ImGui::PopID();
+      }
+      ImGui::EndDisabled();
+      ImGui::EndTable();
+    }
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
+    end_front_door_panel(list_panel, palette, applied_high_contrast_);
+    ImGui::PushStyleColor(ImGuiCol_Text, imgui_color(palette.text_tertiary));
+    ImGui::TextUnformatted("Hover a repository for its folder. liquify keeps the last eight.");
+    ImGui::PopStyleColor();
+  }
+  block_bottom = std::max(block_bottom, ImGui::GetCursorScreenPos().y);
+  ImGui::PopStyleVar();
+  ImGui::EndChild();
+  storage->SetFloat(height_key, block_bottom - block_top);
+  ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, block_bottom));
+  ImGui::Dummy(ImVec2(0.0F, design::space8));
+
   draw_clone_dialog();
+  draw_new_repository_dialog();
 }
 
 void App::draw_status_bar() {
   const auto graph =
       editor_graph_ ? editor_graph_->snapshot() : EditorGraphSnapshot{};
-  if (!ImGui::BeginTable("status", 3, ImGuiTableFlags_SizingStretchProp)) {
-    return;
-  }
-  ImGui::TableSetupColumn("Repository", ImGuiTableColumnFlags_WidthStretch,
-                          1.0F);
-  ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 1.4F);
-  ImGui::TableSetupColumn("Position and details",
-                          ImGuiTableColumnFlags_WidthFixed, 190.0F);
-  ImGui::TableNextRow();
-  ImGui::TableSetColumnIndex(0);
-  const auto name = repository_ ? repository_->name() : std::string{"liquify"};
-  if (ImGui::SmallButton(name.c_str()) && repository_) {
-    first_run_.return_to_welcome();
-  }
-  if (repository_ && !repository_->branch().empty()) {
-    ImGui::SameLine();
-    ImGui::TextUnformatted(std::string(repository_->branch()).c_str());
-  }
-  ImGui::TableSetColumnIndex(1);
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  // One measured row (liquify#36). When the width runs out, segments give way in priority order:
+  // Details and a failure stay, then the repository, the cursor position and the branch; plain
+  // status text and collaborators elide first.
+  const auto spacing = ImGui::GetStyle().ItemSpacing.x;
+  const auto button_width = [](const std::string &label) {
+    return ImGui::CalcTextSize(label.c_str(), nullptr, true).x + design::space2 * 2.0F;
+  };
+  const auto text_width = [](const std::string &text) {
+    return ImGui::CalcTextSize(text.c_str()).x;
+  };
+  const auto failure = (editor_ && !editor_->error().empty()) || graph.build_running ||
+                               sync_was_running_ || hydration_was_running_
+                           ? std::optional<StatusFailure>{}
+                           : status_failure(graph);
   auto state = std::string{};
+  auto essential_state = false;
   if (editor_ && !editor_->error().empty()) {
     state = editor_->error();
+    essential_state = true;
   } else if (graph.build_running) {
     state = "Building…";
   } else if (sync_was_running_) {
     state = "Syncing…";
   } else if (hydration_was_running_) {
     state = "Loading files…";
-  } else if (!editor_status_.empty()) {
+  } else if (!failure && !editor_status_.empty()) {
     state = editor_status_;
-  } else if (!graph.query_error.empty()) {
-    state = "Operation failed · see Diagnostics";
-  } else if (repository_ && repository_->offline() &&
+  } else if (!failure && repository_ && repository_->offline() &&
              repository_->pending_uploads() > 0) {
     state = "Offline · saved changes waiting to sync";
   }
   if (!state.empty()) {
-    auto visible = compact_identifiers(state);
-    const auto width = ImGui::GetContentRegionAvail().x;
-    while (visible.size() > 4 &&
-           ImGui::CalcTextSize(visible.c_str()).x > width) {
-      // Remove a complete UTF-8 code point before appending the ellipsis.
-      auto last = visible.size() - 1;
-      while (last > 0 &&
-             (static_cast<unsigned char>(visible[last]) & 0xc0) == 0x80) {
-        --last;
-      }
-      visible.resize(last);
-    }
-    ImGui::TextUnformatted(visible.c_str());
-    if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("%s", state.c_str());
-    }
-  } else if (multiplayer_) {
+    state = compact_identifiers(without_absolute_paths(state, repository_path()));
+  }
+  auto collaborators = std::string{};
+  if (state.empty() && !failure && multiplayer_) {
     const auto others = std::ranges::count_if(
         multiplayer_->presence, [this](const auto &value) {
           return value.session != multiplayer_session_;
         });
     if (others > 0) {
-      const auto label = std::to_string(others) + " collaborating";
-      if (ImGui::SmallButton(label.c_str())) {
-        panels_.focus(PanelId::multiplayer);
-        shell_state_.sidebar_visible = true;
-        persist_shell_state();
-      }
+      collaborators = std::to_string(others) + " collaborating";
     }
   }
-  ImGui::TableSetColumnIndex(2);
+  const auto failure_text =
+      failure ? failure->summary + " · Open " +
+                    std::string(panels_.descriptor(failure->panel).title)
+              : std::string{};
+  const auto name = repository_ ? repository_->name() : std::string{"liquify"};
+  const auto branch = repository_ ? std::string(repository_->branch()) : std::string{};
+  auto position = std::string{};
   if (editor_) {
     const auto cursor = editor_->cursor();
-    ImGui::TextDisabled("Ln %zu:%zu", cursor.line + 1, cursor.byte + 1);
+    position = std::format("Ln {}:{}", cursor.line + 1, cursor.byte + 1);
+  }
+
+  const auto start_x = ImGui::GetCursorPosX();
+  const auto available = ImGui::GetContentRegionAvail().x;
+  const auto details_width = button_width("Details");
+  const auto minimum = button_width("W...");
+  auto remaining = available - details_width;
+  const auto take = [&](float wanted) {
+    const auto width = std::min(wanted, remaining - spacing);
+    if (width < std::min(wanted, minimum)) {
+      return 0.0F;
+    }
+    remaining -= width + spacing;
+    return width;
+  };
+  const auto middle_wanted = failure ? button_width(failure_text)
+                             : !state.empty() ? text_width(state)
+                             : !collaborators.empty() ? button_width(collaborators)
+                                                      : 0.0F;
+  const auto middle_essential = failure.has_value() || essential_state;
+  auto middle_width = middle_essential && middle_wanted > 0.0F ? take(middle_wanted) : 0.0F;
+  const auto name_width = take(button_width(name));
+  if (!middle_essential && middle_wanted > 0.0F) {
+    middle_width = take(middle_wanted);
+  }
+  const auto position_width =
+      !position.empty() && remaining >= text_width(position) + spacing ? take(text_width(position))
+                                                                       : 0.0F;
+  const auto branch_width =
+      !branch.empty() && remaining >= text_width(branch) + spacing ? take(text_width(branch))
+                                                                   : 0.0F;
+
+  ImGui::AlignTextToFramePadding();
+  auto drawn = false;
+  const auto next = [&drawn] {
+    if (drawn) {
+      ImGui::SameLine();
+    }
+    drawn = true;
+  };
+  const auto elided_button = [&](const std::string &text, float width, const char *id,
+                                 ButtonKind kind = ButtonKind::quiet) {
+    const auto visible = fit_text(text, width - design::space2 * 2.0F);
+    const auto clicked =
+        kit_button((visible + "##" + id).c_str(), kind, ButtonSize::compact);
+    if (visible != text && ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("%s", text.c_str());
+    }
+    frame_layout_.controls[std::string("status/") + id] = item_rectangle();
+    frame_layout_.labels[std::string("status/") + id] = visible;
+    return clicked;
+  };
+  if (name_width > 0.0F) {
+    next();
+    if (elided_button(name, name_width, "repository") && repository_) {
+      first_run_.return_to_welcome();
+    }
+  }
+  if (branch_width > 0.0F) {
+    next();
+    ImGui::TextUnformatted(branch.c_str());
+  }
+  if (middle_width > 0.0F) {
+    // The state starts where the old middle column did when there is room for it.
+    const auto column = start_x + std::max(0.0F, available - 190.0F) / 2.4F;
+    next();
+    if (ImGui::GetCursorPosX() < column &&
+        column + middle_width <= start_x + available - details_width - position_width) {
+      ImGui::SetCursorPosX(column);
+    }
+    if (failure) {
+      if (elided_button(failure_text, middle_width, "failure", ButtonKind::quiet_danger)) {
+        panels_.focus(failure->panel);
+        if (panels_.layout(failure->panel).placement == PanelPlacement::sidebar) {
+          shell_state_.sidebar_visible = true;
+        } else {
+          shell_state_.bottom_panel_visible = true;
+        }
+        persist_shell_state();
+      }
+    } else if (!state.empty()) {
+      const auto visible = fit_text(state, middle_width);
+      ImGui::TextUnformatted(visible.c_str());
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s", state.c_str());
+      }
+      frame_layout_.controls["status/state"] = item_rectangle();
+      frame_layout_.labels["status/state"] = visible;
+    } else if (elided_button(collaborators, middle_width, "collaborators")) {
+      panels_.focus(PanelId::multiplayer);
+      shell_state_.sidebar_visible = true;
+      persist_shell_state();
+    }
+  }
+  // Position and Details sit at the right edge.
+  const auto right = start_x + available - details_width -
+                     (position_width > 0.0F ? position_width + spacing : 0.0F);
+  if (drawn) {
+    ImGui::SameLine(right);
+  } else {
+    ImGui::SetCursorPosX(right);
+  }
+  if (position_width > 0.0F) {
+    ImGui::TextDisabled("%s", position.c_str());
+    frame_layout_.controls["status/position"] = item_rectangle();
     ImGui::SameLine();
   }
-  if (ImGui::SmallButton("Details")) {
+  if (kit_button("Details", ButtonKind::quiet, ButtonSize::compact)) {
     ImGui::OpenPopup("status-details");
   }
+  frame_layout_.controls["status/details"] = item_rectangle();
   if (ImGui::BeginPopup("status-details")) {
     if (ImGui::MenuItem("Repository diagnostics")) {
       repository_details_open_ = true;
@@ -6937,12 +9468,77 @@ void App::draw_status_bar() {
     }
     ImGui::EndPopup();
   }
-  ImGui::EndTable();
+}
+
+// The shell (liquify#102): regions share their edges, separated by hairlines, with no inset
+// frames or gaps; only overlays have shadows. Each region reports its rectangle so a property
+// test can check that neighbours touch.
+void App::shell_region_begin(const char *id, float width, float height, bool scrolls) {
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0F);
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 0.0F);
+  ImGui::BeginChild(id, ImVec2(width, height), ImGuiChildFlags_AlwaysUseWindowPadding,
+                    scrolls ? ImGuiWindowFlags_None
+                            : ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::PopStyleVar(2);
+  // Regions touch; their contents keep the kit's spacing.
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                      ImVec2(design::space2, design::space2));
+}
+
+void App::shell_region_end(const char *id) {
+  ImGui::PopStyleVar();
+  ImGui::EndChild();
+  const auto min = ImGui::GetItemRectMin();
+  const auto max = ImGui::GetItemRectMax();
+  frame_layout_.controls[std::string("region/") + id] =
+      InputRectangle{min.x, min.y, max.x - min.x, max.y - min.y};
+}
+
+void App::hairline(float x0, float y0, float x1, float y1) {
+  const auto palette =
+      effective_palette(applied_dark_theme_, applied_high_contrast_);
+  ImGui::GetWindowDrawList()->AddLine(
+      ImVec2(x0, y0), ImVec2(x1, y1),
+      packed_color(applied_high_contrast_ ? palette.border_strong
+                                          : palette.border_subtle),
+      1.0F);
+}
+
+// A splitter that sits on the shared edge: its hit area straddles the hairline without
+// taking space between the regions.
+auto App::edge_splitter(const char *id, float x, float y, float width,
+                        float height) -> float {
+  const auto delta_axis_x = height > width;
+  const auto grab = design::space1;
+  const auto bb = delta_axis_x
+                      ? ImRect(ImVec2(x - grab, y), ImVec2(x + grab, y + height))
+                      : ImRect(ImVec2(x, y - grab), ImVec2(x + width, y + grab));
+  const auto item = ImGui::GetID(id);
+  ImGui::ItemAdd(bb, item, nullptr, ImGuiItemFlags_NoNav);
+  auto hovered = false;
+  auto held = false;
+  ImGui::ButtonBehavior(bb, item, &hovered, &held, ImGuiButtonFlags_None);
+  if (hovered || held) {
+    ImGui::SetMouseCursor(delta_axis_x ? ImGuiMouseCursor_ResizeEW
+                                       : ImGuiMouseCursor_ResizeNS);
+  }
+  if (ImGui::IsItemDeactivated()) {
+    persist_shell_state();
+  }
+  if (!held) {
+    return 0.0F;
+  }
+  return delta_axis_x ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y;
 }
 
 void App::draw_contents() {
-  const auto status_bar_height =
-      ImGui::GetFrameHeight() + ImGui::GetStyle().WindowPadding.y * 2.0F;
+  // One row of lake's 32-pixel control height: the compact (24-pixel) buttons and the text sit
+  // centred in it, with the window padding taking up the rest (liquify#130). An enlarged UI font
+  // grows the compact buttons, and the row with them (liquify#36).
+  const auto status_row = std::max(design::space6, ImGui::GetFontSize() + design::space2);
+  const auto status_bar_height = status_row + (design::control_sm - design::space6);
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0F, 0.0F));
+  const auto origin = ImGui::GetCursorScreenPos();
   const auto available = ImGui::GetContentRegionAvail();
   const auto *screenshot =
       options_.screenshot_state
@@ -6955,49 +9551,61 @@ void App::draw_contents() {
   const auto show_first_run =
       !options_.smoke && !screenshot_workspace &&
       first_run_.phase() != RepositoryLifecyclePhase::open;
-  if (show_first_run) {
-    const auto content_height = std::max(available.y - status_bar_height -
-                                             ImGui::GetStyle().ItemSpacing.y,
-                                         1.0F);
-    ImGui::BeginChild("first-run", ImVec2(available.x, content_height));
-    draw_welcome();
-    ImGui::EndChild();
-    ImGui::BeginChild("status-bar", ImVec2(available.x, status_bar_height),
-                      ImGuiChildFlags_Border);
+  const auto center_height =
+      std::max(available.y - status_bar_height, 1.0F);
+  const auto draw_status = [&] {
+    ImGui::PopStyleVar();
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + center_height));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+                        ImVec2(design::space3, (status_bar_height - status_row) * 0.5F));
+    // Text in the row is aligned to the compact buttons' frame, so labels and buttons share one
+    // baseline.
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                        ImVec2(design::space2,
+                               std::max(0.0F, (status_row - ImGui::GetFontSize()) * 0.5F)));
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(design::space2, 0.0F));
+    shell_region_begin("status-bar", available.x, status_bar_height, false);
     draw_status_bar();
+    shell_region_end("status-bar");
+    ImGui::PopStyleVar(3);
+    hairline(origin.x, origin.y + center_height, origin.x + available.x,
+             origin.y + center_height);
+  };
+  if (show_first_run) {
+    ImGui::BeginChild("first-run", ImVec2(available.x, center_height));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                        ImVec2(design::space2, design::space2));
+    draw_welcome();
+    ImGui::PopStyleVar();
     ImGui::EndChild();
+    draw_status();
     return;
   }
-  const auto center_height = std::max(
-      available.y - status_bar_height - ImGui::GetStyle().ItemSpacing.y, 1.0F);
-  ImGui::BeginChild("activity-bar", ImVec2(activity_bar_width, center_height),
-                    ImGuiChildFlags_Border);
+  shell_region_begin("activity-bar", activity_bar_width, center_height);
   draw_activity_bar();
-  ImGui::EndChild();
+  shell_region_end("activity-bar");
+  auto edge = origin.x + activity_bar_width;
+  hairline(edge, origin.y, edge, origin.y + center_height);
   ImGui::SameLine(0.0F, 0.0F);
 
   if (shell_state_.sidebar_visible) {
-    ImGui::BeginChild("sidebar",
-                      ImVec2(shell_state_.sidebar_width, center_height),
-                      ImGuiChildFlags_Border);
+    shell_region_begin("sidebar", shell_state_.sidebar_width, center_height);
     draw_sidebar();
-    ImGui::EndChild();
-    ImGui::SameLine(0.0F, 0.0F);
-    ImGui::InvisibleButton("sidebar-divider",
-                           ImVec2(divider_size, center_height));
-    if (ImGui::IsItemActive()) {
+    shell_region_end("sidebar");
+    edge += shell_state_.sidebar_width;
+    hairline(edge, origin.y, edge, origin.y + center_height);
+    if (const auto moved = edge_splitter("sidebar-divider", edge, origin.y,
+                                         1.0F, center_height);
+        moved != 0.0F) {
       shell_state_.sidebar_width =
-          std::clamp(shell_state_.sidebar_width + ImGui::GetIO().MouseDelta.x,
-                     180.0F, 520.0F);
-    }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-      persist_shell_state();
+          std::clamp(shell_state_.sidebar_width + moved, 180.0F, 520.0F);
     }
     ImGui::SameLine(0.0F, 0.0F);
   }
 
   const auto workspace_width = std::max(ImGui::GetContentRegionAvail().x, 1.0F);
   ImGui::BeginChild("workspace", ImVec2(workspace_width, center_height));
+  const auto workspace_origin = ImGui::GetCursorScreenPos();
   const auto workspace = ImGui::GetContentRegionAvail();
   const auto maximum_panel = std::max(workspace.y - 160.0F, 120.0F);
   shell_state_.bottom_panel_height =
@@ -7005,39 +9613,32 @@ void App::draw_contents() {
   const auto bottom_height = shell_state_.bottom_panel_visible
                                  ? shell_state_.bottom_panel_height
                                  : 0.0F;
-  const auto bottom_spacing = shell_state_.bottom_panel_visible
-                                  ? ImGui::GetStyle().ItemSpacing.y * 2.0F
-                                  : 0.0F;
-  const auto editor_height =
-      std::max(workspace.y - bottom_height -
-                   (shell_state_.bottom_panel_visible ? divider_size : 0.0F) -
-                   bottom_spacing,
-               1.0F);
-  ImGui::BeginChild("editor-area", ImVec2(workspace.x, editor_height));
+  const auto editor_height = std::max(workspace.y - bottom_height, 1.0F);
+  // The editor area lays out its own edges: its rows keep space3 inside, the text reaches them.
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  shell_region_begin("editor-area", workspace.x, editor_height);
+  // Restore the padding for windows opened inside (popups, tooltips), keeping the region's
+  // item spacing that shell_region_end pops.
+  ImGui::PopStyleVar(2);
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(design::space2, design::space2));
   draw_editor_area();
-  ImGui::EndChild();
+  shell_region_end("editor-area");
   if (shell_state_.bottom_panel_visible) {
-    ImGui::InvisibleButton("bottom-divider", ImVec2(workspace.x, divider_size));
-    if (ImGui::IsItemActive()) {
+    const auto top = workspace_origin.y + editor_height;
+    hairline(workspace_origin.x, top, workspace_origin.x + workspace.x, top);
+    if (const auto moved = edge_splitter("bottom-divider", workspace_origin.x,
+                                         top, workspace.x, 1.0F);
+        moved != 0.0F) {
       shell_state_.bottom_panel_height = std::clamp(
-          shell_state_.bottom_panel_height - ImGui::GetIO().MouseDelta.y,
-          120.0F, maximum_panel);
+          shell_state_.bottom_panel_height - moved, 120.0F, maximum_panel);
     }
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-      persist_shell_state();
-    }
-    ImGui::BeginChild("bottom-panel",
-                      ImVec2(workspace.x, shell_state_.bottom_panel_height),
-                      ImGuiChildFlags_Border);
+    shell_region_begin("bottom-panel", workspace.x,
+                       shell_state_.bottom_panel_height);
     draw_bottom_panel();
-    ImGui::EndChild();
+    shell_region_end("bottom-panel");
   }
   ImGui::EndChild();
-
-  ImGui::BeginChild("status-bar", ImVec2(available.x, status_bar_height),
-                    ImGuiChildFlags_Border);
-  draw_status_bar();
-  ImGui::EndChild();
+  draw_status();
 }
 
 void App::render_editor(InputRectangle clip_bounds) {
@@ -7124,7 +9725,7 @@ void App::render_editor(InputRectangle clip_bounds) {
       screenshot_mode() ? 1 : graph_snapshot.syntax_generation, editor_x_,
       editor_y_, editor_width_, editor_height_, scroll_line_, line_height_,
       cell_width_, horizontal_scroll_, review_lines, comment_lines,
-      settings_.editor.whitespace);
+      settings_.editor.whitespace, editor_focused_);
   frame_layout_.editor_text =
       text_layer_->visible_text(clip_bounds, line_height_);
 }
@@ -7168,13 +9769,19 @@ void App::frame(bool present) {
   editor_visible_ = false;
   frame_layout_ = {};
   frame_layout_.drawable_scale = {framebuffer_scale.x, framebuffer_scale.y};
+  frame_layout_.controls["type/body"] =
+      InputRectangle{0.0F, 0.0F, 0.0F, ImGui::GetTextLineHeight()};
 
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(viewport->WorkPos);
   ImGui::SetNextWindowSize(viewport->WorkSize);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0F);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0F);
   ImGui::Begin("liquify", nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_NoSavedSettings);
+  ImGui::PopStyleVar(3);
   const auto window_position = ImGui::GetWindowPos();
   const auto window_size = ImGui::GetWindowSize();
   frame_layout_.window = {window_position.x, window_position.y, window_size.x,
@@ -7183,6 +9790,10 @@ void App::frame(bool present) {
   ImGui::End();
   draw_floating_panels();
   draw_command_palette();
+  draw_cut_composer();
+  draw_set_lake_dialog();
+  draw_request_review_dialog();
+  draw_build_setup_dialog();
   draw_navigation_popups();
   draw_repository_action_popup();
   draw_navigation_results();
@@ -7293,6 +9904,9 @@ auto App::async_work_in_flight() const -> bool {
   // keeps frame cadence so the result is noticed as promptly as before.
   return (repository_operation_ && repository_operation_->valid()) ||
          (identity_operation_ && identity_operation_->valid()) ||
+         (cut_preview_ && cut_preview_->valid()) ||
+         (cut_operation_ && cut_operation_->valid()) ||
+         (build_setup_operation_ && build_setup_operation_->valid()) ||
          multiplayer_refresh_.valid();
 }
 
@@ -7394,101 +10008,14 @@ int App::run() {
         input_.clear_drop_target();
       }
 #if defined(__APPLE__) && defined(__OBJC__)
-      if (event.type == SDL_EVENT_USER) {
-        switch (event.user.code) {
-        case menu_close:
-          close_editor();
-          break;
-        case menu_quit:
-          request_quit();
-          break;
-        case menu_save:
-          save_editor();
-          break;
-        case menu_palette:
-          command_palette_open_ = true;
-          break;
-        case menu_sidebar:
-          shell_state_.sidebar_visible = !shell_state_.sidebar_visible;
-          persist_shell_state();
-          break;
-        case menu_panel:
-          shell_state_.bottom_panel_visible =
-              !shell_state_.bottom_panel_visible;
-          persist_shell_state();
-          break;
-        case menu_split:
-          shell_state_.editor_split = !shell_state_.editor_split;
-          persist_shell_state();
-          break;
-        case menu_theme:
-          cycle_theme();
-          break;
-        case menu_contrast:
-          toggle_high_contrast();
-          break;
-        case menu_copy:
-          copy_editor_selection(false);
-          break;
-        case menu_cut:
-          copy_editor_selection(true);
-          break;
-        case menu_paste:
-          paste_editor_clipboard();
-          break;
-        case menu_definition:
-          request_definition();
-          break;
-        case menu_hover:
-          request_hover();
-          break;
-        case menu_build:
-          request_build();
-          break;
-        case menu_tests:
-          request_tests();
-          break;
-        case menu_deploy:
-          request_deploy();
-          break;
-        case menu_next_hunk:
-          navigate_hunk(true);
-          break;
-        case menu_previous_hunk:
-          navigate_hunk(false);
-          break;
-        case menu_next_comment:
-          navigate_comment();
-          break;
-        case menu_expand_selection:
-          expand_structural_selection();
-          break;
-        case menu_shrink_selection:
-          shrink_structural_selection();
-          break;
-        case menu_quick_open:
-          invoke_navigation_action(NavigationAction::quick_open);
-          break;
-        case menu_symbol_search:
-          invoke_navigation_action(NavigationAction::symbol_search);
-          break;
-        case menu_references:
-          invoke_navigation_action(NavigationAction::find_references);
-          break;
-        case menu_call_hierarchy:
-          invoke_navigation_action(NavigationAction::call_hierarchy);
-          break;
-        case menu_open_recent:
-          invoke_navigation_action(NavigationAction::open_recent);
-          break;
-        case menu_back:
-          invoke_navigation_action(NavigationAction::back);
-          break;
-        case menu_forward:
-          invoke_navigation_action(NavigationAction::forward);
-          break;
-        default:
-          break;
+      // A native menu item runs its registry command through the one dispatcher (liquify#34).
+      if (event.type == SDL_EVENT_USER &&
+          event.user.code >= native_menu_code_base) {
+        const auto index =
+            static_cast<std::size_t>(event.user.code - native_menu_code_base);
+        if (index < native_menu_commands_.size()) {
+          const auto command = native_menu_commands_[index];
+          static_cast<void>(invoke_command(command));
         }
       }
 #endif
@@ -7695,6 +10222,9 @@ void NativeAcceptance::click(App &app, InputRectangle rectangle) {
   event.motion.y = y;
   SDL_PushEvent(&event);
   pulse(app);
+  // ImGui decides what is hovered from the previous frame; a loaded machine can deliver the
+  // motion late, so the press follows a second settled pulse, as a person's would.
+  pulse(app);
   event = {};
   event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
   event.button.windowID = SDL_GetWindowID(app.window_);
@@ -7740,6 +10270,11 @@ void NativeAcceptance::key(App &app, std::string_view name, bool primary,
 }
 
 void NativeAcceptance::text(App &app, std::string_view value) {
+  // A person types some frames after the click that focused a field; give SDL's text input
+  // the same frames to activate before requiring it.
+  for (int frame = 0; frame < 20 && !SDL_TextInputActive(app.window_); ++frame) {
+    pulse(app);
+  }
   const auto content = std::string(value);
   std::printf("native text: input_active=%d bytes=%zu\n",
               SDL_TextInputActive(app.window_), content.size());
@@ -7795,6 +10330,13 @@ void NativeAcceptance::resize(App &app) {
                          "native resize did not change layout");
 }
 
+void NativeAcceptance::resize_to(App &app, int width, int height) {
+  test::require_property(SDL_SetWindowSize(app.window_, width, height),
+                         "native resize failed");
+  SDL_SyncWindow(app.window_);
+  pulse(app);
+}
+
 void NativeAcceptance::fonts(App &app) {
   const auto &layout = app.frame_layout();
   for (const auto index : {app.ui_font_index_, app.editor_font_index_}) {
@@ -7808,24 +10350,63 @@ void NativeAcceptance::fonts(App &app) {
 }
 
 void NativeAcceptance::source_tab(App &app) {
-  auto &bars = ImGui::GetCurrentContext()->TabBars;
-  for (int index = 0; index < bars.GetMapSize(); ++index) {
-    auto *bar = bars.TryGetMapData(index);
-    if (bar == nullptr) {
-      continue;
-    }
-    for (auto &tab : bar->Tabs) {
-      if (std::string_view(ImGui::TabBarGetTabName(bar, &tab))
-              .ends_with("###active-editor")) {
-        const auto bounds =
-            InputRectangle{bar->BarRect.Min.x + tab.Offset, bar->BarRect.Min.y,
-                           tab.Width, bar->BarRect.GetHeight()};
-        click(app, bounds);
-        return;
-      }
-    }
+  // The open file's tab, or its breadcrumb segment when it is the only thing open.
+  const auto found = app.frame_layout_.controls.find("editor/file-tab");
+  if (found == app.frame_layout_.controls.end()) {
+    throw std::runtime_error("source tab was not laid out");
   }
-  throw std::runtime_error("source tab was not laid out");
+  click(app, found->second);
+}
+
+auto NativeAcceptance::menu_key(App &app, std::string_view command)
+    -> std::string {
+#if defined(__APPLE__) && defined(__OBJC__)
+  auto *item = native_menu_item(app.native_menu_commands_, command);
+  test::require_property(item != nil, "native menu item exists for command");
+  auto output = std::string{};
+  const auto flags = [item keyEquivalentModifierMask];
+  if ((flags & NSEventModifierFlagControl) != 0) {
+    output += "Ctrl+";
+  }
+  if ((flags & NSEventModifierFlagCommand) != 0) {
+    output += "Cmd+";
+  }
+  if ((flags & NSEventModifierFlagOption) != 0) {
+    output += "Option+";
+  }
+  if ((flags & NSEventModifierFlagShift) != 0) {
+    output += "Shift+";
+  }
+  auto *key = [item keyEquivalent];
+  if ([key length] == 1 && [key characterAtIndex:0] >= NSF1FunctionKey &&
+      [key characterAtIndex:0] <= NSF35FunctionKey) {
+    output += "F" + std::to_string([key characterAtIndex:0] - NSF1FunctionKey + 1);
+  } else {
+    output += [[key uppercaseString] UTF8String];
+  }
+  return output;
+#else
+  static_cast<void>(app);
+  static_cast<void>(command);
+  return {};
+#endif
+}
+
+bool NativeAcceptance::choose_menu(App &app, std::string_view command) {
+#if defined(__APPLE__) && defined(__OBJC__)
+  auto *item = native_menu_item(app.native_menu_commands_, command);
+  if (item == nil) {
+    return false;
+  }
+  // What AppKit does when the item is chosen: send its action to its target.
+  [NSApp sendAction:[item action] to:[item target] from:item];
+  pulse(app);
+  return true;
+#else
+  static_cast<void>(app);
+  static_cast<void>(command);
+  return false;
+#endif
 }
 
 // The display test stays here to preserve the single SDL/ImGui translation
@@ -8016,43 +10597,29 @@ private:
   }
 
   static void focus_source_tab(App &app) {
-    auto &bars = ImGui::GetCurrentContext()->TabBars;
-    for (int index = 0; index < bars.GetMapSize(); ++index) {
-      auto *bar = bars.TryGetMapData(index);
-      if (bar == nullptr) {
-        continue;
-      }
-      for (auto &tab : bar->Tabs) {
-        if (!std::string_view(ImGui::TabBarGetTabName(bar, &tab))
-                 .ends_with("###active-editor")) {
-          continue;
-        }
-        const auto x = bar->BarRect.Min.x + tab.Offset + tab.Width * 0.5F;
-        const auto y = bar->BarRect.GetCenter().y;
-        SDL_Event event{};
-        event.type = SDL_EVENT_MOUSE_MOTION;
-        event.motion.windowID = SDL_GetWindowID(app.window_);
-        event.motion.x = x;
-        event.motion.y = y;
-        SDL_PushEvent(&event);
-        event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
-        event.button.windowID = SDL_GetWindowID(app.window_);
-        event.button.button = SDL_BUTTON_LEFT;
-        event.button.down = true;
-        event.button.x = x;
-        event.button.y = y;
-        SDL_PushEvent(&event);
-        capture(app);
-        event.type = SDL_EVENT_MOUSE_BUTTON_UP;
-        event.button.down = false;
-        SDL_PushEvent(&event);
-        capture(app);
-        require(app.editor_visible_,
-                "source tab click did not expose the editor");
-        return;
-      }
-    }
-    require(false, "source tab was not created");
+    const auto found = app.frame_layout_.controls.find("editor/file-tab");
+    require(found != app.frame_layout_.controls.end(), "source tab was not created");
+    const auto x = found->second.x + found->second.width * 0.5F;
+    const auto y = found->second.y + found->second.height * 0.5F;
+    SDL_Event event{};
+    event.type = SDL_EVENT_MOUSE_MOTION;
+    event.motion.windowID = SDL_GetWindowID(app.window_);
+    event.motion.x = x;
+    event.motion.y = y;
+    SDL_PushEvent(&event);
+    event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    event.button.windowID = SDL_GetWindowID(app.window_);
+    event.button.button = SDL_BUTTON_LEFT;
+    event.button.down = true;
+    event.button.x = x;
+    event.button.y = y;
+    SDL_PushEvent(&event);
+    capture(app);
+    event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    event.button.down = false;
+    SDL_PushEvent(&event);
+    capture(app);
+    require(app.editor_visible_, "source tab click did not expose the editor");
   }
 
   static void check_displays(App &app) {
@@ -8125,7 +10692,7 @@ private:
     app.command_palette_open_ = true;
     auto with_source = capture(app);
     save(prefix.string() + "-palette.png", with_source);
-    auto *window = ImGui::FindWindowByName("Command palette");
+    auto *window = ImGui::FindWindowByName("Command Palette");
     require(window != nullptr && window->Active,
             "command palette did not open");
     // The antialiased outer border blends with whatever is behind the popup.
@@ -8139,7 +10706,7 @@ private:
     replace_buffer(app, "");
     auto without_source = capture(app);
     save(prefix.string() + "-palette-empty-editor.png", without_source);
-    compare_overlay(with_source, without_source, "Command palette",
+    compare_overlay(with_source, without_source, "Command Palette",
                     palette_content);
     ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
     capture(app);

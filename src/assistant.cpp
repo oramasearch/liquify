@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/assistant.hpp"
 
 #include <chrono>

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -62,6 +64,22 @@ void wait_for_mutation(liquify::RepositoryView &view) {
     view.poll();
     std::this_thread::yield();
   }
+}
+
+// liquify#78: a name from a repository is used only when it is one safe path component, and the
+// tree printer never sends a control character to the terminal.
+TEST(RepositoryInput, EntryNamesAreOneSafeComponentAndPrintEscaped) {
+  EXPECT_TRUE(liquify::valid_entry_name("main.cpp"));
+  EXPECT_TRUE(liquify::valid_entry_name(".editorconfig"));
+  EXPECT_FALSE(liquify::valid_entry_name(""));
+  EXPECT_FALSE(liquify::valid_entry_name("."));
+  EXPECT_FALSE(liquify::valid_entry_name(".."));
+  EXPECT_FALSE(liquify::valid_entry_name("a/b"));
+  EXPECT_FALSE(liquify::valid_entry_name("a\\b"));
+  EXPECT_FALSE(liquify::valid_entry_name(std::string("a\0b", 3)));
+  EXPECT_FALSE(liquify::valid_entry_name("\x1b[31mred"));
+  EXPECT_EQ(liquify::printable_name("\x1b[31mred\n"), "\\x1b[31mred\\x0a");
+  EXPECT_EQ(liquify::printable_name("plain.txt"), "plain.txt");
 }
 
 TEST(RepositoryView, OpensFixtureCreatedByPinnedLiquid) {

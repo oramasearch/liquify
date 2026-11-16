@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/interactive_analysis.hpp"
 
 #include <algorithm>
@@ -100,6 +102,12 @@ private:
 class Decoder {
 public:
   explicit Decoder(std::span<const std::byte> input) : input_(input) {}
+
+  // A count read from the input bounded by the bytes left: every element takes at least one byte,
+  // so this never reserves more than the input could hold (liquify#79).
+  [[nodiscard]] auto capped(std::uint32_t count) const -> std::size_t {
+    return std::min<std::size_t>(count, input_.size() - cursor_);
+  }
 
   [[nodiscard]] auto u8() -> liquid::result<std::uint8_t> {
     if (cursor_ == input_.size()) {
@@ -662,7 +670,7 @@ auto decode_declaration(Decoder &input) -> liquid::result<StubDeclaration> {
     return std::unexpected(failure("truncated declaration"));
   }
   auto modifiers = std::vector<std::string>{};
-  modifiers.reserve(*modifier_count);
+  modifiers.reserve(input.capped(*modifier_count));
   for (std::uint32_t index = 0; index < *modifier_count; ++index) {
     auto modifier = input.string();
     if (!modifier) {
@@ -675,6 +683,9 @@ auto decode_declaration(Decoder &input) -> liquid::result<StubDeclaration> {
   auto range = input.range();
   if (!signature || !documentation || !range) {
     return std::unexpected(failure("truncated declaration"));
+  }
+  if (!valid_declaration_kind(*kind)) {
+    return std::unexpected(failure("unknown declaration kind"));
   }
   return StubDeclaration{static_cast<DeclarationKind>(*kind),
                          std::move(*name),
@@ -750,7 +761,7 @@ auto decode_analysis_index(std::span<const std::byte> input)
     return std::unexpected(failure("unsupported interactive index"));
   }
   auto output = AnalysisIndex{};
-  output.stubs.reserve(*stub_count);
+  output.stubs.reserve(decoder.capped(*stub_count));
   for (std::uint32_t stub_index = 0; stub_index < *stub_count; ++stub_index) {
     auto path = decoder.string();
     auto declaration_count = decoder.u32();
@@ -758,7 +769,7 @@ auto decode_analysis_index(std::span<const std::byte> input)
       return std::unexpected(failure("truncated interactive stub index"));
     }
     auto tree = StubTree{};
-    tree.declarations.reserve(*declaration_count);
+    tree.declarations.reserve(decoder.capped(*declaration_count));
     for (std::uint32_t declaration_index = 0;
          declaration_index < *declaration_count; ++declaration_index) {
       auto declaration = decode_declaration(decoder);
@@ -773,7 +784,7 @@ auto decode_analysis_index(std::span<const std::byte> input)
   if (!symbol_count) {
     return std::unexpected(symbol_count.error());
   }
-  output.symbols.reserve(*symbol_count);
+  output.symbols.reserve(decoder.capped(*symbol_count));
   for (std::uint32_t symbol_index = 0; symbol_index < *symbol_count;
        ++symbol_index) {
     auto name = decoder.string();
@@ -783,7 +794,7 @@ auto decode_analysis_index(std::span<const std::byte> input)
       return std::unexpected(failure("truncated symbol record"));
     }
     auto references = std::vector<SourceLocation>{};
-    references.reserve(*reference_count);
+    references.reserve(decoder.capped(*reference_count));
     for (std::uint32_t reference_index = 0; reference_index < *reference_count;
          ++reference_index) {
       auto reference = decode_source_location(decoder);
@@ -859,13 +870,17 @@ auto decode_diagnostics(std::span<const std::byte> input)
     return std::unexpected(failure("unsupported diagnostics value"));
   }
   auto output = std::vector<Diagnostic>{};
-  output.reserve(*count);
+  output.reserve(decoder.capped(*count));
   for (std::uint32_t index = 0; index < *count; ++index) {
     auto location = decode_source_location(decoder);
     auto severity = decoder.u8();
     auto message = decoder.string();
     if (!location || !severity || !message) {
       return std::unexpected(failure("truncated diagnostic"));
+    }
+    if (*severity < static_cast<std::uint8_t>(DiagnosticSeverity::note) ||
+        *severity > static_cast<std::uint8_t>(DiagnosticSeverity::error)) {
+      return std::unexpected(failure("unknown diagnostic severity"));
     }
     output.push_back({std::move(*location),
                       static_cast<DiagnosticSeverity>(*severity),
@@ -967,7 +982,7 @@ auto decode_references(std::span<const std::byte> input)
     return std::unexpected(count.error());
   }
   auto output = std::vector<ReferenceLocation>{};
-  output.reserve(*count);
+  output.reserve(decoder.capped(*count));
   for (std::uint32_t index = 0; index < *count; ++index) {
     auto location = decode_source_location(decoder);
     auto is_definition = decoder.u8();
@@ -1040,7 +1055,7 @@ auto decode_completions(std::span<const std::byte> input)
     return std::unexpected(count.error());
   }
   auto output = std::vector<CompletionCandidate>{};
-  output.reserve(*count);
+  output.reserve(decoder.capped(*count));
   for (std::uint32_t index = 0; index < *count; ++index) {
     auto name = decoder.string();
     auto kind = decoder.u8();
@@ -1049,6 +1064,9 @@ auto decode_completions(std::span<const std::byte> input)
     auto rank = decoder.u32();
     if (!name || !kind || !signature || !path || !rank) {
       return std::unexpected(failure("truncated completion"));
+    }
+    if (!valid_declaration_kind(*kind)) {
+      return std::unexpected(failure("unknown declaration kind"));
     }
     output.push_back({std::move(*name), static_cast<DeclarationKind>(*kind),
                       std::move(*signature), std::filesystem::path(*path),

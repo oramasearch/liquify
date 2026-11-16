@@ -2,11 +2,25 @@
 
 ## What exists
 
-Start liquify with a lake repository URL and the matching local liquid repository:
+Reviews live on the lake the repository pushes to. The Review panel uses, in order: `--lake` when
+liquify was started with it; otherwise the lake repository the folder was cloned from, or the one
+Set Lake recorded (libliquid's drive client keeps it; liquify reads it once, with the rest of the
+repository, at open: `RepositoryView::lake_remote`). The token is `LIQUID_TOKEN`. The window never
+mentions a command-line flag.
 
 ```sh
+LIQUID_TOKEN=<token> ./build/liquify <path>   # a folder cloned from lake
 LIQUID_TOKEN=<token> ./build/liquify --lake https://host/v1/repositories/<id> <path>
 ```
+
+With no lake, the panel says what a review is and offers **Set lake**. With a lake and no reviews,
+it says what a review is and how to get one (cut, push, request) and offers **Request review**.
+
+**Request Review** (the panel's button, or the `review.request` command) asks lake to review the
+repository's current change (its head) through `forge_client::create_review`, with optional
+reviewers typed as names separated by commas, then lists the reviews and opens the new one
+(`ReviewModel::request_review`). The change must already be pushed; if lake does not know it, the
+panel shows the error component with "push it, then … request the review again".
 
 The Reviews section lists the lake reviews returned by `liquid::forge_client`. Opening a review
 pulls the repository through `liquid::sync_endpoint`, takes the review change's first parent as the

@@ -1,7 +1,7 @@
 # Self-contained macOS bundles
 
 `Liquify.app` must launch on a compatible macOS machine without Homebrew or another package
-manager. This rule covers the executable, `Contents/MacOS/frontends` syntax modules and every Mach-O copied into the bundle, including
+manager. This rule covers the executable, `Contents/MacOS/liquify-plugin-host`, `Contents/MacOS/frontends` syntax modules and every Mach-O copied into the bundle, including
 dependencies reached through libliquid and its submodules.
 
 ## Dependency rule

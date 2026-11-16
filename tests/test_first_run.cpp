@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/first_run.hpp"
 
 #include <chrono>
@@ -79,10 +81,17 @@ TEST(FirstRunState, DistinguishesUnreadableRepositoriesAndOfflineClones) {
     EXPECT_EQ(state.error(), "permission denied");
 
     state.begin_clone("https://lake.example/repository", "/repositories/new");
-    state.clone_failed("lake is unreachable", true);
+    state.clone_failed({.kind = liquify::FailureKind::offline,
+                        .summary = "Could not reach lake.example"});
     EXPECT_EQ(state.phase(), liquify::RepositoryLifecyclePhase::offline);
     EXPECT_EQ(state.clone_remote(), "https://lake.example/repository");
-    EXPECT_EQ(state.error(), "lake is unreachable");
+    EXPECT_EQ(state.error(), "Could not reach lake.example");
+
+    // A lake that answered is never presented as offline.
+    state.clone_failed({.kind = liquify::FailureKind::secure_connection,
+                        .summary = "lake.example answered, but a secure connection could not be made"});
+    EXPECT_EQ(state.phase(), liquify::RepositoryLifecyclePhase::failed);
+    EXPECT_EQ(state.clone_failure().kind, liquify::FailureKind::secure_connection);
 }
 
 TEST(FirstRunState, PersistsRecentRepositoriesAndIdentityWithoutSecrets) {
@@ -152,6 +161,21 @@ TEST(StatusBar, ReportsEveryRepositoryAndSessionSignal) {
                   "4 notifications",
                   "taap:1:ed255",
               }));
+}
+
+TEST(StatusBar, NamesTheDaemonProblemInsteadOfItsPresence) {
+    const auto failed = liquify::status_bar_segments(
+        {.repository_open = true, .daemon_problem = "failed to start"});
+    EXPECT_EQ(failed.front(), "Daemon failed to start");
+    const auto lost = liquify::status_bar_segments(
+        {.repository_open = true, .daemon_available = false, .daemon_problem = "connection lost"});
+    EXPECT_EQ(lost.front(), "Daemon connection lost");
+    const auto starting =
+        liquify::status_bar_segments({.repository_open = true, .daemon_starting = true});
+    EXPECT_EQ(starting.front(), "Daemon starting");
+    const auto stopped =
+        liquify::status_bar_segments({.repository_open = true, .daemon_available = true});
+    EXPECT_EQ(stopped.front(), "Daemon stopped");
 }
 
 TEST(StatusBar, ReportsWelcomeAndOfflineDefaults) {

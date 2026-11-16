@@ -1,9 +1,14 @@
+// SPDX-License-Identifier: MIT
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <filesystem>
+#include <format>
+#include <random>
+#include <string>
 #include <span>
 #include <string_view>
 #include <system_error>
@@ -21,7 +26,7 @@ class TemporaryRepository {
 public:
     TemporaryRepository()
         : path_(std::filesystem::temp_directory_path() /
-                ("liquify-review-" + std::to_string(next_++))) {
+                ("liquify-review-" + process_suffix() + "-" + std::to_string(next_++))) {
         auto ignored = std::error_code{};
         std::filesystem::remove_all(path_, ignored);
     }
@@ -36,6 +41,16 @@ public:
     }
 
 private:
+    // ctest runs each test in its own process, where the counter restarts at zero; a
+    // per-process random suffix keeps parallel tests out of each other's directories.
+    static auto process_suffix() -> const std::string& {
+        static const auto suffix = [] {
+            auto device = std::random_device{};
+            return std::format("{:08x}{:08x}", device(), device());
+        }();
+        return suffix;
+    }
+
     inline static std::atomic_uint64_t next_{};
     std::filesystem::path path_;
 };
@@ -142,3 +157,50 @@ TEST(ReviewModel, refresh_maps_shifted_and_deleted_comments_and_updates_state) {
     ASSERT_TRUE(requested) << requested.error().message;
     EXPECT_EQ(requested->selected->state, liquid::forge_review_state::open);
 }
+
+#include "liquid/drive.hpp"
+#include "liquid/sync.hpp"
+
+namespace {
+
+TEST(ReviewModel, requests_a_review_of_the_pushed_current_change) {
+    auto server = liquid::test::forge_double{};
+    ASSERT_TRUE(server.advance_head("src/file.cpp", "one\n"));
+    TemporaryRepository local;
+    {
+        auto client = liquid::runtime::block_on(liquid::drive_client::open(local.path(), server.url()));
+        ASSERT_TRUE(client) << client.error().message;
+        ASSERT_TRUE(liquid::runtime::block_on(client->pin("")));
+        ASSERT_TRUE(liquid::runtime::block_on(client->sync()));
+    }
+    auto head = liquid::change_id{};
+    {
+        auto repository = liquid::runtime::block_on(liquid::repository::open(local.path()));
+        ASSERT_TRUE(repository);
+        const auto text = std::string_view{"one\ntwo\n"};
+        const auto bytes = std::as_bytes(std::span(text));
+        ASSERT_TRUE(liquid::runtime::block_on(
+            repository->write("src/file.cpp", {bytes.begin(), bytes.end()})));
+        auto cut = liquid::runtime::block_on(repository->cut("Add two"));
+        ASSERT_TRUE(cut) << cut.error().message;
+        head = *cut;
+        auto endpoint = liquid::sync_endpoint{server.url()};
+        auto pushed = liquid::runtime::block_on(endpoint.push(*repository));
+        ASSERT_TRUE(pushed) << pushed.error().message;
+    }
+    auto model = liquify::ReviewModel{local.path(), server.url()};
+    auto requested = liquid::runtime::block_on(model.request_review({"ana", "bo"}));
+    ASSERT_TRUE(requested) << requested.error().message;
+    ASSERT_TRUE(requested->selected);
+    EXPECT_EQ(liquid::to_string(requested->selected->change.value), liquid::to_string(head.value));
+    EXPECT_EQ(requested->selected->reviewers, (std::vector<std::string>{"ana", "bo"}));
+    EXPECT_EQ(requested->reviews.size(), 1U);
+}
+
+TEST(ReviewModel, parses_optional_reviewers) {
+    EXPECT_EQ(liquify::parse_reviewers(" ana, bo ,, cy "),
+              (std::vector<std::string>{"ana", "bo", "cy"}));
+    EXPECT_TRUE(liquify::parse_reviewers("  ").empty());
+}
+
+} // namespace

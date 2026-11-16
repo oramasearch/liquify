@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <chrono>
@@ -7,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "liquid/build.hpp"
@@ -22,6 +25,14 @@
 #include "liquify/structural_edit.hpp"
 
 namespace liquify {
+
+// Where the editor keeps a repository's analysis cache (liquify#79): a per-user directory keyed by
+// the repository's canonical path, beside liquify's other per-user state, never inside the
+// repository, so a repository cannot ship a crafted cache. `state_root` defaults to the directory of
+// default_first_run_state_path().
+[[nodiscard]] auto analysis_cache_directory(const std::filesystem::path &repository_path,
+                                            std::optional<std::filesystem::path> state_root =
+                                                std::nullopt) -> std::filesystem::path;
 
 class PluginHost;
 
@@ -55,6 +66,9 @@ struct TestSnapshot {
 struct DeploySnapshot {
   bool running{};
   std::string error;
+  // liquid's error for the failed push, and the sync remote it went to (empty: none set).
+  std::optional<liquid::error> failure;
+  std::string remote;
   std::uint64_t objects{};
   std::uint64_t bytes{};
   std::vector<liquid::sync_ref_outcome> references;
@@ -81,12 +95,30 @@ struct EditorSearchSnapshot {
     std::string error;
 };
 
+// The repository's build service as the graph last saw it (liquify#36): from starting or
+// attaching to it, then from each status call. The status bar reads this, never whether an
+// EditorGraph exists.
+enum class DaemonState : std::uint8_t {
+  starting,     // the start or attach has not answered yet
+  running,      // the last status call answered and the service is running
+  stopped,      // the last status call answered and the service is not running
+  start_failed, // neither starting nor attaching to the service worked
+  disconnected, // the service answered once, then a status call failed
+};
+
+[[nodiscard]] auto daemon_state_name(DaemonState state) -> std::string_view;
+
 struct EditorGraphSnapshot {
   bool ready{};
   bool daemon_running{};
   bool daemon_hosted{};
+  DaemonState daemon_state{DaemonState::starting};
+  // The start, attach or status failure behind start_failed and disconnected; empty otherwise.
+  // Unlike query_error, a later successful query never clears it.
+  std::string daemon_error;
   std::string error;
   std::string query_error;
+  std::optional<liquid::error> query_failure;
   std::optional<liquid::daemon_status> daemon;
   liquid::graph_statistics graph;
   std::uint64_t repository_pending_drips{};
@@ -112,6 +144,8 @@ struct EditorGraphSnapshot {
   std::uint64_t structural_result_generation{};
   double edit_to_diagnostic_ms{};
   bool build_running{};
+  // The last build or test run's failure; shown in the Build panel only.
+  std::optional<liquid::error> build_error;
   std::string build_result;
   std::chrono::milliseconds build_first_action{};
   std::chrono::milliseconds build_finished{};
@@ -180,7 +214,9 @@ public:
     void request_build(liquid::build_target target = {});
     void request_tests(std::string filter = {});
     void refresh_tests();
-    void request_deploy();
+    // Pushes to the repository's sync remote, else to `lake_remote` (the lake it was cloned
+    // from or that Set Lake recorded; see RepositoryView::lake_remote).
+    void request_push(std::string lake_remote = {});
     void publish_build_event(liquid::build_event event);
     void publish_deploy_report(liquid::sync_report report);
     void note_saved_drip(std::uint64_t repository_pending_drips);

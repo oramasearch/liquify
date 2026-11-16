@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 
 set -euo pipefail
 
@@ -11,7 +12,7 @@ binary_path="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 linuxdeploy_path="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 output_directory="$3"
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-version="${LIQUIFY_PACKAGE_VERSION:-0.0.1}"
+version="${LIQUIFY_PACKAGE_VERSION:-0.1.0}"
 
 if [[ ! -x "$binary_path" ]]; then
     echo "liquify binary is not executable: $binary_path" >&2
@@ -32,6 +33,8 @@ app_directory="$work_directory/Liquify.AppDir"
 artifact="$output_directory/liquify-${version}-x86_64.AppImage"
 mkdir -p "$app_directory/usr/bin"
 install -m 755 "$binary_path" "$app_directory/usr/bin/liquify"
+install -m 755 "$(dirname "$binary_path")/liquify-plugin-host" \
+    "$app_directory/usr/bin/liquify-plugin-host"
 cp -R "$(dirname "$binary_path")/frontends" "$app_directory/usr/bin/frontends"
 install -m 755 "$script_directory/AppRun" "$app_directory/AppRun"
 install -m 644 \

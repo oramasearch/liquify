@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 param(
     [Parameter(Mandatory = $true)]
     [string]$BinaryPath,
@@ -9,11 +11,24 @@ param(
     [string]$PfxPassword = '',
     [string]$Publisher = 'CN=Liquify CI',
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
-    [string]$PackageVersion = '0.0.1.0'
+    [string]$PackageVersion = '0.1.0.0'
 )
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
+
+# A release is never self-signed (liquify#77). LIQUIFY_RELEASE=1, or a build of a v* tag, requires a
+# real certificate (-PfxPath) and its publisher; the self-signed CN=Liquify CI path is for local and
+# test builds only.
+$isRelease = ($env:LIQUIFY_RELEASE -eq '1') -or ("$env:GITHUB_REF" -like 'refs/tags/v*')
+if ($isRelease) {
+    if ([string]::IsNullOrWhiteSpace($PfxPath) -or -not (Test-Path $PfxPath)) {
+        throw 'refusing to package a release without a signing certificate (-PfxPath)'
+    }
+    if ([string]::IsNullOrWhiteSpace($Publisher) -or $Publisher -eq 'CN=Liquify CI') {
+        throw 'refusing to package a release under the test publisher CN=Liquify CI'
+    }
+}
 
 if ($PackageVersion -notmatch '^(\d+)\.(\d+)\.(\d+)\.(\d+)$') {
     throw 'PackageVersion must contain four numeric components'
@@ -155,6 +170,10 @@ try {
     New-Item -ItemType Directory -Path $layoutDirectory, $assetsDirectory, $resolvedOutput -Force |
         Out-Null
     Copy-Item -Path $resolvedBinary -Destination (Join-Path $layoutDirectory 'liquify.exe')
+    # Every dynamic plugin runs in this separate, confined process (liquify#82).
+    Copy-Item `
+        -Path (Join-Path (Split-Path -Parent $resolvedBinary) 'liquify-plugin-host.exe') `
+        -Destination (Join-Path $layoutDirectory 'liquify-plugin-host.exe')
     Copy-Item `
         -Path (Join-Path (Split-Path -Parent $resolvedBinary) 'frontends') `
         -Destination (Join-Path $layoutDirectory 'frontends') `
@@ -168,6 +187,10 @@ try {
     $dependencySearchDirectories += $env:PATH -split ';'
     Copy-RuntimeDependencies `
         (Join-Path $layoutDirectory 'liquify.exe') `
+        $objdump `
+        $dependencySearchDirectories
+    Copy-RuntimeDependencies `
+        (Join-Path $layoutDirectory 'liquify-plugin-host.exe') `
         $objdump `
         $dependencySearchDirectories
     Get-ChildItem (Join-Path $layoutDirectory 'frontends') -Filter '*.dll' | ForEach-Object {

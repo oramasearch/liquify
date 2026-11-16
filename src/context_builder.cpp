@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/context_builder.hpp"
 
 #include <algorithm>

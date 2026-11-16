@@ -1,18 +1,44 @@
+// SPDX-License-Identifier: MIT
+
 #include "native_acceptance.hpp"
 
 #include "../src/editor_buffer.hpp"
 #include "../src/repository_view.hpp"
+#include "forge_double.hpp"
+#include "liquid/drive.hpp"
+#include "liquid/forge.hpp"
+#include "liquid/identity.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
+#include "liquify/command.hpp"
 #include "liquify/editor_graph.hpp"
+#include "liquify/lake_remote.hpp"
+#include "liquify/user_error.hpp"
 #include "ui_property_assert.hpp"
 
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <thread>
+#include <algorithm>
+#include <array>
+#include <format>
 #include <fstream>
+#include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -45,6 +71,95 @@ std::string read_back(const std::filesystem::path &path) {
   require(bytes.has_value(), "persisted main.cpp blob read");
   return {reinterpret_cast<const char *>(bytes->data()), bytes->size()};
 }
+
+// A loopback HTTP responder that answers every request with one canned status, standing in for
+// a lake that answers. Test code only: liquify itself reaches lakes through libliquid.
+class CannedLake {
+public:
+  explicit CannedLake(int status) : status_(status) {
+    socket_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    require(socket_ >= 0, "canned lake socket created");
+    auto address = sockaddr_in{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    require(::bind(socket_, reinterpret_cast<sockaddr *>(&address),
+                   sizeof(address)) == 0 &&
+                ::listen(socket_, 8) == 0,
+            "canned lake listening on loopback");
+    auto length = socklen_t{sizeof(address)};
+    ::getsockname(socket_, reinterpret_cast<sockaddr *>(&address), &length);
+    port_ = ntohs(address.sin_port);
+    thread_ = std::thread([this] { serve(); });
+  }
+
+  ~CannedLake() {
+    stopping_ = true;
+    ::shutdown(socket_, SHUT_RDWR);
+    ::close(socket_);
+    thread_.join();
+  }
+
+  CannedLake(const CannedLake &) = delete;
+  auto operator=(const CannedLake &) -> CannedLake & = delete;
+
+  [[nodiscard]] auto port() const -> int { return port_; }
+  [[nodiscard]] auto requests() const -> int { return requests_; }
+
+private:
+  void serve() {
+    while (!stopping_) {
+      const auto client = ::accept(socket_, nullptr, nullptr);
+      if (client < 0) {
+        return;
+      }
+      auto timeout = timeval{.tv_sec = 2, .tv_usec = 0};
+      ::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+      auto request = std::string{};
+      auto buffer = std::array<char, 4096>{};
+      while (request.find("\r\n\r\n") == std::string::npos) {
+        const auto received = ::recv(client, buffer.data(), buffer.size(), 0);
+        if (received <= 0) {
+          break;
+        }
+        request.append(buffer.data(), static_cast<std::size_t>(received));
+      }
+      ++requests_;
+      const auto response =
+          "HTTP/1.1 " + std::to_string(status_) +
+          " Canned\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+      ::send(client, response.data(), response.size(), 0);
+      ::close(client);
+    }
+  }
+
+  int status_;
+  int socket_{-1};
+  int port_{};
+  std::atomic_bool stopping_{};
+  std::atomic_int requests_{};
+  std::thread thread_;
+};
+
+// Holds a repository's daemon lock with nothing listening, so liquid's daemon start answers
+// "already running" and attaching finds no service: a controlled startup failure (liquify#36).
+class HeldDaemonLock {
+public:
+  explicit HeldDaemonLock(const std::filesystem::path &repository) {
+    const auto directory =
+        std::filesystem::weakly_canonical(repository) / ".liquid" / "daemon";
+    std::filesystem::create_directories(directory);
+    descriptor_ = ::open((directory / "lock").c_str(), O_CREAT | O_RDWR, 0600);
+    require(descriptor_ >= 0 && ::flock(descriptor_, LOCK_EX | LOCK_NB) == 0,
+            "daemon lock held with no daemon listening");
+  }
+  ~HeldDaemonLock() { ::close(descriptor_); }
+  HeldDaemonLock(const HeldDaemonLock &) = delete;
+  auto operator=(const HeldDaemonLock &) -> HeldDaemonLock & = delete;
+
+private:
+  int descriptor_{-1};
+};
 
 void save_image(const std::filesystem::path &path,
                 const liquify::ScreenshotImage &image) {
@@ -101,7 +216,7 @@ void NativeAcceptance::geometry(App &app, const std::filesystem::path &output) {
   test::require_editor(image, app.frame_layout());
   save_image(output / "resized.png", image);
   key(app, "p", true, true);
-  require(popup("Command palette"), "keyboard opened modal over real source");
+  require(popup("Command Palette"), "keyboard opened modal over real source");
   save_image(output / "palette.png", capture(app));
 }
 
@@ -110,7 +225,7 @@ void NativeAcceptance::modal_input(App &app) {
   click(app, app.frame_layout().editor);
   const auto before = std::string(app.editor_->text());
   key(app, "p", true, true);
-  require(popup("Command palette"), "palette opened over focused source");
+  require(popup("Command Palette"), "palette opened over focused source");
   text(app, "modal query");
   require(app.command_palette_query_ == "modal query",
           "modal query received native text");
@@ -123,7 +238,7 @@ void NativeAcceptance::modal_input(App &app) {
 void NativeAcceptance::quick_open(App &app) {
   open_file(app);
   key(app, "p", true);
-  require(popup("Quick open"), "Primary+P opened Quick Open");
+  require(popup("Quick Open"), "Primary+P opened Quick Open");
   text(app, "other.cpp");
   std::printf("quick-open: query='%s' expected='other.cpp'\n",
               app.quick_open_query_.c_str());
@@ -132,20 +247,20 @@ void NativeAcceptance::quick_open(App &app) {
   key(app, "Down");
   key(app, "Enter");
   require(app.editor_ && app.editor_->display_path() == "other.cpp" &&
-              !popup("Quick open"),
+              !popup("Quick Open"),
           "#33: Down/Enter opens selected result and closes Quick Open");
 }
 
 void NativeAcceptance::edit(App &app, const std::filesystem::path &output) {
   open_file(app);
   key(app, "p", true);
-  require(popup("Quick open"), "Quick Open opened before focus transition");
+  require(popup("Quick Open"), "Quick Open opened before focus transition");
   click(app, app.frame_layout().controls.at("quick-open/query"));
   text(app, "main.cpp");
   require(app.quick_open_query_ == "main.cpp",
           "SDL text reached focused ImGui field");
   click(app, app.frame_layout().controls.at("quick-open/main.cpp"));
-  require(!popup("Quick open"), "SDL pointer selected Quick Open result");
+  require(!popup("Quick Open"), "SDL pointer selected Quick Open result");
   source_tab(app);
   click(app, app.frame_layout().editor);
   const auto before = std::string(app.editor_->text());
@@ -177,18 +292,141 @@ void NativeAcceptance::palette(App &app) {
   open_file(app);
   const auto before = app.shell_state_.bottom_panel_visible;
   key(app, "p", true, true);
-  require(popup("Command palette"), "Primary+Shift+P opened palette");
+  require(popup("Command Palette"), "Primary+Shift+P opened palette");
   text(app, "Toggle bottom panel");
   require(app.command_palette_query_ == "Toggle bottom panel",
           "palette receives keyboard query");
+  require(app.command_palette_selection_ == 0,
+          "#34: the first result is selected");
   key(app, "Down");
+  require(app.command_palette_selection_ == 1 ||
+              app.commands_->search(app.command_palette_query_).size() == 1,
+          "#34: Down moves the selection");
+  key(app, "Up");
+  require(app.command_palette_selection_ == 0, "#34: Up moves it back");
   key(app, "Enter");
   std::printf("palette: visible=%d bottom_before=%d bottom_after=%d\n",
-              popup("Command palette"), before,
+              popup("Command Palette"), before,
               app.shell_state_.bottom_panel_visible);
-  require(!popup("Command palette") &&
+  require(!popup("Command Palette") &&
               app.shell_state_.bottom_panel_visible != before,
-          "palette Down/Enter dispatches selected command");
+          "#34: Enter runs the selected palette result");
+}
+
+// liquify#34: one source of truth for bindings. A rebind made through the settings surface's
+// Keymap field reaches the window's keys, the palette and the native menus at once; the old
+// chord cannot bypass it, and a chord two commands claim runs neither and says why.
+void NativeAcceptance::rebind(App &app) {
+  open_file(app);
+  const auto editor = app.frame_layout().editor;
+  click(app, editor);
+  require(app.editor_focused_, "a click focuses the editor");
+  const auto collapse = [&] {
+    app.editor_->set_cursor({});
+    require(!app.editor_->selection().has_value(), "the selection is collapsed");
+  };
+  const auto whole_buffer = [&app] {
+    const auto selection = app.editor_->selection();
+    const auto last = app.editor_->line_count() - 1;
+    return selection.has_value() && selection->begin == TextPosition{} &&
+           selection->end == TextPosition{last, app.editor_->line(last).size()};
+  };
+
+  collapse();
+  key(app, "a", true);
+  require(whole_buffer(), "#34: default Primary+A selects the buffer through the registry");
+
+  collapse();
+  require(app.set_keymap_binding("edit.select-all", "F6"),
+          "#34: the Keymap field accepts F6 for Select All");
+  require(app.commands_->binding_label("edit.select-all") == "F6",
+          "#34: the registry resolves the rebind");
+  key(app, "F6");
+  require(whole_buffer(), "#34: the rebound key selects the buffer");
+
+  collapse();
+  key(app, "a", true);
+  std::printf("rebind: old chord selection=%d\n", app.editor_->selection().has_value());
+  require(!app.editor_->selection().has_value(),
+          "#34: the old hard-coded chord no longer bypasses the rebind");
+
+  collapse();
+  key(app, "p", true, true);
+  require(popup("Command Palette"), "palette opened");
+  text(app, "Select All");
+  const auto matches = app.commands_->search(app.command_palette_query_);
+  require(!matches.empty() && matches.front().name == "edit.select-all" &&
+              app.commands_->binding_label(matches.front().name) == "F6",
+          "#34: the palette's first row is Select All, labelled F6");
+  key(app, "Enter");
+  require(!popup("Command Palette") && whole_buffer(),
+          "#34: Enter on the palette row selects the buffer");
+  // Back to the editor, away from the first click so it is not read as a double click.
+  click(app, {editor.x, editor.y, editor.width / 2.0F, editor.height / 2.0F});
+  require(app.editor_focused_, "a click focuses the editor again");
+
+#if defined(__APPLE__)
+  const auto menu = menu_key(app, "edit.select-all");
+  std::printf("rebind: native menu key equivalent=%s\n", menu.c_str());
+  require(menu == "F6", "#34: the native Edit menu shows the rebound key");
+  require(menu_key(app, "edit.command-palette") == "Cmd+Shift+P",
+          "#34: the native menu shows resolved default bindings");
+  collapse();
+  require(choose_menu(app, "edit.select-all") && whole_buffer(),
+          "#34: choosing the native menu item runs the registry command");
+#else
+  std::printf("rebind: native menus are macOS only; menu checks skipped\n");
+#endif
+
+  collapse();
+  require(app.set_keymap_binding("edit.select-all", "Primary+L"),
+          "#34: the Keymap field accepts Primary+L");
+  require(!app.commands_->conflicts().empty(),
+          "#34: Primary+L conflicts with Select Line and is reported");
+  key(app, "l", true);
+  std::printf("rebind: conflict status='%s'\n", app.editor_status_.c_str());
+  require(!app.editor_->selection().has_value() &&
+              app.editor_status_.find("is bound to") != std::string::npos,
+          "#34: a conflicting chord runs neither command and says why");
+
+  require(app.set_keymap_binding("edit.select-all", "Primary+A"),
+          "#34: the Keymap field restores Primary+A");
+  require(app.commands_->conflicts().empty(), "#34: the conflict is gone");
+  collapse();
+  key(app, "a", true);
+  require(whole_buffer(), "#34: the restored binding works again");
+}
+
+// liquify#34: every built-in command, run through the one dispatcher with a file open, either
+// acts or puts the reason it could not in the status bar; none is a silent no-op.
+void NativeAcceptance::commands(App &app) {
+  open_file(app);
+  click(app, app.frame_layout().editor);
+  // Not run here: Quit and Close File (a dirty buffer asks in a native dialog) and Reveal (it
+  // opens the system file manager). Their handlers are still required below.
+  const auto skipped = std::array<std::string_view, 3>{"app.quit", "file.close",
+                                                       "repository.reveal"};
+  auto names = std::vector<std::string>{};
+  for (const auto &command : builtin_commands()) {
+    require(App::handles_command(command.name), command.name + " has an implementation");
+    if (std::ranges::find(skipped, command.name) == skipped.end()) {
+      names.push_back(command.name);
+    }
+  }
+  for (const auto &name : names) {
+    const auto *definition = app.commands_->find(name);
+    app.editor_status_.clear();
+    const auto acted = app.invoke_command(name);
+    std::printf("command: %s acted=%d status='%s'\n", name.c_str(), acted,
+                app.editor_status_.c_str());
+    require(acted || app.editor_status_.starts_with(definition->title + ":"),
+            name + " acted or said why not");
+    pulse(app);
+  }
+  const auto before = app.shell_state_.sidebar_visible;
+  require(app.invoke_command("view.toggle-sidebar") &&
+              app.shell_state_.sidebar_visible != before,
+          "#34: view.toggle-sidebar changes the shell state");
 }
 
 void NativeAcceptance::tabs(App &app) {
@@ -224,40 +462,1143 @@ void NativeAcceptance::tabs(App &app) {
           "#35: every visible tab selects its panel; failed=" + failed);
 }
 
-void NativeAcceptance::build(App &app) {
+} // namespace liquify
+
+namespace {
+
+auto overlaps(liquify::InputRectangle a, liquify::InputRectangle b) -> bool {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height &&
+         b.y < a.y + a.height;
+}
+
+auto inside(liquify::InputRectangle inner, liquify::InputRectangle outer) -> bool {
+  constexpr auto slack = 0.5F;
+  return inner.x >= outer.x - slack && inner.y >= outer.y - slack &&
+         inner.x + inner.width <= outer.x + outer.width + slack &&
+         inner.y + inner.height <= outer.y + outer.height + slack;
+}
+
+} // namespace
+
+namespace liquify {
+
+// liquify#35: at each UI size and theme the bottom tabs have disjoint rectangles that hold their
+// text, a click selects each one, and keyboard focus selects the tab it is on.
+void NativeAcceptance::tab_row(App &app, float font, std::string_view name) {
+  const auto label = std::string(name);
+  auto tabs = std::vector<std::pair<PanelId, InputRectangle>>{};
+  for (const auto &[id, geometry] : app.frame_layout().panels) {
+    // The bottom row only; editor-tab panels have their own row.
+    if (geometry.tab.width > 0 && geometry.tab.height > 0 &&
+        app.panels_.layout(id).placement == PanelPlacement::bottom) {
+      tabs.emplace_back(id, geometry.tab);
+    }
+  }
+  require(tabs.size() > 1, label + ": several bottom tabs are laid out");
+  for (std::size_t first = 0; first < tabs.size(); ++first) {
+    test::require_bounds(tabs[first].second, app.frame_layout().window,
+                         std::string(panel_id_name(tabs[first].first)));
+    test::require_property(tabs[first].second.height >= font,
+                           label + ": a tab is shorter than its font");
+    for (auto second = first + 1; second < tabs.size(); ++second) {
+      test::require_property(!overlaps(tabs[first].second, tabs[second].second),
+                             label + ": " + std::string(panel_id_name(tabs[first].first)) +
+                                 " overlaps " + std::string(panel_id_name(tabs[second].first)));
+    }
+  }
+  require(true, label + ": tab rectangles are disjoint and as tall as the font");
+  // Mouse, in both directions.
+  auto order = tabs;
+  std::ranges::reverse(order);
+  order.insert(order.end(), tabs.begin(), tabs.end());
+  for (const auto &[id, ignored] : order) {
+    const auto target = app.frame_layout().panels.at(id).tab;
+    click(app, target);
+    if (app.panels_.active(PanelPlacement::bottom) != id) {
+      // A loaded host now and then drops a synthetic press (the existing `tabs` scenario shows
+      // the same); one repeat is logged, and a real defect fails both.
+      std::printf("%s: click on %s repeated\n", label.c_str(), panel_id_name(id).data());
+      click(app, app.frame_layout().panels.at(id).tab);
+    }
+    const auto &current = app.frame_layout().panels.at(id);
+    const auto active = app.panels_.active(PanelPlacement::bottom);
+    test::require_property(
+        current.selected && current.content.height > 0 && active == id,
+        std::format("{}: clicking {} at {:.0f},{:.0f} {:.0f}x{:.0f} selected {} (tab now at "
+                    "{:.0f},{:.0f} {:.0f}x{:.0f})",
+                    label, panel_id_name(id), target.x, target.y, target.width, target.height,
+                    active ? panel_id_name(*active) : "nothing", current.tab.x, current.tab.y,
+                    current.tab.width, current.tab.height));
+  }
+  require(true, label + ": a click selects every tab, in both directions");
+  // Keyboard: Tab moves focus along the row, Space selects the focused tab.
+  auto selected = std::vector<PanelId>{};
+  for (int press = 0; press < 40 && selected.size() < tabs.size(); ++press) {
+    key(app, "Tab");
+    auto focused = std::optional<PanelId>{};
+    for (const auto &[id, geometry] : app.frame_layout().panels) {
+      if (geometry.tab_focused && app.panels_.layout(id).placement == PanelPlacement::bottom &&
+          std::ranges::find(selected, id) == selected.end()) {
+        focused = id;
+      }
+    }
+    // The frame layout is rebuilt by the next key, so the id is copied out first.
+    if (focused) {
+      const auto id = *focused;
+      key(app, "Space");
+      if (app.panels_.active(PanelPlacement::bottom) != id &&
+          app.frame_layout().panels.at(id).tab_focused) {
+        std::printf("%s: Space on %s repeated\n", label.c_str(), panel_id_name(id).data());
+        key(app, "Space");
+      }
+      const auto &current = app.frame_layout().panels.at(id);
+      test::require_property(current.selected &&
+                                 app.panels_.active(PanelPlacement::bottom) == id,
+                             label + ": Space on focused " + std::string(panel_id_name(id)) +
+                                 " did not select it");
+      selected.push_back(id);
+    }
+  }
+  std::printf("%s: keyboard selected %zu of %zu tabs\n", label.c_str(), selected.size(),
+              tabs.size());
+  require(selected.size() == tabs.size(),
+          label + ": keyboard focus reaches and selects every tab");
+}
+
+// liquify#36: the status row holds its controls at each UI size and theme.
+void NativeAcceptance::status_row(App &app, float font, std::string_view name) {
+  const auto label = std::string(name);
+  const auto &controls = app.frame_layout().controls;
+  require(controls.contains("region/status-bar") && controls.contains("status/details"),
+          label + ": the status row and its Details button are laid out");
+  const auto region = controls.at("region/status-bar");
+  test::require_bounds(region, app.frame_layout().window, "status row");
+  auto drawn = std::vector<std::pair<std::string, InputRectangle>>{};
+  for (const auto &[key_name, rectangle] : controls) {
+    if (key_name.starts_with("status/")) {
+      drawn.emplace_back(key_name, rectangle);
+    }
+  }
+  for (std::size_t first = 0; first < drawn.size(); ++first) {
+    test::require_property(inside(drawn[first].second, region),
+                           label + ": " + drawn[first].first + " leaves the status row");
+    test::require_property(drawn[first].second.height >= font,
+                           label + ": " + drawn[first].first + " is shorter than its font");
+    for (auto second = first + 1; second < drawn.size(); ++second) {
+      test::require_property(!overlaps(drawn[first].second, drawn[second].second),
+                             label + ": " + drawn[first].first + " overlaps " +
+                                 drawn[second].first);
+    }
+  }
+  std::printf("%s: status row %.0fx%.0f with %zu controls\n", label.c_str(), region.width,
+              region.height, drawn.size());
+  require(true, label + ": status controls sit inside the row, as tall as the font, apart");
+}
+
+void NativeAcceptance::shell_sizes(App &app, const std::filesystem::path &output) {
+  open_file(app);
+  key(app, "j", true);
+  if (!app.shell_state_.bottom_panel_visible) {
+    key(app, "j", true);
+  }
+  require(app.shell_state_.bottom_panel_visible, "Primary+J exposed bottom tabs");
+  const auto source_before = std::string(app.editor_->text());
+  // 14 is the default; 24 and 32 are sizes the type scale loads exactly.
+  for (const auto size : {14U, 24U, 32U}) {
+    app.settings_.fonts.ui_size = size;
+    app.apply_settings_live(true);
+    pulse(app);
+    for (const auto theme : {ThemePreference::light, ThemePreference::dark}) {
+      app.options_.forced_theme = theme;
+      pulse(app);
+      const auto name = std::format("ui {} {}", size,
+                                    theme == ThemePreference::dark ? "dark" : "light");
+      tab_row(app, static_cast<float>(size), name);
+      status_row(app, static_cast<float>(size), name);
+      save_image(output / std::format("ui-{}-{}.png", size,
+                                      theme == ThemePreference::dark ? "dark" : "light"),
+                 capture(app));
+    }
+  }
+  app.options_.forced_theme.reset();
+  std::printf("editor: before=%zu bytes after=%zu bytes\n", source_before.size(),
+              app.editor_->text().size());
+  require(app.editor_->text() == source_before,
+          "keyboard traversal of the tabs never typed into the editor");
+}
+
+// liquify#36: a repository whose build service cannot start says so in the status row, in the
+// words the Build panel uses, and keeps the failure and Details readable at a narrow width.
+void NativeAcceptance::daemon_failure(App &app, const std::filesystem::path &output) {
+  open_file(app);
+  require(app.editor_graph_ != nullptr, "real repository has editor graph");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+  auto snapshot = app.editor_graph_->snapshot();
+  std::printf("daemon: state=%s error='%s' status='%s'\n",
+              std::string(daemon_state_name(snapshot.daemon_state)).c_str(),
+              snapshot.daemon_error.c_str(), editor_graph_status(snapshot).c_str());
+  require(!snapshot.daemon_running && snapshot.daemon_state == DaemonState::start_failed &&
+              !snapshot.daemon_error.empty(),
+          "the graph snapshot records that the daemon failed to start");
+  require(editor_graph_status(snapshot).find("daemon failed to start") != std::string::npos,
+          "repository details name the daemon failure");
+  const auto expected = std::string("The build service is not running for this repository");
+  const auto &labels = app.frame_layout().labels;
+  std::printf("status: failure='%s'\n",
+              labels.contains("status/failure") ? labels.at("status/failure").c_str() : "");
+  require(labels.contains("status/failure") &&
+              labels.at("status/failure").starts_with(expected),
+          "the status row names the daemon failure, not 'Daemon on'");
+
+  key(app, "F7");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+  snapshot = app.editor_graph_->snapshot();
+  const auto build_failure = describe_build_failure(
+      snapshot.build_error.value_or(liquid::error{}), app.repository_->path());
+  std::printf("build: summary='%s' status='%s'\n", build_failure.summary.c_str(),
+              app.frame_layout().labels.contains("status/failure")
+                  ? app.frame_layout().labels.at("status/failure").c_str()
+                  : "");
+  require(snapshot.build_error.has_value() && build_failure.summary == expected,
+          "the build reports the service that is not running");
+  require(app.frame_layout().labels.at("status/failure") ==
+              expected + " · Open " + std::string(app.panels_.descriptor(PanelId::build).title),
+          "the status row agrees with the build error and names the Build panel");
+  capture_themes(app, output, "daemon-failure");
+
+  for (const auto size : {14U, 24U}) {
+    app.settings_.fonts.ui_size = size;
+    app.apply_settings_live(true);
+    resize_to(app, 520, 600);
+    const auto name = std::format("narrow ui {}", size);
+    status_row(app, static_cast<float>(size), name);
+    const auto &narrow = app.frame_layout().labels;
+    std::printf("%s: failure='%s' repository=%d position=%d\n", name.c_str(),
+                narrow.contains("status/failure") ? narrow.at("status/failure").c_str() : "",
+                narrow.contains("status/repository"),
+                app.frame_layout().controls.contains("status/position"));
+    require(narrow.contains("status/failure") &&
+                narrow.at("status/failure").starts_with("The build service"),
+            name + ": the failure stays readable at a narrow width");
+    capture_themes(app, output, std::format("daemon-failure-narrow-{}", size));
+    app.panels_.focus(PanelId::diagnostics);
+    pulse(app);
+    click(app, app.frame_layout().controls.at("status/failure"));
+    require(app.panels_.active(PanelPlacement::bottom) == PanelId::build,
+            name + ": the narrow failure still opens the Build panel");
+    require(app.frame_layout().controls.contains("status/details"),
+            name + ": Details stays reachable at a narrow width");
+  }
+}
+
+void NativeAcceptance::build(App &app, const std::filesystem::path &output) {
   open_file(app);
   require(app.editor_graph_ != nullptr, "real repository has editor graph");
   app.editor_graph_->wait_until_idle();
   key(app, "F7");
   app.editor_graph_->wait_until_idle();
   pulse(app);
-  const auto snapshot = app.editor_graph_->snapshot();
-  std::printf("build: running=%d actions=%zu result='%s' error='%s'\n",
+  auto snapshot = app.editor_graph_->snapshot();
+  const auto repository = app.repository_->path().string();
+  const auto build_failure = describe_build_failure(
+      snapshot.build_error.value_or(liquid::error{}), app.repository_->path());
+  std::printf("build: running=%d actions=%zu result='%s' summary='%s' "
+              "step='%s' details='%s' query_error='%s'\n",
               snapshot.build_running, snapshot.build_actions.size(),
-              snapshot.build_result.c_str(), snapshot.query_error.c_str());
-  require(!snapshot.build_running && !snapshot.query_error.empty() &&
+              snapshot.build_result.c_str(), build_failure.summary.c_str(),
+              build_failure.next_step.c_str(), build_failure.details.c_str(),
+              snapshot.query_error.c_str());
+  require(!snapshot.build_running && snapshot.build_error.has_value() &&
               snapshot.build_result.empty(),
           "unconfigured build reports unavailable without fabricated success");
+  require(snapshot.query_error.empty(),
+          "#99: a build failure is not reported a second time as a query error");
+  require(build_failure.summary.find(repository) == std::string::npos &&
+              build_failure.details.find(repository) == std::string::npos,
+          "#99: no absolute repository path in the build failure");
+  auto status = app.status_failure(snapshot);
+  require(status && status->panel == PanelId::build &&
+              status->summary == build_failure.summary,
+          "#99: the status bar names the Build panel, which holds the error");
+  require(app.frame_layout().controls.contains("status/failure"),
+          "status bar failure is a control");
+  click(app, app.frame_layout().controls.at("status/failure"));
+  require(app.shell_state_.bottom_panel_visible &&
+              app.panels_.active(PanelPlacement::bottom) == PanelId::build &&
+              app.frame_layout().controls.contains("build-failure/summary"),
+          "#99: the status bar opens the Build panel showing the error");
+  capture_themes(app, output, "build-failure");
+
   key(app, "F9");
   app.editor_graph_->wait_until_idle();
   pulse(app);
-  const auto deploy = app.editor_graph_->snapshot().deploy;
-  std::printf("offline: running=%d objects=%llu error='%s'\n", deploy.running,
-              static_cast<unsigned long long>(deploy.objects),
-              deploy.error.c_str());
-  require(!deploy.running && !deploy.error.empty() && deploy.objects == 0,
+  snapshot = app.editor_graph_->snapshot();
+  const auto &deploy = snapshot.deploy;
+  const auto push_failure =
+      describe_push_failure(deploy.failure.value_or(liquid::error{}),
+                            deploy.remote, app.repository_->path());
+  std::printf("offline: running=%d objects=%llu summary='%s' step='%s' "
+              "details='%s' query_error='%s'\n",
+              deploy.running, static_cast<unsigned long long>(deploy.objects),
+              push_failure.summary.c_str(), push_failure.next_step.c_str(),
+              push_failure.details.c_str(), snapshot.query_error.c_str());
+  require(!deploy.running && deploy.failure.has_value() && deploy.objects == 0,
           "missing remote reports offline without fabricated upload");
+  require(snapshot.query_error.empty(),
+          "#99: a push failure appears once, not also as a query error");
+  require(push_failure.action == ErrorAction::set_sync_remote &&
+              push_failure.details.find(repository) == std::string::npos,
+          "#99: no sync remote offers Set lake, with no absolute path");
+  require(app.frame_layout().controls.contains("push-failure/summary"),
+          "push failure drawn in the Build panel");
+  capture_themes(app, output, "push-failure");
+}
+
+void NativeAcceptance::cut(App &app, const std::filesystem::path &output) {
+  open_file(app);
+  click(app, app.frame_layout().editor);
+  const auto marker = std::string("/* cut from the native window */");
+  text(app, marker);
+  require(app.editor_->dirty(), "typed text reached the retained editor");
+  key(app, "s", true);
+  std::printf("save: dirty=%d status='%s' buffer_error='%s'\n", app.editor_->dirty(),
+              app.editor_status_.c_str(), std::string(app.editor_->error()).c_str());
+  if (app.editor_->dirty()) {
+    auto options = liquid::repository_options{};
+    options.session = app.multiplayer_session_;
+    auto probe = liquid::runtime::block_on(
+        liquid::repository::open(*app.options_.repository_path, options));
+    std::printf("probe: path=%s ok=%d error='%s' context='%s'\n",
+                app.options_.repository_path->string().c_str(), probe.has_value(),
+                probe ? "" : probe.error().message.c_str(),
+                probe ? "" : probe.error().context.c_str());
+  }
+  require(!app.editor_->dirty(), "Primary+S saved the edit as a drip");
+  key(app, "k", true, true);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while ((!popup("Cut Change") || !app.cut_pending_) &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  require(popup("Cut Change"), "Primary+Shift+K opened the Cut Change composer");
+  std::printf("composer: drips=%zu files=%zu base='%s'\n",
+              app.cut_pending_ ? app.cut_pending_->drips.size() : 0,
+              app.cut_pending_ ? app.cut_pending_->paths.size() : 0,
+              app.cut_pending_ ? app.cut_pending_->base.c_str() : "");
+  // The repository's two seeded writes and the typed save: three drips, no change yet.
+  require(app.cut_pending_ && app.cut_pending_->failure.empty() &&
+              app.cut_pending_->drips.size() == 3 &&
+              app.cut_pending_->paths ==
+                  std::vector<std::string>{"main.cpp", "other.cpp"},
+          "composer lists the saved drips and the files they touch");
+  capture_themes(app, output, "cut-composer-empty");
+  click(app, app.frame_layout().controls.at("cut/message"));
+  const auto message = std::string("Explain the answer");
+  text(app, message);
+  require(app.cut_message_ == message, "message typed into the composer");
+  require(!app.editor_->dirty() &&
+              !std::string(app.editor_->text()).contains(message),
+          "#39: the composer's text does not reach the source it covers");
+  capture_themes(app, output, "cut-composer");
+  click(app, app.frame_layout().controls.at("cut/submit"));
+  const auto started = std::chrono::steady_clock::now();
+  while ((app.cut_operation_ || popup("Cut Change")) &&
+         std::chrono::steady_clock::now() < started + std::chrono::seconds(60)) {
+    pulse(app);
+  }
+  std::printf("cut: waited_ms=%lld operation=%d popup=%d failure='%s' details='%s'\n",
+              static_cast<long long>(
+                  std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - started)
+                      .count()),
+              app.cut_operation_.has_value(), popup("Cut Change"),
+              app.cut_failure_.summary.c_str(), app.cut_failure_.details.c_str());
+  require(!popup("Cut Change") && app.cut_result_.has_value(),
+          "Cut change closed the composer with a new change");
+  auto repository = liquid::runtime::block_on(
+      liquid::repository::open(app.repository_->path()));
+  require(repository.has_value(), "repository reopened independently");
+  const auto log = liquid::runtime::block_on(repository->log());
+  require(log.has_value() && !log->empty(), "liquid log lists the change");
+  const auto &change = log->front();
+  auto signer =
+      liquid::runtime::block_on(liquid::identity_detail::local_signer());
+  require(signer.has_value(), "local identity available");
+  std::printf("cut: change=%s message='%s' author=%.*s status='%s'\n",
+              liquid::to_string(change.id.value).c_str(),
+              change.message.c_str(),
+              static_cast<int>(change.author.identifier().size()),
+              change.author.identifier().data(), app.editor_status_.c_str());
+  require(liquid::to_string(change.id.value) == *app.cut_result_ &&
+              change.message == message,
+          "the change in liquid's log carries the message");
+  require(change.author.identifier() == signer->identity().identifier(),
+          "the change is signed by this computer's identity");
+  const auto bytes =
+      liquid::runtime::block_on(repository->at(change.id));
+  require(bytes.has_value(), "the change's snapshot reads back");
+  const auto saved = read_back(app.repository_->path());
+  require(saved.contains(marker), "the cut change holds the typed edit");
+  capture_themes(app, output, "cut-done");
+}
+
+// Types into the open editor, saves, and cuts a change through the composer.
+void NativeAcceptance::edit_save_cut(App &app, std::string_view marker,
+                                     std::string_view message) {
+  click(app, app.frame_layout().editor);
+  text(app, marker);
+  key(app, "s", true);
+  std::printf("save: dirty=%d status='%s' buffer_error='%s'\n", app.editor_->dirty(),
+              app.editor_status_.c_str(), std::string(app.editor_->error()).c_str());
+  if (app.editor_->dirty()) {
+    auto options = liquid::repository_options{};
+    options.session = app.multiplayer_session_;
+    auto probe = liquid::runtime::block_on(
+        liquid::repository::open(*app.options_.repository_path, options));
+    std::printf("probe: path=%s ok=%d error='%s' context='%s'\n",
+                app.options_.repository_path->string().c_str(), probe.has_value(),
+                probe ? "" : probe.error().message.c_str(),
+                probe ? "" : probe.error().context.c_str());
+  }
+  require(!app.editor_->dirty(), "Primary+S saved the edit as a drip");
+  key(app, "k", true, true);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while ((!popup("Cut Change") || !app.cut_pending_) &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  require(popup("Cut Change") && app.cut_pending_ &&
+              !app.cut_pending_->drips.empty(),
+          "Cut Change lists the saved drip");
+  click(app, app.frame_layout().controls.at("cut/message"));
+  text(app, message);
+  click(app, app.frame_layout().controls.at("cut/submit"));
+  while ((app.cut_operation_ || popup("Cut Change")) &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  require(app.cut_result_.has_value(), "the change was cut");
+}
+
+// Presses F9 and waits for the push to finish.
+void NativeAcceptance::push(App &app) {
+  key(app, "F9");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+}
+
+// Clones `remote` into a fresh folder with libliquid alone and returns main.cpp.
+auto NativeAcceptance::lake_file(const std::string &remote,
+                                 const std::filesystem::path &folder,
+                                 std::string path) -> std::string {
+  {
+    auto client = liquid::runtime::block_on(
+        liquid::drive_client::open(folder, remote));
+    require(client.has_value(), "verification clone opened");
+    require(liquid::runtime::block_on(client->pin("")).has_value() &&
+                liquid::runtime::block_on(client->sync()).has_value(),
+            "verification clone synced from the test lake");
+  }
+  auto repository =
+      liquid::runtime::block_on(liquid::repository::open(folder));
+  require(repository.has_value(), "verification clone opened as a repository");
+  const auto bytes =
+      liquid::runtime::block_on(repository->read(std::move(path)));
+  require(bytes.has_value(), "file read from the verification clone");
+  return {reinterpret_cast<const char *>(bytes->data()), bytes->size()};
+}
+
+void NativeAcceptance::clone_push(App &app, const std::filesystem::path &output) {
+  auto lake = liquid::test::forge_double{};
+  require(lake.advance_head("main.cpp", source).has_value(),
+          "test lake holds main.cpp");
+  click(app, app.frame_layout().controls.at("front-door/clone"));
+  for (int attempt = 0; attempt < 3 && !popup("Clone from Lake"); ++attempt) {
+    click(app, app.frame_layout().controls.at("front-door/clone"));
+  }
+  require(popup("Clone from Lake"), "Clone from lake dialog opened");
+  const auto stamp = std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count());
+  fill_clone(app, lake.url(), (output / ("clone-" + stamp)).string());
+  click(app, app.frame_layout().controls.at("clone/submit"));
+  wait_for_repository_operation(app);
+  require(app.repository_ != nullptr && app.repository_->error().empty(),
+          "the lake repository was cloned and opened");
+  const auto recorded = recorded_lake_remote(app.repository_->path());
+  std::printf("clone: recorded_remote='%s' lake='%s'\n",
+              recorded ? recorded->c_str() : "?", lake.url().c_str());
+  require(recorded && *recorded == lake.url(),
+          "#104: a clone records the lake it came from");
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (std::chrono::steady_clock::now() < deadline &&
+         (!app.frame_layout().controls.contains("repository/main.cpp") ||
+          app.repository_->navigation_loading())) {
+    pulse(app);
+  }
+  click(app, app.frame_layout().controls.at("repository/main.cpp"));
+  std::printf("clone: opened='%s' bytes=%zu\n",
+              app.editor_ ? std::string(app.editor_->display_path()).c_str() : "",
+              app.editor_ ? app.editor_->text().size() : 0);
+  require(app.editor_ && app.editor_->display_path() == "main.cpp",
+          "the cloned main.cpp opened in the editor");
+  source_tab(app);
+  const auto marker = std::string("/* pushed from the native window */");
+  edit_save_cut(app, marker, "Push from liquify");
+  push(app);
+  const auto &deploy = app.editor_graph_->snapshot().deploy;
+  std::printf("push: remote='%s' objects=%llu references=%zu failure='%s'\n",
+              deploy.remote.c_str(),
+              static_cast<unsigned long long>(deploy.objects),
+              deploy.references.size(),
+              deploy.failure ? deploy.failure->message.c_str() : "");
+  require(!deploy.failure && deploy.remote == lake.url() &&
+              !deploy.references.empty() &&
+              std::ranges::all_of(deploy.references,
+                                  [](const auto &reference) {
+                                    return reference.outcome ==
+                                           liquid::sync_ref_outcome_kind::applied;
+                                  }),
+          "#104: F9 pushed the change to the lake it was cloned from");
+  capture_themes(app, output, "push-done");
+  const auto served = lake_file(lake.url(), output / ("verify-" + stamp), "main.cpp");
+  require(served.contains(marker),
+          "#104: the lake serves the pushed edit to a fresh clone");
+}
+
+void NativeAcceptance::set_lake_push(App &app,
+                                     const std::filesystem::path &output) {
+  auto lake = liquid::test::forge_double{};
+  open_file(app);
+  const auto marker = std::string("/* first push */");
+  edit_save_cut(app, marker, "First push");
+  push(app);
+  require(app.editor_graph_->snapshot().deploy.failure.has_value(),
+          "F9 with no lake reports it");
+  click(app, app.frame_layout().controls.at("status/failure"));
+  require(app.frame_layout().controls.contains("push-failure/action"),
+          "#104: the push failure offers Set lake");
+  capture_themes(app, output, "push-no-lake");
+  click(app, app.frame_layout().controls.at("push-failure/action"));
+  pulse(app);
+  require(popup("Set Lake"), "Set lake opened the Set Lake dialog");
+  // The address field has the keyboard when the dialog opens.
+  text(app, lake.url());
+  require(app.set_lake_url_ == lake.url(), "address typed into Set Lake");
+  capture_themes(app, output, "set-lake");
+  click(app, app.frame_layout().controls.at("set-lake/submit"));
+  std::printf("set-lake: popup=%d failure='%s' details='%s'\n", popup("Set Lake"),
+              app.set_lake_failure_.summary.c_str(), app.set_lake_failure_.details.c_str());
+  require(!popup("Set Lake") && app.set_lake_failure_.empty(),
+          "Set lake recorded the lake");
+  push(app);
+  const auto &deploy = app.editor_graph_->snapshot().deploy;
+  std::printf("push: remote='%s' objects=%llu references=%zu failure='%s'\n",
+              deploy.remote.c_str(),
+              static_cast<unsigned long long>(deploy.objects),
+              deploy.references.size(),
+              deploy.failure ? deploy.failure->message.c_str() : "");
+  // The test lake already holds a repository of its own, so it refuses this unrelated history;
+  // what this proves is that F9 now reaches the lake Set Lake recorded, and says why it refused.
+  const auto failure = describe_push_failure(
+      deploy.failure.value_or(liquid::error{}), deploy.remote,
+      app.repository_->path());
+  std::printf("push: summary='%s' step='%s'\n", failure.summary.c_str(),
+              failure.next_step.c_str());
+  require(deploy.remote == lake.url() && deploy.failure &&
+              failure.action != ErrorAction::set_sync_remote &&
+              failure.summary.contains("holds a different repository"),
+          "#104: F9 pushed to the lake Set Lake recorded");
+  capture_themes(app, output, "push-other-history");
+}
+
+// A folder cloned from the test lake by libliquid alone, then opened in liquify.
+void NativeAcceptance::opened_clone_push(const std::filesystem::path &output) {
+  auto lake = liquid::test::forge_double{};
+  require(lake.advance_head("main.cpp", source).has_value(),
+          "test lake holds main.cpp");
+  const auto stamp = std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count());
+  const auto folder = output / ("clone-" + stamp);
+  static_cast<void>(lake_file(lake.url(), folder, "main.cpp"));
+  App app({.repository_path = folder});
+  require(launch(app, 2) == 0, "real native application window initialized");
+  pulse(app);
+  open_file(app);
+  const auto marker = std::string("/* pushed from the native window */");
+  edit_save_cut(app, marker, "Push from liquify");
+  push(app);
+  const auto &deploy = app.editor_graph_->snapshot().deploy;
+  std::printf("push: remote='%s' objects=%llu references=%zu failure='%s'\n",
+              deploy.remote.c_str(),
+              static_cast<unsigned long long>(deploy.objects),
+              deploy.references.size(),
+              deploy.failure ? deploy.failure->message.c_str() : "");
+  require(!deploy.failure && deploy.remote == lake.url() &&
+              !deploy.references.empty() &&
+              std::ranges::all_of(deploy.references,
+                                  [](const auto &reference) {
+                                    return reference.outcome ==
+                                           liquid::sync_ref_outcome_kind::applied;
+                                  }),
+          "#104: F9 pushed the change to the lake the folder was cloned from");
+  app.panels_.focus(PanelId::build);
+  app.shell_state_.bottom_panel_visible = true;
+  pulse(app);
+  capture_themes(app, output, "push-done");
+  const auto served =
+      lake_file(lake.url(), output / ("verify-" + stamp), "main.cpp");
+  require(served.contains(marker),
+          "#104: the lake serves the pushed edit to a fresh clone");
+}
+
+void NativeAcceptance::request_review(const std::filesystem::path &output) {
+  // A repository with no lake: the Review panel teaches and offers Set lake.
+  {
+    const auto local = output / ("local-" + std::to_string(std::chrono::steady_clock::now()
+                                                              .time_since_epoch()
+                                                              .count()));
+    create_repository(local);
+    App app({.repository_path = local});
+    require(launch(app, 2) == 0, "real native application window initialized");
+    app.panels_.focus(PanelId::review);
+    app.shell_state_.sidebar_visible = true;
+    pulse(app);
+    require(app.review_ == nullptr &&
+                app.frame_layout().controls.contains("review/set-lake"),
+            "#105: with no lake the Review panel offers Set lake, no flag");
+    capture_themes(app, output, "review-no-lake");
+  }
+  auto lake = liquid::test::forge_double{};
+  require(lake.advance_head("main.cpp", source).has_value(),
+          "test lake holds main.cpp");
+  const auto stamp = std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count());
+  const auto folder = output / ("clone-" + stamp);
+  static_cast<void>(lake_file(lake.url(), folder, "main.cpp"));
+  const auto before = recorded_lake_remote(folder);
+  std::printf("review: recorded_before='%s' error='%s'\n",
+              before ? before->c_str() : "", before ? "" : before.error().message.c_str());
+  App app({.repository_path = folder});
+  require(launch(app, 2) == 0, "real native application window initialized");
+  pulse(app);
+  std::printf("review: lake_url='%s' status='%s'\n",
+              app.options_.lake_url.value_or("").c_str(), app.editor_status_.c_str());
+  require(app.review_ != nullptr,
+          "#105: the Review panel uses the lake the repository came from");
+  app.panels_.focus(PanelId::review);
+  app.shell_state_.sidebar_visible = true;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (app.review_->snapshot().busy &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  pulse(app);
+  require(app.frame_layout().controls.contains("review/request-empty"),
+          "#105: the empty Review panel offers Request review");
+  capture_themes(app, output, "review-empty");
+  app.panels_.focus(PanelId::repository);
+  pulse(app);
+  open_file(app);
+  edit_save_cut(app, "/* please review */", "Ask for review");
+  push(app);
+  require(!app.editor_graph_->snapshot().deploy.failure,
+          "the change was pushed");
+  app.panels_.focus(PanelId::review);
+  app.shell_state_.sidebar_visible = true;
+  pulse(app);
+  click(app, app.frame_layout().controls.at("review/request"));
+  pulse(app);
+  require(popup("Request Review"), "Request review opened its dialog");
+  text(app, "ana, bo");
+  require(app.request_review_reviewers_ == "ana, bo", "reviewers typed");
+  capture_themes(app, output, "request-review");
+  click(app, app.frame_layout().controls.at("request-review/submit"));
+  while ((app.review_->snapshot().busy ||
+          !app.review_->snapshot().review.selected) &&
+         std::chrono::steady_clock::now() < deadline + std::chrono::seconds(30)) {
+    pulse(app);
+  }
+  const auto snapshot = app.review_->snapshot();
+  std::printf("review: selected=%s error='%s'\n",
+              snapshot.review.selected ? snapshot.review.selected->id.c_str() : "",
+              snapshot.error.c_str());
+  require(snapshot.review.selected.has_value(),
+          "#105: Request review created the review and opened it");
+  auto client = liquid::forge_client{lake.url()};
+  const auto reviews = liquid::runtime::block_on(client.list_reviews());
+  require(reviews.has_value(), "the test lake lists reviews");
+  auto repository = liquid::runtime::block_on(liquid::repository::open(folder));
+  require(repository.has_value(), "repository reopened");
+  const auto head = repository->status()->head;
+  const auto found = std::ranges::find_if(*reviews, [&](const auto &review) {
+    return review.id == snapshot.review.selected->id;
+  });
+  require(found != reviews->end() && head &&
+              liquid::to_string(found->change.value) ==
+                  liquid::to_string(head->value) &&
+              found->reviewers == std::vector<std::string>{"ana", "bo"},
+          "#105: the lake holds the same review, of the current change, with "
+          "its reviewers");
+  capture_themes(app, output, "review-opened");
+}
+
+void NativeAcceptance::front_door(App &app, const std::filesystem::path &output) {
+  for (const auto *control : {"front-door/open", "front-door/new", "front-door/clone",
+                              "front-door/new-window", "front-door/identity"}) {
+    require(app.frame_layout().controls.contains(control),
+            std::string("front door shows ") + control);
+  }
+  capture_themes(app, output, "front-door");
+  click(app, app.frame_layout().controls.at("front-door/clone"));
+  for (int attempt = 0; attempt < 3 && !popup("Clone from Lake"); ++attempt) {
+    click(app, app.frame_layout().controls.at("front-door/clone"));
+  }
+  require(popup("Clone from Lake"), "Clone from Lake dialog opened");
+  capture_themes(app, output, "front-door-clone");
+  click(app, app.frame_layout().controls.at("clone/cancel"));
+  require(!popup("Clone from Lake"), "Cancel closed the clone dialog");
+
+  // Your identity: this computer's signing key, not a lake sign-in.
+  click(app, app.frame_layout().controls.at("front-door/identity"));
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (!app.first_run_.session() &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  require(app.first_run_.session().has_value(),
+          "Your identity shows this computer's signing identity");
+  click(app, app.frame_layout().controls.at("front-door/identity"));
+  capture_themes(app, output, "front-door-identity");
+  key(app, "Escape");
+
+  // New repository, created with no terminal, then open in the same window.
+  click(app, app.frame_layout().controls.at("front-door/new"));
+  for (int attempt = 0; attempt < 3 && !popup("New Repository"); ++attempt) {
+    click(app, app.frame_layout().controls.at("front-door/new"));
+  }
+  require(popup("New Repository"), "New repository opened its dialog");
+  const auto folder =
+      output / ("new-" + std::to_string(std::chrono::steady_clock::now()
+                                             .time_since_epoch()
+                                             .count()));
+  text(app, folder.string());
+  require(app.new_repository_path_ == folder.string(), "folder typed");
+  capture_themes(app, output, "front-door-new");
+  click(app, app.frame_layout().controls.at("new-repository/submit"));
+  wait_for_repository_operation(app);
+  std::printf("new repository: open=%d error='%s' phase=%d\n",
+              app.repository_ != nullptr,
+              app.repository_ ? std::string(app.repository_->error()).c_str() : "",
+              static_cast<int>(app.first_run_.phase()));
+  require(app.repository_ != nullptr && app.repository_->error().empty() &&
+              app.repository_->path() == folder,
+          "#106: New repository created and opened the repository");
+  auto reopened = liquid::runtime::block_on(liquid::repository::open(folder));
+  require(reopened.has_value(), "#106: libliquid opens the new repository");
+  capture_themes(app, output, "front-door-created");
+}
+
+// Types the address into the focused field and the folder into the next, as a person would.
+void NativeAcceptance::fill_clone(App &app, const std::string &remote,
+                                  const std::string &folder) {
+  text(app, remote);
+  click(app, app.frame_layout().controls.at("clone/folder"));
+  text(app, folder);
+  pulse(app);
+  require(app.clone_remote_ == remote && app.clone_path_ == folder,
+          "address and folder typed into Clone from Lake");
+}
+
+// A fresh CMake repository: F7 proposes the CMake command, records it through libliquid's wrap
+// API and builds, with no terminal.
+void NativeAcceptance::set_up_build(const std::filesystem::path &output) {
+  const auto folder =
+      output / ("cmake-" + std::to_string(std::chrono::steady_clock::now()
+                                               .time_since_epoch()
+                                               .count()));
+  std::filesystem::create_directories(folder);
+  const auto cmake = std::string("cmake_minimum_required(VERSION 3.20)\n"
+                                 "project(answer CXX)\n"
+                                 "add_executable(answer main.cpp)\n");
+  const auto main = std::string("int main() { return 0; }\n");
+  std::ofstream(folder / "CMakeLists.txt") << cmake;
+  std::ofstream(folder / "main.cpp") << main;
+  {
+    auto repo = liquid::runtime::block_on(liquid::repository::create(folder));
+    require(repo.has_value(), "CMake repository created");
+    for (const auto &[name, text] :
+         {std::pair{"CMakeLists.txt", cmake}, std::pair{"main.cpp", main}}) {
+      const auto bytes = std::as_bytes(std::span(text));
+      require(liquid::runtime::block_on(
+                  repo->write(name, {bytes.begin(), bytes.end()}))
+                  .has_value(),
+              std::string("persisted ") + name);
+    }
+  }
+  App app({.repository_path = folder});
+  require(launch(app, 2) == 0, "real native application window initialized");
+  pulse(app);
+  app.editor_graph_->wait_until_idle();
+  key(app, "F7");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+  require(app.editor_graph_->snapshot().build_error.has_value(),
+          "F7 with no recorded build reports it");
+  click(app, app.frame_layout().controls.at("status/failure"));
+  require(app.frame_layout().controls.contains("build-failure/action"),
+          "#107: the build failure offers Set up build");
+  click(app, app.frame_layout().controls.at("build-failure/action"));
+  pulse(app);
+  require(popup("Set Up Build"), "Set up build opened its dialog");
+  require(app.build_setup_command_ ==
+              "cmake -S . -B build && cmake --build build",
+          "#107: the dialog proposes the CMake command and names it");
+  capture_themes(app, output, "set-up-build");
+  click(app, app.frame_layout().controls.at("build-setup/submit"));
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(120);
+  while ((app.build_setup_operation_ || popup("Set Up Build")) &&
+         app.build_setup_failure_.empty() &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  std::printf("set-up-build: failure='%s' details='%s'\n",
+              app.build_setup_failure_.summary.c_str(),
+              app.build_setup_failure_.details.c_str());
+  require(app.build_setup_failure_.empty() && !popup("Set Up Build"),
+          "#107: the command was recorded through libliquid's wrap API");
+  app.editor_graph_->wait_until_idle();
+  pulse(app);
+  const auto snapshot = app.editor_graph_->snapshot();
+  std::printf("set-up-build: build_error='%s' result='%s' actions=%zu\n",
+              snapshot.build_error ? snapshot.build_error->message.c_str() : "",
+              snapshot.build_result.c_str(), snapshot.build_actions.size());
+  require(!snapshot.build_error ||
+              snapshot.build_error->code != liquid::errc::not_configured,
+          "#107: F7 now finds the recorded build");
+  capture_themes(app, output, "set-up-build-done");
+}
+
+// The command palette and the front door's Recent repositories, whose headers liquify#109
+// fixed, in the real window and both themes.
+void NativeAcceptance::table_headers(App &app, const std::filesystem::path &output) {
+  open_file(app);
+  key(app, "p", true, true);
+  require(popup("Command Palette"), "palette opened");
+  require(app.frame_layout().controls.contains("palette/header"),
+          "#109: the palette draws its header row");
+  capture_themes(app, output, "palette-header");
+  key(app, "Escape");
+  app.first_run_.return_to_welcome();
+  pulse(app);
+  require(app.frame_layout().controls.contains("recent-repositories/header"),
+          "#109: the front door draws Recent repositories with its header row");
+  capture_themes(app, output, "recent-header");
+}
+
+// liquify#100-#102: the screens the look issues name, in the real window and both themes:
+// the empty editor, a panel header, the command palette, Settings and the front door.
+void NativeAcceptance::look(App &app, const std::filesystem::path &output) {
+  require(app.frame_layout().controls.contains("editor/empty-title"),
+          "#100: the empty editor shows its title");
+  require(app.frame_layout().controls.at("editor/empty-title").height >
+              app.frame_layout().controls.at("type/body").height * 1.5F,
+          "#100: the empty editor title is set in the title size");
+  capture_themes(app, output, "look-empty-editor");
+  key(app, "p", true, true);
+  require(popup("Command Palette"), "palette opened");
+  capture_themes(app, output, "look-palette");
+  key(app, "Escape");
+  static_cast<void>(app.invoke_command("settings.open"));
+  pulse(app);
+  require(popup("Settings"), "Settings opened");
+  capture_themes(app, output, "look-settings");
+  key(app, "Escape");
+  open_file(app);
+  capture_themes(app, output, "look-editor");
+  app.panels_.focus(PanelId::search);
+  app.shell_state_.sidebar_visible = true;
+  pulse(app);
+  require(app.frame_layout().controls.contains("search/query"),
+          "#101: the Search panel shows its labelled fields");
+  capture_themes(app, output, "look-search");
+  // #102: the whole window, and a dialog open over it in dark.
+  app.shell_state_.bottom_panel_visible = true;
+  pulse(app);
+  const auto &layout = app.frame_layout().controls;
+  require(layout.contains("region/sidebar") && layout.contains("region/editor-area") &&
+              std::abs(layout.at("region/sidebar").x + layout.at("region/sidebar").width -
+                       layout.at("region/editor-area").x) < 0.5F,
+          "#102: the sidebar and editor share an edge");
+  capture_themes(app, output, "look-window");
+  key(app, "p", true, true);
+  app.options_.forced_theme = ThemePreference::dark;
+  pulse(app);
+  save_image(output / "look-dialog-dark.png", capture(app));
+  app.options_.forced_theme.reset();
+  key(app, "Escape");
+  app.first_run_.return_to_welcome();
+  pulse(app);
+  require(app.frame_layout().controls.at("welcome/title").height >=
+              app.frame_layout().controls.at("welcome/copy").height * 1.5F,
+          "#100: the front door title is set in the title size");
+  capture_themes(app, output, "look-front-door");
+}
+
+void NativeAcceptance::wait_for_repository_operation(App &app) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (app.repository_operation_ &&
+         std::chrono::steady_clock::now() < deadline) {
+    pulse(app);
+  }
+  pulse(app);
+  require(!app.repository_operation_, "repository operation finished");
+}
+
+void NativeAcceptance::capture_themes(App &app,
+                                      const std::filesystem::path &output,
+                                      std::string_view name) {
+  for (const auto theme : {ThemePreference::light, ThemePreference::dark}) {
+    app.options_.forced_theme = theme;
+    pulse(app);
+    const auto suffix = theme == ThemePreference::dark ? "-dark.png" : "-light.png";
+    save_image(output / (std::string(name) + suffix), capture(app));
+  }
+  app.options_.forced_theme.reset();
+  pulse(app);
+}
+
+void NativeAcceptance::clone_failures(App &app,
+                                      const std::filesystem::path &output) {
+  struct Case {
+    std::string_view name;
+    int status;          // 0: nothing listens on the port
+    std::string_view scheme;
+    FailureKind expected;
+  };
+  const auto cases = std::array<Case, 7>{{
+      {"offline", 0, "http", FailureKind::offline},
+      {"secure-connection", 404, "https", FailureKind::secure_connection},
+      {"unauthorized", 401, "http", FailureKind::unauthorized},
+      {"forbidden", 403, "http", FailureKind::forbidden},
+      {"not-found", 404, "http", FailureKind::not_found},
+      {"lake-unavailable", 503, "http", FailureKind::lake_unavailable},
+      {"unsupported-lake", 400, "http", FailureKind::unsupported_lake},
+  }};
+  for (const auto &item : cases) {
+    auto lake = std::optional<CannedLake>{};
+    auto port = 0;
+    if (item.status != 0) {
+      lake.emplace(item.status);
+      port = lake->port();
+    } else {
+      // Bind and release a port, so nothing listens on it during the clone.
+      auto probe = std::optional<CannedLake>{};
+      probe.emplace(404);
+      port = probe->port();
+    }
+    const auto remote = std::format("{}://127.0.0.1:{}/v1/repositories/sample",
+                                    item.scheme, port);
+    require(app.frame_layout().controls.contains("front-door/clone"),
+            "front door shows Clone from lake");
+    const auto button = app.frame_layout().controls.at("front-door/clone");
+    std::printf("front-door/clone at %.0f,%.0f %.0fx%.0f phase=%d\n", button.x,
+                button.y, button.width, button.height,
+                static_cast<int>(app.first_run_.phase()));
+    for (int attempt = 0; attempt < 3 && !popup("Clone from Lake"); ++attempt) {
+      click(app, button);
+      pulse(app);
+    }
+    require(popup("Clone from Lake"), "Clone from lake dialog opened");
+    fill_clone(app, remote,
+               (output / ("clone-" + std::string(item.name))).string());
+    click(app, app.frame_layout().controls.at("clone/submit"));
+    wait_for_repository_operation(app);
+    const auto &failure = app.first_run_.clone_failure();
+    std::printf("clone %.*s: kind=%.*s summary='%s' step='%s' details='%s' "
+                "lake_requests=%d\n",
+                static_cast<int>(item.name.size()), item.name.data(),
+                static_cast<int>(failure_kind_name(failure.kind).size()),
+                failure_kind_name(failure.kind).data(), failure.summary.c_str(),
+                failure.next_step.c_str(), failure.details.c_str(),
+                lake ? lake->requests() : 0);
+    require(failure.kind == item.expected,
+            std::format("{} failure is classified from liquid's error",
+                        item.name));
+    const auto says_offline =
+        failure.next_step.find("offline is normal") != std::string::npos;
+    require(says_offline == (item.expected == FailureKind::offline),
+            std::format("{}: 'offline is normal' only when unreachable",
+                        item.name));
+    require(app.first_run_.phase() ==
+                (item.expected == FailureKind::offline
+                     ? RepositoryLifecyclePhase::offline
+                     : RepositoryLifecyclePhase::failed),
+            std::format("{}: lifecycle phase matches the failure", item.name));
+    require(app.frame_layout().controls.contains("clone-failure/summary") &&
+                app.frame_layout().controls.contains("clone-failure/details"),
+            std::format("{}: sentence and Details control drawn", item.name));
+    require(failure.details.find(output.string()) == std::string::npos,
+            std::format("{}: no absolute path in the message", item.name));
+    click(app, app.frame_layout().controls.at("clone-failure/details"));
+    require(app.error_details_open_["clone-failure"],
+            "Details shows liquid's message on request");
+    capture_themes(app, output, "clone-" + std::string(item.name));
+    click(app, app.frame_layout().controls.at("clone-failure/details"));
+    for (int attempt = 0;
+         attempt < 3 &&
+         app.first_run_.phase() != RepositoryLifecyclePhase::welcome;
+         ++attempt) {
+      click(app, app.frame_layout().controls.at("clone-failure/back"));
+    }
+    require(app.first_run_.phase() == RepositoryLifecyclePhase::welcome,
+            "Back returns to the front door");
+  }
+}
+
+// liquify#149: the fault plugin's hanging panel and command, in their own host process, never
+// stall a frame. Before the fix each refresh waited up to the 2 s panel deadline on the UI
+// thread and the command up to its 10 s; now every frame is drawn while they wait, the panel
+// shows its loading state, and the deadlines end both calls as before.
+void NativeAcceptance::plugin_hang(App &app, const std::filesystem::path &output) {
+  using namespace std::chrono_literals;
+  require(app.plugin_dispatcher_ != nullptr, "#149: plugin dispatcher created for the repository");
+  for (const auto &failure : app.plugin_failures_) {
+    std::printf("plugin failure: %s: %s\n", failure.path.string().c_str(), failure.error.c_str());
+  }
+  require(app.plugin_failures_.empty(), "#149: fault plugin loaded in its host process");
+  app.panels_.focus(PanelId::plugins);
+  auto slowest = std::chrono::steady_clock::duration{};
+  auto frames = 0;
+  // One pulse is four production frames; a frame that waited on a plugin would take the
+  // panel's 2 s deadline, so a pulse under half of it cannot contain one.
+  const auto frame = [&] {
+    const auto start = std::chrono::steady_clock::now();
+    pulse(app);
+    slowest = std::max(slowest, std::chrono::steady_clock::now() - start);
+    frames += 4;
+  };
+  const auto slowest_ms = [&] {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(slowest).count();
+  };
+  const auto panel = [&](std::string_view name) {
+    const auto found = std::ranges::find(app.plugin_panels_, name, &PluginPanelSnapshot::name);
+    if (found == app.plugin_panels_.end()) {
+      require(false, std::string("#149: panel listed: ") + std::string(name));
+    }
+    return *found;
+  };
+
+  frame();
+  require(panel("fault.hang").loading, "#149: the hanging panel draws its loading state");
+  save_image(output / "plugin-loading.png", capture(app));
+
+  key(app, "p", true, true);
+  require(popup("Command Palette"), "#149: Primary+Shift+P opened the palette");
+  text(app, "fault.sleep");
+  const auto results = app.commands_->search(app.command_palette_query_);
+  require(!results.empty() && results[app.command_palette_selection_].name == "fault.sleep",
+          "#149: the palette selects the hanging plugin command");
+  const auto before_enter = std::chrono::steady_clock::now();
+  key(app, "Enter");
+  require(std::chrono::steady_clock::now() - before_enter < 1s,
+          "#149: Enter returns while the plugin command hangs");
+  require(app.editor_status_ == "plugin command running: fault.sleep",
+          "#149: the status bar says the command is running");
+
+  // The panel answers after its deadline; the command after its own, queued behind it.
+  const auto until = std::chrono::steady_clock::now() + 60s;
+  auto panel_answered = false;
+  auto command_answered = false;
+  auto status_seen = false;
+  while (std::chrono::steady_clock::now() < until &&
+         !(panel_answered && command_answered && status_seen)) {
+    frame();
+    panel_answered = panel_answered || !panel("fault.hang").loading;
+    command_answered = command_answered || app.plugin_dispatcher_->running_commands().empty();
+    status_seen = status_seen ||
+                  (app.editor_status_.find("fault:fault.sleep") != std::string::npos &&
+                   app.editor_status_.find("did not answer in time") != std::string::npos);
+  }
+  std::printf("plugin hang: frames=%d slowest_pulse_ms=%lld hang=\"%s\" status=\"%s\"\n",
+              frames, static_cast<long long>(slowest_ms()), panel("fault.hang").error.c_str(),
+              app.editor_status_.c_str());
+  require(panel_answered &&
+              panel("fault.hang").error.find("did not answer in time") != std::string::npos,
+          "#149: the hanging panel ends at its deadline and shows that error");
+  require(command_answered && status_seen,
+          "#149: the hanging command ends at its deadline in the status bar");
+  require(slowest < 1s, "#149: no frame waited on the plugin (slowest four-frame pulse " +
+                            std::to_string(slowest_ms()) + " ms)");
+  save_image(output / "plugin-answered.png", capture(app));
 }
 
 int NativeAcceptance::run(std::string_view scenario,
                           const std::filesystem::path &output) {
   std::filesystem::create_directories(output);
+  if (scenario == "set-up-build") {
+    set_up_build(output);
+    std::printf("native acceptance: PASS set-up-build\n");
+    return 0;
+  }
+  if (scenario == "request-review") {
+    request_review(output);
+    std::printf("native acceptance: PASS request-review\n");
+    return 0;
+  }
+  if (scenario == "opened-clone-push") {
+    opened_clone_push(output);
+    std::printf("native acceptance: PASS opened-clone-push\n");
+    return 0;
+  }
+  if (scenario.starts_with("front-door-")) {
+    App app({});
+    const auto launch_status = launch(app, 2);
+    if (launch_status != 0) {
+      return launch_status;
+    }
+    require(true, "real native application window initialized");
+    pulse(app);
+    if (scenario == "front-door-clone-failures") {
+      clone_failures(app, output);
+    } else if (scenario == "front-door-actions") {
+      front_door(app, output);
+    } else if (scenario == "front-door-clone-push") {
+      clone_push(app, output);
+    } else {
+      throw std::runtime_error("unknown native acceptance scenario");
+    }
+    std::printf("native acceptance: PASS %.*s\n",
+                static_cast<int>(scenario.size()), scenario.data());
+    return 0;
+  }
+  if (scenario == "plugin-hang") {
+    // The fault plugin, in the user's global plugin list of a home of its own.
+    const auto home = output / "plugin-home";
+    std::filesystem::create_directories(home);
+    ::setenv("HOME", home.c_str(), 1);
+    ::setenv("XDG_CONFIG_HOME", (home / ".config").c_str(), 1);
+    const auto config = liquify::global_plugin_config_path();
+    require(!config.empty(), "#149: global plugin list path resolved");
+    std::filesystem::create_directories(config.parent_path());
+    std::ofstream(config) << "config.liquify.plugins=" << LIQUIFY_FAULT_PLUGIN << "\n";
+  }
   const auto repo =
       output /
       ("repository-" +
        std::to_string(
            std::chrono::steady_clock::now().time_since_epoch().count()));
   create_repository(repo);
+  const auto held = scenario == "daemon-failure" ? std::make_unique<HeldDaemonLock>(repo)
+                                                 : std::unique_ptr<HeldDaemonLock>{};
   App app({.repository_path = repo});
   const auto launch_status = launch(app, scenario == "launch-1" ? 1 : 2);
   if (launch_status != 0) {
@@ -275,10 +1616,28 @@ int NativeAcceptance::run(std::string_view scenario,
     modal_input(app);
   } else if (scenario == "palette") {
     palette(app);
+  } else if (scenario == "rebind") {
+    rebind(app);
+  } else if (scenario == "commands") {
+    commands(app);
   } else if (scenario == "tabs") {
     tabs(app);
+  } else if (scenario == "shell-sizes") {
+    shell_sizes(app, output);
+  } else if (scenario == "daemon-failure") {
+    daemon_failure(app, output);
   } else if (scenario == "build") {
-    build(app);
+    build(app, output);
+  } else if (scenario == "look") {
+    look(app, output);
+  } else if (scenario == "table-headers") {
+    table_headers(app, output);
+  } else if (scenario == "cut") {
+    cut(app, output);
+  } else if (scenario == "set-lake-push") {
+    set_lake_push(app, output);
+  } else if (scenario == "plugin-hang") {
+    plugin_hang(app, output);
   } else {
     throw std::runtime_error("unknown native acceptance scenario");
   }

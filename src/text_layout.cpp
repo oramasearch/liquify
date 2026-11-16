@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "text_layout.hpp"
 
 #include <algorithm>

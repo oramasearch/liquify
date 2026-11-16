@@ -42,4 +42,4 @@ plugin test covers all three event callbacks and verifies the retained callback 
 CBOR. Native static and shared suites, `liquify version`, and `liquify --smoke 30` are the release
 proof for this surface.
 
-Linux proof is deferred (decision 33).
+Linux proof is deferred: it has not been run yet.

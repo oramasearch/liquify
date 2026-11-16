@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -6,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include "../src/repository_error.hpp"
+#include "liquid/version.hpp"
 
 namespace {
 
@@ -27,7 +30,9 @@ TEST(RepositoryError, RecognizesOnlyCompleteUnknownObjectMapTags) {
     const auto message = liquify::repository_error_message(error);
     EXPECT_NE(message.find("object map v6"), std::string::npos);
     EXPECT_NE(message.find("Upgrade liquify and the liquid CLI together"), std::string::npos);
-    EXPECT_NE(message.find("libliquid 0.0.1+"), std::string::npos);
+    // The guidance names the libliquid this binary links, read from libliquid itself.
+    EXPECT_NE(message.find("libliquid " + std::string(liquid::version_string()) + "+"),
+              std::string::npos);
     EXPECT_EQ(message.find("invalid object map"), std::string::npos);
     for (const auto version : {1, 2, 3, 4, 5}) {
         header[5] = static_cast<char>(version);

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -216,6 +217,8 @@ function compile() {
     ),
     "",
     ...byteArray("ibm_plex_sans_regular", join(FONT_ROOT, "IBMPlexSans-Regular.ttf")),
+    "",
+    ...byteArray("ibm_plex_sans_semibold", join(FONT_ROOT, "IBMPlexSans-SemiBold.ttf")),
     "",
     ...byteArray("ibm_plex_mono_regular", join(FONT_ROOT, "IBMPlexMono-Regular.ttf")),
     "",

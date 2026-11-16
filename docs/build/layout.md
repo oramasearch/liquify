@@ -32,11 +32,15 @@ libliquid's public API.
 | `include/liquify/plugin.hpp`, `src/plugin.cpp` | checked native plugin host, global/repository configuration, canonical-CBOR validation, graph query registration, commands, and panel view models |
 | `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
 | `packaging/` | hand-built macOS, Windows, AppImage, and Flatpak release inputs used until liquid's projection targets land |
+| `tools/spdx-headers.py`, `tools/third-party-licenses.py` | add the `SPDX-License-Identifier: MIT` line to every source file (`--check` lists the missing ones) and regenerate `THIRD_PARTY_LICENSES` |
+| `tools/sbom.py`, `sbom.spdx.json`, `sbom.cdx.json` | the committed SBOM of the source tree (SPDX 2.3 and CycloneDX 1.7), made with `syft`; `python3 tools/sbom.py --check` says when it is stale |
+| `LICENSE`, `COPYRIGHT`, `THIRD_PARTY_LICENSES`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` | the MIT licence and its holder, the components written by others with their licences, how to contribute (a copyright-assignment CLA, in `CLA.md`), the code of conduct, and how to report a vulnerability |
 | `bench/` | stub-tree benchmarks, built with `LIQUIFY_BUILD_BENCH` |
 | `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `--command NAME`, `docs commands|keymap`, `--screenshot STATE --out PNG`, `version`, `--smoke [N]`, `--help` |
 | `tests/` | GoogleTest, including screenshot pixel-region assertions; `ctest --test-dir build` |
 | `tools/ui/` | refreshes every named screenshot under `docs/ui/screenshots/` |
-| `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* module of `liquid-bridge`, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
+| `tools/tree-sitter-asan/` | standalone AddressSanitizer harness for the tree-sitter runtime and the C and C++ grammars ([tree-sitter-asan.md](tree-sitter-asan.md)) |
+| `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* checkout, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
 | `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |
 | `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |
 | `docs/` | one folder per topic ([`../README.md`](../README.md)) |

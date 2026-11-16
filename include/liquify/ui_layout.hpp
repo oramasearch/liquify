@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <array>
@@ -22,6 +24,8 @@ struct UiPanelGeometry {
   InputRectangle content;
   InputRectangle tab;
   bool selected{};
+  // The tab holds keyboard focus.
+  bool tab_focused{};
   UiTextGeometry text;
 };
 
@@ -38,6 +42,8 @@ struct UiFrameLayout {
   UiTextGeometry editor_text;
   std::map<PanelId, UiPanelGeometry> panels;
   std::map<std::string, InputRectangle> controls;
+  // The text a control shows, for controls whose words a test reads (the status row).
+  std::map<std::string, std::string> labels;
 };
 
 } // namespace liquify

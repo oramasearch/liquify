@@ -1,8 +1,8 @@
 # What liquify is
 
 liquify is the IDE for liquid: a native, cross-platform editor, one binary, built on libliquid's
-graph. liquid is the tool. lake is where it collects. liquify is where you work. It is private for
-now and open source eventually, like liquid.
+graph. liquid is the tool. lake is where it collects. liquify is where you work. It is open source
+under the MIT licence, like liquid.
 
 ## Why a native editor
 
@@ -33,6 +33,5 @@ these choices are in `CLAUDE.md`.
 ## Where this sits
 
 liquify is part of the liquid project. The product specification is `oramasearch/liquid`
-`docs/features/21-liquify-ide.md`; the cross-module map and the action plan are in
-[`oramasearch/liquid-bridge`](https://github.com/oramasearch/liquid-bridge). What the source tree
-implements today is [`status.md`](status.md).
+`docs/features/21-liquify-ide.md`. What the source tree implements today is
+[`status.md`](status.md).

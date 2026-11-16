@@ -5,6 +5,9 @@ display. The screenshot path uses SDL's dummy video driver and software renderer
 with a framebuffer scale of one. It uses the token-derived style and embedded IBM Plex atlas,
 static fixture text, and two frames. It reads no repository, clock or network state.
 
+How a failure is shown (the error component and the lake failure classes) is
+[`errors.md`](errors.md).
+
 The run loop's redraw policy — when liquify draws and when it waits — is
 [`redraw.md`](redraw.md).
 
@@ -16,12 +19,12 @@ Every screen has light and dark variants:
 |---|---|---|---|
 | Welcome | First-run entry point and repository action | [`welcome-light.png`](screenshots/welcome-light.png) | [`welcome-dark.png`](screenshots/welcome-dark.png) |
 | Unreadable repository | Local error and retry actions | [`repository-unreadable-light.png`](screenshots/repository-unreadable-light.png) | [`repository-unreadable-dark.png`](screenshots/repository-unreadable-dark.png) |
-| Lake offline | Expected offline clone recovery | [`lake-offline-light.png`](screenshots/lake-offline-light.png) | [`lake-offline-dark.png`](screenshots/lake-offline-dark.png) |
+| Lake offline | Expected offline clone recovery ([errors](errors.md)) | [`lake-offline-light.png`](screenshots/lake-offline-light.png) | [`lake-offline-dark.png`](screenshots/lake-offline-dark.png) |
 | Repository | Open repository and deterministic tree | [`repository-light.png`](screenshots/repository-light.png) | [`repository-dark.png`](screenshots/repository-dark.png) |
 | C++ editor | C++ buffer with a highlighted source line | [`editor-cpp-light.png`](screenshots/editor-cpp-light.png) | [`editor-cpp-dark.png`](screenshots/editor-cpp-dark.png) |
 | Editor view | Multi-cursor source, search results, syntax and gutters | [`editor-view-light.png`](screenshots/editor-view-light.png) | [`editor-view-dark.png`](screenshots/editor-view-dark.png) |
 | Diagnostics | Findings panel and count badge | [`diagnostics-light.png`](screenshots/diagnostics-light.png) | [`diagnostics-dark.png`](screenshots/diagnostics-dark.png) |
-| Build | Build, test and deploy panel | [`build-light.png`](screenshots/build-light.png) | [`build-dark.png`](screenshots/build-dark.png) |
+| Build | Build, test and push panel | [`build-light.png`](screenshots/build-light.png) | [`build-dark.png`](screenshots/build-dark.png) |
 | Review | Review panel and comment status | [`review-light.png`](screenshots/review-light.png) | [`review-dark.png`](screenshots/review-dark.png) |
 | Assistant | Offline assistant panel | [`assistant-light.png`](screenshots/assistant-light.png) | [`assistant-dark.png`](screenshots/assistant-dark.png) |
 | Plugins | Data-only plugin panel | [`plugins-light.png`](screenshots/plugins-light.png) | [`plugins-dark.png`](screenshots/plugins-dark.png) |

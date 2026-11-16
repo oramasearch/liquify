@@ -7,17 +7,22 @@ both in the same change. The specification lives in
 [`docs/features/21-liquify-ide.md`](https://github.com/oramasearch/liquid/blob/main/docs/features/21-liquify-ide.md).
 
 In one line: a retained GPU editor with graph-backed interactive C/C++ analysis, inline build,
-test and deploy, structural editing, review in place, native plugins, and an optional AI surface,
+test and push, structural editing, review in place, native plugins, and an optional AI surface,
 over one pinned libliquid.
 
 ## Shell and repository
 
-With no path, the shell is a repository front door: open a local folder, clone through liquid's
-drive client, reopen one of eight persisted recent repositories, establish a public TAAP identity
-session, or create another process-backed window. Opening a different repository replaces its
+With no path, the shell is a repository front door: open a local folder, create a repository,
+clone through liquid's drive client, reopen one of eight persisted recent repositories, show Your
+identity (this computer's TAAP signing identity, not a lake sign-in), or create another
+process-backed window. It is laid out as lake's pages: a column with the title and the ways in as
+large action rows, and Recent Repositories as a compact table, with a teaching empty state
+([first run](../ui/first-run.md#layout)). Opening a different repository replaces its
 services in the current process. Unreadable local repositories and unreachable lake remotes have
-separate retry states; lake unavailability is normal offline operation
-([`../ui/first-run.md`](../ui/first-run.md)).
+separate retry states. A failed clone is classified from liquid's error code: only an unreachable
+lake is offline, and a lake that answered (TLS, token, access, not found, busy, unsupported) gets its
+own sentence, next step and Details ([`../ui/first-run.md`](../ui/first-run.md),
+[`../ui/errors.md`](../ui/errors.md)).
 
 `liquify <path>` opens a liquid repository through the public coroutine API, off the render
 thread, renders its root entries, loads nested trees on expansion, and opens blobs into an
@@ -36,7 +41,12 @@ SDL composition handles CJK input methods and dead keys without editing until co
 plain clipboard forms, file drops through libliquid, complete keyboard traversal with visible
 focus, macOS accessibility labels, high contrast, and the OS reduced-motion preference are
 recorded in [`../ui/accessibility.md`](../ui/accessibility.md).
-The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
+The stamped Orama token and IBM Plex snapshot (Sans Regular and SemiBold, Mono) under `design/`
+generate committed native constants, and a title / heading / body / caption type scale is applied
+to the front door, dialogs, panel headers and the empty editor; controls follow lake's kit (one primary action
+per surface, secondary and quiet buttons, labelled checkboxes that show their state, labels above
+full-width fields, one slider shape); shell regions are flat and share edges separated by hairlines, with
+a compact status bar and a translucent canvas scrim behind dialogs;
 its gate verifies source hashes and rejects stale generated output. Those roles drive the system,
 light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom
 panel, floating panels and status bar. One frame-level drawable scale applies to shell and
@@ -48,14 +58,31 @@ and records known product defects separately from unavailable display modes
 ([`../ui/native-acceptance.md`](../ui/native-acceptance.md)). One registry supplies panel
 metadata, commands, placement, focus, state and notifications; each surface moves among dock
 areas, floats and re-docks. Divider
-sizes and complete panel layouts persist per repository and can be reset. The status bar reports
-actionable build, sync, hydration and failure state. Collaboration, identity, change, timing and
+sizes and complete panel layouts persist per repository and can be reset. Bottom-panel tabs have
+disjoint hit rectangles sized from the UI font, so pointer and keyboard focus agree at every size
+(liquify#35). The status bar reports
+actionable build, sync, hydration and failure state, its daemon state from the graph's snapshot of
+the build service (a startup failure and a lost connection included), and its row height and
+segment priorities from the UI font and the width (liquify#36); a failure is shown once, by one error
+component (sentence, next step, action, Details, no absolute paths), in the panel the status bar
+names ([`../ui/errors.md`](../ui/errors.md)). Collaboration, identity, change, timing and
 validation records remain available through explicit gutter, panel, and details controls. macOS installs native
 command menus and Cmd bindings ([`../ui/design-system.md`](../ui/design-system.md),
 [`../ui/app-shell.md`](../ui/app-shell.md), [`../ui/panels.md`](../ui/panels.md)).
 The shared command registry powers fuzzy palette search, recent commands, platform key bindings,
 keymap conflict reporting, native menus and headless `--command` invocation
-([`../ui/commands.md`](../ui/commands.md)).
+([`../ui/commands.md`](../ui/commands.md)). It is the only key path: window keys, palette rows and
+native menu items run one handler table, navigation actions are registry commands, and a rebind
+in Settings reaches keys, palette and menus at once (liquify#34). Cut Change (palette, Change menu, Primary+Shift+K)
+names the drips saved since the last change as one change through libliquid's cut API, after
+showing what it gathers ([`../editor/cut.md`](../editor/cut.md)). While a modal dialog is open,
+typed text reaches only the dialog, never the source behind it. F9 is Push: it pushes to the
+repository's sync remote or the lake it was cloned from, and with neither offers Set Lake
+([`../editor/build.md`](../editor/build.md)). Request Review asks lake to review the current change;
+the Review panel uses the repository's lake, teaches when it is empty, and never names a
+command-line flag ([`../editor/review.md`](../editor/review.md)). F7 on a repository with no
+recorded build offers Set up build, which proposes a command from the repository and records it
+through libliquid's wrap API ([`../editor/build.md`](../editor/build.md)).
 The searchable settings surface reads a user `.liquid` file plus repository overrides and applies
 theme, fonts, editor behavior, keymaps, optional AI, lake accounts and default-off telemetry live.
 Parser and typed validation errors remain inline, group reset is local, and credential values never
@@ -73,8 +100,8 @@ and repository operation history. Its interaction, worker and screenshot contrac
 
 ## The liquid pin
 
-liquid is pinned by `liquid-bridge` and resolved here through `LIQUIFY_LIQUID_SOURCE_DIR`
-(default `../liquid`); CI pins the same revision as the bridge in `.github/workflows/ci.yml`.
+liquid is a sibling checkout, resolved here through `LIQUIFY_LIQUID_SOURCE_DIR`
+(default `../liquid`).
 An independent CLI → IDE → CLI integration check exercises repository creation, file listing,
 editor save, read-back, and unsupported-format guidance; the artifact combinations are in
 [`../build/store-compatibility.md`](../build/store-compatibility.md). The pin includes liquid's compact-checkpoint repository
@@ -124,9 +151,16 @@ Native plugins use liquid's versioned frontend C boundary to register graph quer
 and canonical-CBOR panels through checked static or configured dynamic loading. Plugin commands
 appear in the palette and data-only panels render below analysis results. The sample plugin
 proves all three registrations; load and panel failures remain local to their source
-([`../plugins/README.md`](../plugins/README.md)).
+([`../plugins/README.md`](../plugins/README.md)). Plugins named by repository metadata load only
+when the user has trusted their SHA-256 digest with `liquify plugin trust`, from a per-user trust
+store outside every repository; otherwise they are listed as not trusted and never loaded. Every
+dynamic plugin runs in its own sandboxed `liquify-plugin-host` process and the IDE never maps its
+library; a crash or hang fails only the call that met it, and a plugin is disabled after three
+restarts. Panel refreshes, commands and events are sent from one worker per plugin, so the window
+never waits for a plugin: a panel draws its last answer or its loading state until the next answer
+arrives (liquify#149). Limits: reads are not denied, and Windows has no network sandbox.
 
-## Build, test and deploy
+## Build, test and push
 
 F7 plans and starts the configured build through the attached daemon, then renders its action
 event stream, critical path and scheduler decisions. F8 lists and runs graph test actions. F9
@@ -136,12 +170,12 @@ their affected editor lines ([`../editor/build.md`](../editor/build.md)).
 
 ## Packaging and CI
 
-Every main-branch push and pull request repeats the clean-clone release build on Linux, macOS and
-Windows, runs the tests, the version command and the display-backed smoke self-test, and produces
-a hardened-runtime macOS `pkg` and `dmg`, a signed and install-tested Windows MSIX, and an AppImage
-exercised on Ubuntu and Fedora. `v*` tags publish those installers with signed and unsigned
-SHA-256 records; notarization runs when the release secrets are present. Hand-built packaging
-remains in place until liquid's projection and platform-signing targets land
+The workflows in `.github/workflows/` describe a clean-clone build on Linux, macOS and Windows and
+installer packaging (a hardened-runtime macOS `pkg` and `dmg`, a signed Windows MSIX, an
+AppImage), but GitHub Actions is turned off for this repository, so none of them runs. Proof is
+local: the build and the full suite, run when a release is cut
+([`../releases/README.md`](../releases/README.md)). v0.1.0 publishes no installer. Hand-built
+packaging remains in place until liquid's projection and platform-signing targets land
 ([`../build/ci.md`](../build/ci.md), [`../packaging/README.md`](../packaging/README.md)).
 
 Native window and Diagnostics screenshot rendering checks consume the current frame layout

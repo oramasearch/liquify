@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/first_run.hpp"
 
 #include <algorithm>
@@ -79,6 +81,7 @@ void FirstRunState::begin_open(std::filesystem::path path) {
     pending_path_ = std::move(path);
     clone_remote_.clear();
     error_.clear();
+    clone_failure_ = {};
 }
 
 void FirstRunState::begin_clone(std::string remote, std::filesystem::path path) {
@@ -86,6 +89,7 @@ void FirstRunState::begin_clone(std::string remote, std::filesystem::path path) 
     clone_remote_ = std::move(remote);
     pending_path_ = std::move(path);
     error_.clear();
+    clone_failure_ = {};
 }
 
 void FirstRunState::repository_opened(RepositorySummary summary,
@@ -95,6 +99,7 @@ void FirstRunState::repository_opened(RepositorySummary summary,
     pending_path_.clear();
     clone_remote_.clear();
     error_.clear();
+    clone_failure_ = {};
     phase_ = RepositoryLifecyclePhase::open;
 }
 
@@ -106,10 +111,16 @@ void FirstRunState::open_failed(std::filesystem::path path, std::string error) {
     phase_ = RepositoryLifecyclePhase::unreadable;
 }
 
-void FirstRunState::clone_failed(std::string error, bool offline) {
+void FirstRunState::clone_failed(UserError failure) {
     active_repository_.reset();
-    error_ = std::move(error);
-    phase_ = offline ? RepositoryLifecyclePhase::offline : RepositoryLifecyclePhase::failed;
+    error_ = failure.summary;
+    phase_ = failure.offline() ? RepositoryLifecyclePhase::offline
+                               : RepositoryLifecyclePhase::failed;
+    clone_failure_ = std::move(failure);
+}
+
+auto FirstRunState::clone_failure() const -> const UserError& {
+    return clone_failure_;
 }
 
 void FirstRunState::return_to_welcome() {
@@ -117,6 +128,7 @@ void FirstRunState::return_to_welcome() {
     pending_path_.clear();
     clone_remote_.clear();
     error_.clear();
+    clone_failure_ = {};
     phase_ = RepositoryLifecyclePhase::welcome;
 }
 
@@ -286,6 +298,10 @@ auto status_bar_segments(const StatusBarInput& input) -> std::vector<std::string
     }
     if (input.daemon_running) {
         output.push_back("Daemon on");
+    } else if (!input.daemon_problem.empty()) {
+        output.push_back("Daemon " + input.daemon_problem);
+    } else if (input.daemon_starting) {
+        output.push_back("Daemon starting");
     } else if (input.daemon_available) {
         output.push_back("Daemon stopped");
     } else {

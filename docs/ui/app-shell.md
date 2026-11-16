@@ -10,7 +10,7 @@ divider is interactive.
 The activity bar switches among Repository, Search, Review, Build, and Multiplayer. Repository
 renders the annotated `RepositoryView` tree and Search filters its libliquid symbol records;
 Review continues to render `ReviewController`; Build invokes the existing editor-graph build,
-test, and deploy requests. Search also runs liquid repository queries and opens results at their
+test, and push requests. Search also runs liquid repository queries and opens results at their
 source locations. Multiplayer displays the presence records used by the editor gutter. Quick
 Open, Symbol Search, recent locations, references, and call hierarchy use modal or result windows
 over the same shell ([`navigation.md`](navigation.md)).
@@ -124,13 +124,15 @@ relocation record, and live-window acceptance are in
 ## macOS conventions
 
 On macOS, CMake compiles `src/app.cpp` as Objective-C++ so it remains the only SDL/ImGui
-translation unit while installing an AppKit menu bar. File, Edit, Selection, View, Go, Run, and
-Review are native top-level groups. The command registry supplies the fuzzy palette, resolved
-platform bindings, recent-command ordering, typed `.liquid` overrides, and plugin commands;
-[`commands.md`](commands.md) is its generated reference. Cmd-S saves, Cmd-Shift-P opens the
-palette, Cmd-B toggles the sidebar, Cmd-J toggles the bottom panel, Cmd-backslash toggles the
-editor split, Cmd-Shift-T cycles the theme, Cmd-P opens paths, Cmd-T opens symbols, and Cmd-R
-opens recent locations.
+translation unit while installing an AppKit menu bar. The menu bar is built from the command
+registry: one menu per registry group (File, Edit, Selection, View, Go, Repository, Refactor, Run,
+Change, Review, Assistant, Preferences, Help, Plugins), one item per command, each showing its
+resolved key equivalent, rebuilt whenever a binding changes. Choosing an item runs the registry
+command. The menus never take the key press themselves: keys reach the window, where the
+registry's dispatcher applies each command's scope and its conflicts, so a menu shortcut cannot
+run outside its scope or around a rebind. The registry also supplies the fuzzy palette,
+recent-command ordering, typed `.liquid` overrides, and plugin commands;
+[`commands.md`](commands.md) is its generated reference with every default key.
 
 The native window title is `<repository> — <current change> — liquify`; an open review replaces
 `Working change` with its change identifier.
@@ -160,7 +162,7 @@ The committed evidence is:
 | Editor tabs and split | [light](screenshots/editor-cpp-light.png) | [dark](screenshots/editor-cpp-dark.png) |
 | Editor view | [light](screenshots/editor-view-light.png) | [dark](screenshots/editor-view-dark.png) |
 | Diagnostics | [light](screenshots/diagnostics-light.png) | [dark](screenshots/diagnostics-dark.png) |
-| Build/test/deploy | [light](screenshots/build-light.png) | [dark](screenshots/build-dark.png) |
+| Build/test/push | [light](screenshots/build-light.png) | [dark](screenshots/build-dark.png) |
 | Assistant | [light](screenshots/assistant-light.png) | [dark](screenshots/assistant-dark.png) |
 | Review | [light](screenshots/review-light.png) | [dark](screenshots/review-dark.png) |
 | Plugins | [light](screenshots/plugins-light.png) | [dark](screenshots/plugins-dark.png) |

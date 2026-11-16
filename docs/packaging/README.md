@@ -1,12 +1,18 @@
 # Release packaging
 
-Liquify packages the existing release executable directly until liquid issues
-[#76](https://github.com/oramasearch/liquid/issues/76) and
-[#77](https://github.com/oramasearch/liquid/issues/77) provide platform projection and signing.
+> **Disabled 2026-11-15.** GitHub Actions are turned off for this repository and every workflow file
+> is commented out (no hosted CI in oramasearch repositories). Builds, installers and their checks run
+> locally; tests run when a release is cut. What follows describes the workflows as they were.
+
+Liquify packages the existing release executable directly until liquid provides platform
+projection and platform signing.
 The scripts under [`packaging/`](../../packaging/) are shared by pull-request CI and the tag release
 workflow, so a published installer has already followed the same build and verification path.
 Each artifact carries the adjacent `frontends/liquid-frontend-tree-sitter` module used by the
-editor; platform dependency collection and signing treat it as executable code.
+editor, and `liquify-plugin-host` beside the `liquify` executable, the process every dynamic plugin
+runs in ([`../plugins/README.md`](../plugins/README.md#process-isolation)); platform dependency
+collection and signing treat both as executable code. On macOS the host is signed with the same
+hardened runtime and entitlements as the application.
 The macOS dependency policy, bundle audit, and relocation test are documented in
 [`macos.md`](macos.md).
 
@@ -14,9 +20,9 @@ The macOS dependency policy, bundle audit, and relocation test are documented in
 
 | Platform | Release artifacts | CI verification |
 |---|---|---|
-| macOS | `liquify-0.0.1-macos.pkg`, `liquify-0.0.1-macos.dmg` | transitive Mach-O dependency audit, relocated launch before packaging and from the mounted dmg, hardened-runtime `codesign`, notarization and stapling when credentials are present, then `spctl` assessment |
-| Windows | `liquify-0.0.1-windows-x64.msix` | bundled non-system DLLs, SHA-256 Authenticode signature with RFC 3161 timestamp, `signtool verify`, `Add-AppxPackage`, installed `liquify version` with a system-only `PATH` |
-| Linux | `liquify-0.0.1-x86_64.AppImage` | `liquify version` on Ubuntu 24.04 and Fedora 42 |
+| macOS | `liquify-0.1.0-macos.pkg`, `liquify-0.1.0-macos.dmg` | transitive Mach-O dependency audit, relocated launch before packaging and from the mounted dmg, hardened-runtime `codesign`, notarization and stapling when credentials are present, then `spctl` assessment |
+| Windows | `liquify-0.1.0-windows-x64.msix` | bundled non-system DLLs, SHA-256 Authenticode signature with RFC 3161 timestamp, `signtool verify`, `Add-AppxPackage`, installed `liquify version` with a system-only `PATH` |
+| Linux | `liquify-0.1.0-x86_64.AppImage` | `liquify version` on Ubuntu 24.04 and Fedora 42 |
 
 The AppImage is the published Linux format. The checked-in
 [`com.oramasearch.Liquify.yml`](../../packaging/flatpak/com.oramasearch.Liquify.yml)
@@ -32,7 +38,7 @@ without publishing an unsigned installer.
 
 ## Credentials
 
-Steve owns and rotates the release credentials. GitHub Actions receives them only from repository
+The maintainers own and rotate the release credentials. GitHub Actions receives them only from repository
 secrets; no certificate, private key, password, or API credential belongs in the repository.
 
 macOS uses these secrets:
@@ -90,30 +96,30 @@ Verify the platform trust records with native tools:
 
 ```sh
 # macOS
-pkgutil --check-signature liquify-0.0.1-macos.pkg
-spctl --assess --type install --verbose=4 liquify-0.0.1-macos.pkg
+pkgutil --check-signature liquify-0.1.0-macos.pkg
+spctl --assess --type install --verbose=4 liquify-0.1.0-macos.pkg
 spctl --assess --type open --context context:primary-signature \
-  --verbose=4 liquify-0.0.1-macos.dmg
-xcrun stapler validate liquify-0.0.1-macos.pkg
-xcrun stapler validate liquify-0.0.1-macos.dmg
+  --verbose=4 liquify-0.1.0-macos.dmg
+xcrun stapler validate liquify-0.1.0-macos.pkg
+xcrun stapler validate liquify-0.1.0-macos.dmg
 
 # Linux
-APPIMAGE_EXTRACT_AND_RUN=1 ./liquify-0.0.1-x86_64.AppImage version
+APPIMAGE_EXTRACT_AND_RUN=1 ./liquify-0.1.0-x86_64.AppImage version
 ```
 
 On Windows, use a Developer PowerShell prompt:
 
 ```powershell
-signtool verify /pa /v .\liquify-0.0.1-windows-x64.msix
-Add-AppxPackage .\liquify-0.0.1-windows-x64.msix
+signtool verify /pa /v .\liquify-0.1.0-windows-x64.msix
+Add-AppxPackage .\liquify-0.1.0-windows-x64.msix
 $package = Get-AppxPackage OramaSearch.Liquify
 & "$($package.InstallLocation)\liquify.exe" version
 ```
 
 ## Projection follow-up
 
-Part B remains deferred while liquid #76 and #77 are open. Once both land, a dedicated follow-up
-issue will bump the bridge's liquid pin, build liquify under `liquid wrap`, replace the platform scripts
+Part B remains deferred until liquid provides platform projection and platform signing. Once
+both land, a follow-up will move to the liquid revision that carries them, build liquify under `liquid wrap`, replace the platform scripts
 with `liquid project macos-pkg|msix|appimage` and `liquid sign macos|windows`, and retain this tag
 release workflow. Those projected artifacts will carry liquid provenance. Auto-update, app-store
-submission, Snap, and another installer writer remain outside this issue.
+submission, Snap, and another installer writer remain out of scope.

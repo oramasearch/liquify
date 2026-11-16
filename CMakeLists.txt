@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.28)
 
 # liquify is C++26 on the same coroutine stack as Zetta (Capy/Corosio/Beast2), which
@@ -27,7 +29,7 @@ if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT LIQUIFY_USE_SYSTEM_COMPILER)
   endif()
 endif()
 
-project(liquify VERSION 0.0.1 LANGUAGES C CXX
+project(liquify VERSION 0.1.0 LANGUAGES C CXX
         DESCRIPTION "liquify — the cross-platform IDE for liquid")
 
 set(CMAKE_CXX_STANDARD 26)
@@ -38,16 +40,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(LIQUIFY_BUILD_TESTS "Build the test suite" ON)
 option(LIQUIFY_NATIVE_WINDOW_TESTS "Test real windows (requires a desktop session)" ${APPLE})
 
-# liquid is not vendored here. One pin, in liquid-bridge, is the single source of truth;
-# a second submodule pointer in this repo could disagree with it. The default is the
-# sibling checkout in that bridge (../liquid); CI and standalone builds pass the path.
+# liquid is not vendored here: a submodule pointer in this repo could disagree with the
+# liquid revision the rest of the project builds against. The default is a sibling
+# checkout (../liquid); CI and other layouts pass the path.
 set(LIQUIFY_LIQUID_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../liquid"
     CACHE PATH "Path to the liquid source tree providing libliquid")
 if(NOT EXISTS "${LIQUIFY_LIQUID_SOURCE_DIR}/CMakeLists.txt")
   message(FATAL_ERROR
     "LIQUIFY_LIQUID_SOURCE_DIR does not contain a liquid source tree: ${LIQUIFY_LIQUID_SOURCE_DIR}\n"
-    "liquid is a sibling module of liquid-bridge, not a submodule of liquify. Build liquify from "
-    "the bridge checkout, or pass -DLIQUIFY_LIQUID_SOURCE_DIR=<path to oramasearch/liquid>.")
+    "liquid is not a submodule of liquify. Clone liquid next to liquify (../liquid), "
+    "or pass -DLIQUIFY_LIQUID_SOURCE_DIR=<path to a liquid checkout>.")
 endif()
 
 # Release numbers are provisional; identify the actual IDE and library artifacts.
@@ -164,14 +166,20 @@ add_library(liquify-core STATIC
   src/context_builder.cpp
   src/editor_buffer.cpp
   src/editor_model.cpp
+  src/build_setup.cpp
+  src/change_cut.cpp
   src/editor_graph.cpp
   src/input.cpp
+  src/lake_remote.cpp
   src/first_run.cpp
   src/interactive_analysis.cpp
   src/panel.cpp
   src/navigation.cpp
   src/multiplayer.cpp
   src/plugin.cpp
+  src/plugin_dispatcher.cpp
+  src/plugin_process.cpp
+  src/plugin_protocol.cpp
   src/redraw.cpp
   src/repository_error.cpp
   src/repository_view.cpp
@@ -180,8 +188,15 @@ add_library(liquify-core STATIC
   src/screenshot.cpp
   src/structural_edit.cpp
   src/text_layout.cpp
+  src/user_error.cpp
   src/stub_tree.cpp
   src/version.cpp)
+# The one place the release version lives is project(VERSION) above; the code reads it from here.
+target_compile_definitions(liquify-core PUBLIC
+  LIQUIFY_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+  LIQUIFY_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+  LIQUIFY_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+  LIQUIFY_VERSION_STRING="${PROJECT_VERSION}")
 target_compile_definitions(liquify-core PRIVATE
   LIQUIFY_REVISION="${LIQUIFY_REVISION}"
   LIQUIFY_LIQUID_REVISION="${LIQUID_REVISION}")
@@ -199,6 +214,22 @@ elseif(WIN32)
 endif()
 target_link_libraries(liquify-core PRIVATE ${CMAKE_DL_LIBS})
 add_dependencies(liquify-core liquid-frontend-tree-sitter)
+
+# The process every dynamic plugin runs in (liquify#82). It links only the protocol and the C ABI
+# header: no liquid, no SDL, no ImGui. liquify finds it beside its own executable and falls back
+# to this build tree's copy.
+add_executable(liquify-plugin-host src/plugin_host_main.cpp src/plugin_protocol.cpp)
+target_include_directories(liquify-plugin-host PRIVATE "${LIQUIFY_LIQUID_SOURCE_DIR}/include")
+target_link_libraries(liquify-plugin-host PRIVATE ${CMAKE_DL_LIBS})
+if(WIN32)
+  target_link_libraries(liquify-plugin-host PRIVATE Shell32)
+elseif(NOT APPLE)
+  find_package(Threads REQUIRED)
+  target_link_libraries(liquify-plugin-host PRIVATE Threads::Threads)
+endif()
+add_dependencies(liquify-core liquify-plugin-host)
+target_compile_definitions(liquify-core PRIVATE
+  LIQUIFY_PLUGIN_HOST="$<TARGET_FILE:liquify-plugin-host>")
 
 add_library(liquify-sample-plugin-objects OBJECT plugins/sample/sample_plugin.cpp)
 set_target_properties(liquify-sample-plugin-objects PROPERTIES

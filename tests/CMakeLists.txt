@@ -1,7 +1,11 @@
+# SPDX-License-Identifier: MIT
+
 add_executable(liquify-tests
   test_ai.cpp
   test_redraw.cpp
   test_app_state.cpp
+  test_build_setup.cpp
+  test_change_cut.cpp
   test_command.cpp
   test_editor_buffer.cpp
   test_editor_model.cpp
@@ -20,14 +24,27 @@ add_executable(liquify-tests
   test_screenshot.cpp
   test_structural_edit.cpp
   test_text_layout.cpp
+  test_user_error.cpp
   test_stub_tree.cpp
   test_version.cpp)
+# test_ai.cpp parses the request body the provider sends (liquify#73), so the tests use
+# Boost.JSON directly; liquify-core links it privately (liquify#133).
 target_link_libraries(liquify-tests PRIVATE
   liquify-app
   liquid_forge_double
   liquify-sample-plugin-static
+  Boost::json
   GTest::gtest_main)
 add_dependencies(liquify-tests liquify-sample-plugin)
+# A plugin that crashes, hangs and tries to escape its sandbox (liquify#82).
+add_library(liquify-fault-plugin MODULE fault_plugin.cpp)
+set_target_properties(liquify-fault-plugin PROPERTIES
+  PREFIX ""
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON)
+target_include_directories(liquify-fault-plugin PRIVATE "${LIQUIFY_LIQUID_SOURCE_DIR}/include")
+add_dependencies(liquify-tests liquify-fault-plugin liquify-plugin-host)
+target_include_directories(liquify-tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(liquify-tests PRIVATE LIQUIFY_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_LIQUID_DIR="${LIQUIFY_LIQUID_SOURCE_DIR}")
@@ -35,6 +52,7 @@ target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(liquify-tests PRIVATE
   LIQUIFY_SAMPLE_PLUGIN="$<TARGET_FILE:liquify-sample-plugin>"
+  LIQUIFY_FAULT_PLUGIN="$<TARGET_FILE:liquify-fault-plugin>"
   LIQUIFY_TREE_SITTER_FRONTEND="$<TARGET_FILE:liquid-frontend-tree-sitter>"
   LIQUIFY_C_COMPILER="${CMAKE_C_COMPILER}"
   LIQUIFY_EXECUTABLE="$<TARGET_FILE:liquify>"
@@ -70,8 +88,17 @@ add_test(NAME liquify-independent-cli-compat
 set_tests_properties(liquify-independent-cli-compat PROPERTIES RUN_SERIAL TRUE)
 if(LIQUIFY_NATIVE_WINDOW_TESTS)
   add_executable(liquify-native-acceptance native_acceptance.cpp)
-  target_link_libraries(liquify-native-acceptance PRIVATE liquify-app)
-  foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette modal-input tabs build)
+  target_link_libraries(liquify-native-acceptance PRIVATE liquify-app liquid_forge_double)
+  # plugin-hang loads the fault plugin through the user's global plugin list (liquify#149).
+  add_dependencies(liquify-native-acceptance liquify-fault-plugin liquify-plugin-host)
+  target_compile_definitions(liquify-native-acceptance PRIVATE
+    LIQUIFY_FAULT_PLUGIN="$<TARGET_FILE:liquify-fault-plugin>")
+  foreach(scenario IN ITEMS launch-1 launch-2 edit quick-open palette rebind commands modal-input tabs
+      shell-sizes daemon-failure build
+      front-door-clone-failures cut
+      front-door-clone-push set-lake-push opened-clone-push
+      request-review front-door-actions set-up-build
+      table-headers look plugin-hang)
     add_test(NAME liquify-native-acceptance-${scenario}
       COMMAND liquify-native-acceptance ${scenario}
         ${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario})
@@ -79,14 +106,11 @@ if(LIQUIFY_NATIVE_WINDOW_TESTS)
       LABELS "native;display;acceptance" RUN_SERIAL TRUE TIMEOUT 120
       ENVIRONMENT "LIQUID_HOME=${CMAKE_CURRENT_BINARY_DIR}/native-acceptance/${scenario}/home")
   endforeach()
-  # #39 remains open: retained-editor text input stops after an ImGui field.
-  set_tests_properties(liquify-native-acceptance-edit PROPERTIES WILL_FAIL TRUE)
-  # #33 remains open: Quick Open has no keyboard result dispatch.
-  set_tests_properties(liquify-native-acceptance-quick-open PROPERTIES WILL_FAIL TRUE)
-  # #34 remains open: palette keyboard selection does not dispatch a command.
-  set_tests_properties(liquify-native-acceptance-palette PROPERTIES WILL_FAIL TRUE)
-  # #39 remains open: modal ImGui text can also reach the obscured retained editor.
-  set_tests_properties(liquify-native-acceptance-modal-input PROPERTIES WILL_FAIL TRUE)
+  # #97 / liquid#526 remain open: a store liquify just cloned usually loses an index run when
+  # liquify's handles write to it, so the first save fails before the push; now and then it
+  # does not. Neither WILL_FAIL nor a pass is stable, so the scenario is run by hand until
+  # liquid#526 lands (see native-acceptance.md).
+  set_tests_properties(liquify-native-acceptance-front-door-clone-push PROPERTIES DISABLED TRUE)
   set_tests_properties(liquify-native-acceptance-launch-1 PROPERTIES SKIP_RETURN_CODE 77)
   add_executable(liquify-native-window-test test_native_window.cpp)
   target_link_libraries(liquify-native-window-test PRIVATE liquify-app)
@@ -112,6 +136,13 @@ if(APPLE)
         "LIQUID_HOME=${CMAKE_BINARY_DIR}/.cache/liquify-native-buffer-home;TMPDIR=.cache/t"
       SKIP_RETURN_CODE 77)
 endif()
+
+# Every release version has its notes page (docs/releases/vX.Y.Z.md).
+add_test(NAME liquify-release-notes-exist
+  COMMAND ${CMAKE_COMMAND} -E cat ${CMAKE_SOURCE_DIR}/docs/releases/v${PROJECT_VERSION}.md)
+add_test(NAME liquify-release-version-packaging
+  COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DVERSION=${PROJECT_VERSION}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/test_release_version.cmake)
 
 add_test(
   NAME liquify-print-tree-unreadable

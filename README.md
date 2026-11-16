@@ -1,163 +1,132 @@
 # liquify
 
-liquify is the editor built on libliquid's graph: the IDE for liquid, native and cross-platform,
-one binary. SDL3 and Dear ImGui are the shell, the buffer is a retained GPU text layer, and
-everything liquify knows about repositories, drips, builds, analysis and search comes through
-libliquid, pinned as a submodule and linked as a library. It never depends on Zetta or on lake.
-liquid is the tool, lake is where it collects, liquify is where you work. The longer statement,
-and why it is a native editor rather than an extension, is in
-[`docs/design/overview.md`](docs/design/overview.md).
+> **Status: experimental.** liquify is under active development and not ready for daily work.
+> Expect missing features, rough edges, changes to its settings and keymaps without notice, and
+> bugs that can lose unsaved work. The first release, v0.1.0, is an early preview. Use it to try
+> liquid's editing model, not on code you cannot afford to redo.
 
-## Status
+**The IDE, built on liquid's incremental graph. First release: v0.1.0.**
 
-`liquify` opens a repository front door with local open, lake clone, recent repositories, identity
-session and additional-window actions. `liquify <path>` opens a liquid repository, edits blobs in
-retained GPU text buffers, preserves unsaved edits when switching files, and confirms discard
-on close, repository switch and quit ([buffer policy](docs/ui/buffers.md)). It saves
-through libliquid as a drip; C and C++ buffers add graph-backed diagnostics, navigation and
-completion, structural editing, and F7, F8 and F9 build, test and deploy through the attached
-daemon. The editor adds multi-cursor and column editing, repository-configured indentation,
-liquid syntax and collaboration gutters, search/replace, and per-buffer undo/redo.
-Quick Open, Symbol Search, definitions, references, call hierarchy, breadcrumbs, recent
-locations, history traversal, and repository context actions share registered default-key commands.
-`--lake` adds review in place with cursor-anchored comments. Multiplayer surfaces presence,
-per-line attribution and semantic lease controls, including lease events delivered to native
-plugins. Native plugins register queries, commands and panels, and the assistant is off by default
-and opens no connection while off. `design/` carries the stamped Orama DTCG snapshot, generated
-native roles and embedded IBM Plex assets. The light/dark application shell hosts every surface
-through one panel registry; dock, editor-tab and floating placement plus focus persist per
-repository, layouts reset to their defaults, and one channel reports long-operation progress.
-The default window keeps source reading, direct controls and actionable state visible; attribution,
-presence, identity and repository telemetry open from deliberate gutter, panel and details
-affordances ([what the window shows](docs/ui/what-the-window-shows.md)).
-Native macOS menus remain available. Searchable `.liquid` settings combine user preferences with
-repository overrides and apply theme, fonts, editor behavior, keymaps, optional AI and lake
-accounts live; telemetry remains off by default and credentials are masked. The shared command
-registry supplies the fuzzy command palette, platform bindings, conflict reporting, macOS menus
-and headless `--command` invocation; its generated reference is in
-[`docs/ui/commands.md`](docs/ui/commands.md). Pull-request CI
-packages macOS, Windows and Linux installers
-and `v*` tags publish them; [`docs/design/status.md`](docs/design/status.md) lists each area with
-its page, and the specification is `oramasearch/liquid` `docs/features/21-liquify-ide.md`.
-SDL text composition supports CJK input methods and dead keys; the editor exchanges rich and plain
-clipboard forms and accepts desktop file drops. Keyboard navigation has visible focus, macOS
-exposes labelled accessibility elements, and high contrast plus the OS reduced-motion preference
-apply across the shell.
+liquify is a native, cross-platform editor for repositories kept in [liquid](https://github.com/oramasearch/liquid).
+Everything it knows about files, changes, builds, analysis and search comes from libliquid, so a
+save is a signed drip, a build runs through liquid's daemon, and code intelligence comes from the
+same graph liquid uses. It is one binary: SDL3 and Dear ImGui for the shell, and a retained GPU text
+layer for the buffer.
 
-## Build and run
+Part of [Orama Lake](https://github.com/oramasearch/lake-platform), the sovereign AI stack.
+MIT-licensed.
 
-Requirements on macOS: CMake 3.28 or newer, Ninja, Homebrew LLVM (Clang 17 or newer), Node.js,
-OpenSSL and zlib (`brew install llvm cmake ninja node openssl@3`). liquid, the assistant transport
-and tree-sitter are submodules; SDL3, Dear ImGui and GoogleTest are fetched by CMake, and SDL is
-linked static so the result is one binary.
+## What it does
+
+What is built today. What is partial is listed once, under [Known limits](#known-limits).
+
+- **Front door**: open a folder, create a repository, clone one from lake, reopen a recent one,
+  your local signing identity, more windows. [Docs](docs/ui/first-run.md)
+- **Editor**: GPU text buffers with multi-cursor and column editing, search and replace, folds,
+  liquid syntax and per-buffer undo; Save writes a drip and Cut Change names the saved drips as a
+  change. [Docs](docs/ui/editor.md), [cut](docs/editor/cut.md)
+- **Navigation and C/C++ analysis**: Quick Open, symbol search, definitions, references,
+  breadcrumbs and history; diagnostics, completion and structural edits (rename, extract
+  function) for C and C++. Quick Open and Symbol Search work from the keyboard.
+  [Docs](docs/ui/navigation.md), [analysis](docs/editor/interactive-analysis.md)
+- **Lake**: push to the lake a repository came from, list, open and request reviews, comment at
+  the cursor and approve. [Docs](docs/editor/review.md)
+- **Build and test**: F7 builds and F8 runs tests through liquid's daemon; with no recorded build,
+  F7 proposes a command and records it. [Docs](docs/editor/build.md)
+- **Shell**: one panel system (dock, float, tabs), a command palette with one row per action and
+  rebindable keys, searchable `.liquid` settings, light and dark themes, accessibility labels,
+  high contrast and reduced motion. Keys, the palette and the native macOS menus all run through
+  one command registry, so a rebind in settings reaches all three at once.
+  [Docs](docs/ui/README.md)
+- **Plugins**: native plugins, each run in its own sandboxed host process; a plugin a repository
+  names loads only once you trust its digest. Plugin calls run off the UI thread, so a slow or
+  hung plugin does not stall the window. [Docs](docs/plugins/README.md)
+- **Optional**: multiplayer presence and attribution, and an AI assistant that is off by default
+  and opens no connection while off. [Docs](docs/multiplayer.md), [assistant](docs/editor/ai.md)
+
+The full list, area by area, is in [the implementation status](docs/design/status.md).
+
+## Quickstart
+
+v0.1.0 ships no signed installer, so liquify is built from source.
+
+### Build from source
+
+On macOS: CMake 3.28 or newer, Ninja, Clang 17 or newer (Homebrew LLVM), Node.js, OpenSSL and zlib
+(`brew install llvm cmake ninja node openssl@3`). liquid is not a submodule: clone it next to
+liquify, where the build looks for it (`../liquid`), or pass its path with
+`-DLIQUIFY_LIQUID_SOURCE_DIR`. SDL3, Dear ImGui and GoogleTest are fetched by CMake.
 
 ```sh
-git clone --recurse-submodules git@github.com:oramasearch/liquify.git
+git clone --recurse-submodules https://github.com/oramasearch/liquid.git
+git clone --recurse-submodules https://github.com/oramasearch/liquify.git
 cd liquify
-git submodule update --init --recursive
 cmake -S . -B build -G Ninja
-cmake --build build -j 6
-ctest --test-dir build --output-on-failure
-./build/liquify version
-./build/liquify --smoke 30
+cmake --build build
+./build/liquify
 ```
 
-`version` and the unit tests run without a display; native rendering and workflow acceptance tests
-require a logged-in desktop on macOS (see [native acceptance](docs/ui/native-acceptance.md),
-[`docs/ui/app-shell.md`](docs/ui/app-shell.md) and
-[layout property proof](docs/ui/property-tests.md)); `--smoke` opens a window, scrolls and edits a
-50,000-line buffer for 30 frames, prints latency metrics and exits 0. `./build/liquify <path>`
-opens a liquid repository; `--print-tree`, `--apply-edits` and `--lake` are listed with the rest
-of the build in [`docs/build/local.md`](docs/build/local.md). Linux requirements and the CI
-toolchains are in [`docs/build/ci.md`](docs/build/ci.md).
+You should see the front door: open a folder that holds a liquid repository, or create one. Run
+the tests with `ctest --test-dir build --output-on-failure`; the native window tests need a
+logged-in desktop. Linux requirements and the rest of the build options are in
+[`docs/build/local.md`](docs/build/local.md) and [`docs/build/ci.md`](docs/build/ci.md).
 
-Until versioned releases identify compatible builds, use these artifact combinations:
+liquid and liquify are not yet paired by version tags: build liquid at the commit
+[`docs/build/store-compatibility.md`](docs/build/store-compatibility.md) records for this release.
+`liquify version` names the IDE and library revisions, and that page also has the store
+compatibility rule.
 
-| Artifact | Supported revision |
-|---|---|
-| Separately built liquid CLI and liquify's pinned libliquid | `7ff6ed82f93b916ef206c5776e2761b19536d8f3` |
-| Native lake service used for clone verification | `620c249c3e03c455b1392d4691488e7639d01ff6` |
+## How it fits the stack
 
-`liquify version` identifies the IDE and library revisions. The store compatibility rule,
-upgrade diagnostics, and independent CLI → IDE → CLI integration check are in
-[`docs/build/store-compatibility.md`](docs/build/store-compatibility.md).
+liquify talks only to liquid: libliquid in process for repositories, analysis and edits, and
+liquid's daemon for builds and sync. Through liquid it pushes to, pulls from and reviews on a lake.
+It never depends on lake or zetta directly.
+
+| Piece | What it does | Relation to liquify |
+|---|---|---|
+| [liquid](https://github.com/oramasearch/liquid) | Version control, builds, packages, deploys | liquify links libliquid and drives its daemon |
+| [lake](https://github.com/oramasearch/lake) | The AI workspace, and where liquid repositories collect | liquify pushes, pulls and reviews on it through liquid |
+
+## Known limits
+
+- No signed installer: build from source.
+- Quick Open can come up empty now and then, when liquid's store index fails to load; it is fixed
+  in liquid and reaches liquify with the next liquid update.
+- One lake per repository: the lake a repository was cloned from, or one you set.
+- Accepted assistant edits are signed as you, not as the assistant acting for you; agent
+  attribution waits on liquid.
+- Plugin sandboxes do not deny reads, and Windows has no network sandbox.
+- Recording a build on macOS may need a filesystem extension liquid's sandbox uses.
+- A few toolbar labels and tooltips show a key's default binding after you rebind it.
+- The Linux and Windows builds are exercised less often than macOS.
 
 ## Documentation
-| Path | Role |
-|---|---|
-| `include/liquify/app.hpp`, `src/app.cpp` | the application shell: window, renderer, ImGui context, frame loop. **The one TU that includes SDL3 or ImGui.** |
-| `include/liquify/input.hpp`, `src/input.cpp` | the plain-C++ input and accessibility state machine: composition, clipboard, drops, preferences, and platform labels |
-| `src/editor_buffer.hpp`, `src/editor_buffer.cpp` | the in-memory text buffer, input modes, and libliquid blob read/write path |
-| `src/text_layout.hpp`, `src/text_layout.cpp` | retained per-blob line layout with edit-local invalidation and UTF-8/tab positioning |
-| `src/repository_view.hpp`, `src/repository_view.cpp` | the plain C++ repository loader: reads the root on a worker, loads nested trees on expansion, and exposes entries, open latency, or an error |
-| `include/liquify/version.hpp`, `src/version.cpp` | version |
-| `include/liquify/stub_tree.hpp`, `src/stub_tree.cpp` | tree-sitter C/C++ declaration stubs, their liquid graph query, and cross-file stub resolver |
-| `include/liquify/interactive_analysis.hpp`, `src/interactive_analysis.cpp` | open-buffer incremental trees and registered cursor, completion, hover, reference and diagnostics queries |
-| `include/liquify/editor_graph.hpp`, `src/editor_graph.cpp` | background editor-query runtime, daemon host/attach lifetime, asynchronous query snapshots and status data |
-| `docs/editor/build.md` | graph build, test and deploy panels, event states, bindings and measurement record |
-| `include/liquify/structural_edit.hpp`, `src/structural_edit.cpp` | canonical node-level edit records, selection, rename, extract-function and repository application |
-| `include/liquify/review.hpp`, `src/review.cpp` | coroutine-native review model/controller: forge listing and state, sync pull, text diff, cursor comments, and anchor advancement |
-| `include/liquify/context_builder.hpp`, `src/context_builder.cpp` | byte-budgeted, inspectable assistant context assembled from graph facts |
-| `include/liquify/ai_provider.hpp`, `src/ai_provider.cpp` | streaming provider interface and Anthropic Messages implementation |
-| `include/liquify/ai_config.hpp`, `src/ai_config.cpp` | default-off repository/global configuration and credential lookup |
-| `include/liquify/assistant.hpp`, `src/assistant.cpp` | assistant state, proposal acceptance, and local assisted-edit record |
-| `include/liquify/plugin.hpp`, `src/plugin.cpp` | checked native plugin host, global/repository configuration, canonical-CBOR validation, graph query registration, commands, and panel view models |
-| `include/liquify/multiplayer.hpp`, `src/multiplayer.cpp` | liquid-backed presence, per-line attribution, lease operations, session identity, and editor display text |
-| `plugins/sample/` | sample query, command, and panel built for static and dynamic registration |
-| `docs/multiplayer.md` | multiplayer editor surface, plugin callback delivery, authorization boundary, and verification |
-| `packaging/` | hand-built macOS, Windows, AppImage, and Flatpak release inputs used until liquid's projection targets land |
-| `src/main.cpp` | CLI: optional repository path, `--lake URL`, `--print-tree`, `--apply-edits`, `version`, `--smoke [N]`, `--help` |
-| `tests/` | GoogleTest; `ctest --test-dir build` |
-| `../liquid` (`LIQUIFY_LIQUID_SOURCE_DIR`) | **libliquid** — a *sibling* module of `liquid-bridge`, not a submodule here; built library-only (`LIQUID_BUILD_CLI OFF`), linked as `liquid::liquid` |
-| `modules/corosio`, `modules/http` | pinned TLS coroutine and HTTP/1.1 transport used only by the assistant provider |
-| `modules/tree-sitter*` | pinned tree-sitter runtime plus generated C and C++ grammars |
 
-[`docs/README.md`](docs/README.md) indexes one folder per topic. Every change to the system lands
-its page there in the same change; this file is only the front door. The most useful pages:
+[`docs/README.md`](docs/README.md) indexes one folder per topic. Start with
+[`docs/design/overview.md`](docs/design/overview.md) (what liquify is),
+[`docs/design/status.md`](docs/design/status.md) (what works, by area),
+[`docs/ui/design-system.md`](docs/ui/design-system.md) (the look),
+[`docs/ui/commands.md`](docs/ui/commands.md) (every command and key, generated from the code) and
+[`docs/build/layout.md`](docs/build/layout.md) (the source tree).
 
-- [`docs/design/overview.md`](docs/design/overview.md): what liquify is and what it is built on.
-- [`docs/design/status.md`](docs/design/status.md): what the source tree does, by area.
-- [`docs/app-shell/README.md`](docs/app-shell/README.md): the SDL3 and ImGui shell, the CLI, and
-  how the liquid pin is bumped.
-- [`docs/ui/design-system.md`](docs/ui/design-system.md): the stamped Orama tokens, generated
-  native constants, IBM Plex assets, and token gate.
-- [`docs/ui/app-shell.md`](docs/ui/app-shell.md): the persisted editor layout, themes, native
-  macOS conventions, and light/dark screenshot matrix.
-- [`docs/ui/accessibility.md`](docs/ui/accessibility.md): text composition, rich/plain clipboard,
-  file drops, keyboard focus order, platform labels, high contrast, and reduced motion.
-- [`docs/ui/first-run.md`](docs/ui/first-run.md): first run, repository switching, lake clone,
-  identity session, recovery states, multiple windows, and status signals.
-- [`docs/ui/panels.md`](docs/ui/panels.md): the panel registry, docking, layout persistence,
-  commands, states, and shared progress channel.
-- [`docs/ui/editor.md`](docs/ui/editor.md): the editor interaction model, syntax, gutters, search,
-  history and editor-view screenshots.
-- [`docs/ui/settings.md`](docs/ui/settings.md): searchable `.liquid` settings, repository overrides,
-  live application, validation, credentials and telemetry.
-- [`docs/editor/README.md`](docs/editor/README.md): the buffer, the retained text layer and the
-  smoke measurements.
-- [`docs/editor/interactive-analysis.md`](docs/editor/interactive-analysis.md),
-  [`docs/editor/structural-editing.md`](docs/editor/structural-editing.md),
-  [`docs/editor/review.md`](docs/editor/review.md), [`docs/editor/ai.md`](docs/editor/ai.md),
-  [`docs/editor/build.md`](docs/editor/build.md): analysis, structural edits, review in place,
-  the assistant, and build, test and deploy.
-- [`docs/plugins/README.md`](docs/plugins/README.md): the native plugin ABI.
-- [`docs/ui/README.md`](docs/ui/README.md): deterministic light and dark screenshot proof.
-- [`docs/build/layout.md`](docs/build/layout.md): the source tree.
-- [`docs/packaging/README.md`](docs/packaging/README.md): installers, signing and verification.
+## Community
 
-liquify is part of the liquid project;
-[`oramasearch/liquid-bridge`](https://github.com/oramasearch/liquid-bridge) holds the
-cross-module map and the action plan.
+- Bugs and requests: [issues](https://github.com/oramasearch/liquify/issues)
+- Security reports: privately, per [SECURITY.md](SECURITY.md). Please don't open a public issue.
 
-## Repository rules
+## Contributing
 
-[`CLAUDE.md`](CLAUDE.md) is the instruction file for every contributor and agent: the recorded
-decisions, the one-translation-unit rule for SDL and ImGui, the liquid pin, what never changes,
-and the full local proof to run before finishing a change. [`AGENTS.md`](AGENTS.md) restates the
-non-negotiables for Codex.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and open a
+pull request (against `dev`). Every contributor signs the
+[Contributor License Agreement](CLA.md) once, before their first pull request is merged.
+[`CLAUDE.md`](CLAUDE.md) and [`AGENTS.md`](AGENTS.md) carry the repository's rules for people and
+agents alike.
 
-## Licence
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
-No licence file is declared. The repository is private for now and open source eventually, like
-liquid; the licence decision is tracked in
-[oramasearch/liquid-bridge#2](https://github.com/oramasearch/liquid-bridge/issues/2).
+## License
+
+MIT. See [LICENSE](LICENSE) and [COPYRIGHT](COPYRIGHT). Third-party components keep their own
+licenses, listed in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES).
+
+"Orama Lake", "liquid", "lake", "liquify" and their logos are trademarks of OramaSearch, Inc.

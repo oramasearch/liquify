@@ -1,8 +1,7 @@
 # What the window shows
 
 The default window follows one rule: **content, control, or state worth acting on**.
-Anything else is absent until someone deliberately opens its details. This is the design from
-[liquify #61](https://github.com/oramasearch/liquify/issues/61#issuecomment-5591691715).
+Anything else is absent until someone deliberately opens its details.
 
 ## Three zones
 
@@ -19,7 +18,7 @@ Anything else is absent until someone deliberately opens its details. This is th
 | Group | Controls |
 |---|---|
 | File | Save |
-| Build | Build (F7), Tests (F8), Deploy (F9) |
+| Build | Build (F7), Tests (F8), Push (F9) |
 | View | Split, Hide panel |
 | Mode | Standard, structural editing, optional assistant |
 

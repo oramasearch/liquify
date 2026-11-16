@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <chrono>
@@ -71,6 +73,10 @@ public:
     create_comment(std::string body, std::string path, std::uint64_t line, std::uint64_t column)
         -> liquid::runtime::task<ReviewSnapshot>;
     [[nodiscard]] auto approve() -> liquid::runtime::task<ReviewSnapshot>;
+    // Asks for a review of the local repository's current change (its head) on lake, through
+    // forge_client::create_review, and opens it. The change must already be pushed.
+    [[nodiscard]] auto request_review(std::vector<std::string> reviewers)
+        -> liquid::runtime::task<ReviewSnapshot>;
     [[nodiscard]] auto request_changes() -> liquid::runtime::task<ReviewSnapshot>;
 
     [[nodiscard]] auto snapshot() const -> const ReviewSnapshot&;
@@ -115,6 +121,7 @@ public:
     void
     request_comment(std::string body, std::string path, std::uint64_t line, std::uint64_t column);
     void request_approve();
+    void request_review(std::vector<std::string> reviewers);
     void request_changes();
 
     [[nodiscard]] auto snapshot() const -> ReviewControllerSnapshot;
@@ -123,6 +130,8 @@ private:
     std::shared_ptr<State> state_;
 };
 
+// "ana, bo ,, cy" -> {"ana", "bo", "cy"}.
+[[nodiscard]] auto parse_reviewers(std::string_view text) -> std::vector<std::string>;
 [[nodiscard]] auto review_state_name(liquid::forge_review_state state) -> std::string_view;
 [[nodiscard]] auto review_anchor_state_name(ReviewAnchorState state) -> std::string_view;
 

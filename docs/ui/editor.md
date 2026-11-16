@@ -20,6 +20,9 @@ spaces, indentation width and soft wrapping. Tab inserts the configured indentat
 bar reports the caret count and active indentation/wrap policy. `visual_rows` is the shared,
 deterministic model for soft-wrapped and folded source rows.
 
+The editor's chrome (the file row with tabs and breadcrumb, the toolbar, the gutter's look and
+the focus treatment) is specified in [`design-system.md`](design-system.md#editor-chrome).
+
 The gutter renders one-based line numbers, analysis severity markers, per-line human or agent
 attribution, active repository presence, syntax fold markers and a liquid Drive-state badge.
 Bracket pairs are found with nesting awareness and outlined when the caret is on either side of a
@@ -74,4 +77,4 @@ static: smoke: lines=50000 frames=30 visible_lines=43 avg_frame_ms=2.275 p95_fra
 shared: smoke: lines=50000 frames=30 visible_lines=43 avg_frame_ms=2.385 p95_frame_ms=2.680 achieved_hz=419.3 display_hz=60.0 avg_typing_ms=2.521 p95_typing_ms=2.683
 ```
 
-Linux proof is deferred under decision 33.
+Linux proof is deferred: it has not been run yet.

@@ -1,31 +1,34 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/plugin.hpp"
 
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <set>
+#include <span>
 #include <string_view>
 #include <utility>
 
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
-
 #include "encoding/cbor.hpp"
 #include "liquid/graph.hpp"
+#include "liquid/hash.hpp"
 #include "liquid/repository.hpp"
 #include "liquid/runtime.hpp"
 #include "liquify/ai_config.hpp"
+#include "liquify/settings.hpp"
+#include "plugin_process.hpp"
 
 namespace liquify {
 namespace {
@@ -395,10 +398,21 @@ private:
   liquid_frontend_owned_bytes_v1 value_;
 };
 
+namespace protocol = plugin_protocol;
+
+// How long one call may take before its host is ended and the call fails (liquify#82). Panels
+// and events refresh what the window shows, so they get the shorter deadline. Neither is waited
+// for on the UI thread: `PluginDispatcher` sends them from a worker (liquify#149).
+constexpr auto operation_deadline = std::chrono::milliseconds(10'000);
+constexpr auto view_deadline = std::chrono::milliseconds(2'000);
+
 struct Operation {
   std::string plugin;
   std::string name;
   liquify_plugin_operation_v1 invoke{};
+  // Set for a dynamic plugin: the operation is a request to its `liquify-plugin-host`.
+  std::shared_ptr<detail::PluginProcess> process;
+  protocol::Kind kind = protocol::Kind::query;
 };
 
 struct CommandOperation : Operation {
@@ -406,28 +420,43 @@ struct CommandOperation : Operation {
   std::vector<std::byte> argument_schema;
 };
 
+// A statically registered plugin (`descriptor`, in this process) or a dynamic one (`process`,
+// in its own `liquify-plugin-host`). The IDE never maps a dynamic plugin's library.
 struct PluginModule {
   std::string name;
   const liquify_plugin_v1 *descriptor{};
-  void *library{};
-  bool owns_library{};
+  std::shared_ptr<detail::PluginProcess> process;
   std::vector<Operation> queries;
   std::vector<CommandOperation> commands;
   std::vector<Operation> panels;
   liquify_plugin_event_callbacks_v1 events{};
+  std::vector<std::string> process_events;
+
+  PluginModule() = default;
+  PluginModule(const PluginModule &) = delete;
+  auto operator=(const PluginModule &) -> PluginModule & = delete;
 
   ~PluginModule() {
     if (descriptor && descriptor->destroy) {
       descriptor->destroy(descriptor->plugin_context);
     }
-    if (!owns_library || !library) {
+  }
+
+  [[nodiscard]] auto context() const -> void * {
+    return descriptor ? descriptor->plugin_context : nullptr;
+  }
+
+  void publish(liquify_plugin_event_v1 callback, std::string_view kind,
+               std::span<const std::byte> event) const {
+    if (process) {
+      if (std::ranges::find(process_events, kind) != process_events.end()) {
+        (void)process->call(protocol::Kind::event, kind, event, view_deadline);
+      }
       return;
     }
-#if defined(_WIN32)
-    FreeLibrary(static_cast<HMODULE>(library));
-#else
-    dlclose(library);
-#endif
+    if (callback) {
+      callback(context(), {reinterpret_cast<const std::uint8_t *>(event.data()), event.size()});
+    }
   }
 };
 
@@ -569,6 +598,20 @@ auto invoke_operation(const Operation &operation, void *context,
   if (!input) {
     return std::unexpected(input.error());
   }
+  if (operation.process) {
+    const auto deadline = operation.kind == protocol::Kind::panel ? view_deadline
+                                                                  : operation_deadline;
+    auto value = operation.process->call(operation.kind, operation.name, arguments, deadline);
+    if (!value) {
+      return std::unexpected(value.error());
+    }
+    auto valid = validate_cbor(*value, liquid::errc::corrupt,
+                               operation.plugin + ":" + operation.name);
+    if (!valid) {
+      return std::unexpected(valid.error());
+    }
+    return value;
+  }
   auto output = liquid_frontend_owned_bytes_v1{};
   auto error = liquid_frontend_error_v1{};
   const auto callbacks = liquid_frontend_callbacks_v1{};
@@ -611,19 +654,6 @@ auto invoke_operation(const Operation &operation, void *context,
 }
 
 auto nonempty(const char *value) -> bool { return value && value[0] != '\0'; }
-
-auto library_error(const std::filesystem::path &path, std::string action)
-    -> liquid::error {
-#if defined(_WIN32)
-  return plugin_error(liquid::errc::unavailable, std::move(action),
-                      path.string());
-#else
-  const auto *detail = dlerror();
-  auto message = detail ? std::string(detail) : std::move(action);
-  return plugin_error(liquid::errc::unavailable, std::move(message),
-                      path.string());
-#endif
-}
 
 class PanelDecoder {
 public:
@@ -752,8 +782,8 @@ struct PluginHost::Impl {
     return {};
   }
 
-  [[nodiscard]] auto add(const liquify_plugin_v1 *descriptor, void *library,
-                         bool owns_library) -> liquid::result<void> {
+  [[nodiscard]] auto add(const liquify_plugin_v1 *descriptor)
+      -> liquid::result<void> {
     constexpr auto descriptor_size = offsetof(liquify_plugin_v1, events);
     if (!descriptor || descriptor->abi_version != LIQUIFY_PLUGIN_ABI_VERSION ||
         descriptor->struct_size < descriptor_size ||
@@ -795,7 +825,8 @@ struct PluginHost::Impl {
                                             "plugin has an invalid query",
                                             module->name));
       }
-      module->queries.push_back({module->name, query.name, query.invoke});
+      module->queries.push_back(
+          {module->name, query.name, query.invoke, nullptr, protocol::Kind::query});
     }
     for (std::size_t index = 0; index < descriptor->command_count; ++index) {
       const auto &command = descriptor->commands[index];
@@ -815,7 +846,8 @@ struct PluginHost::Impl {
       if (!valid) {
         return std::unexpected(valid.error());
       }
-      module->commands.push_back({{module->name, command.name, command.invoke},
+      module->commands.push_back({{module->name, command.name, command.invoke,
+                                   nullptr, protocol::Kind::command},
                                   command.default_binding,
                                   {schema.begin(), schema.end()}});
     }
@@ -827,7 +859,8 @@ struct PluginHost::Impl {
                                             "plugin has an invalid panel",
                                             module->name));
       }
-      module->panels.push_back({module->name, panel.name, panel.view_model});
+      module->panels.push_back({module->name, panel.name, panel.view_model,
+                                nullptr, protocol::Kind::panel});
     }
     if (descriptor->struct_size >= sizeof(liquify_plugin_v1) &&
         descriptor->events &&
@@ -848,8 +881,73 @@ struct PluginHost::Impl {
       }
     }
     module->descriptor = descriptor;
-    module->library = library;
-    module->owns_library = owns_library;
+    modules.push_back(std::move(module));
+    return {};
+  }
+
+  // A dynamic plugin, described by the manifest its host reported. Every check `add` makes on a
+  // descriptor is made again here: the host is not trusted either.
+  [[nodiscard]] auto add(std::shared_ptr<detail::PluginProcess> process)
+      -> liquid::result<void> {
+    const auto &manifest = process->manifest();
+    auto module = std::make_unique<PluginModule>();
+    module->name = manifest.name;
+    if (module->name.empty()) {
+      return std::unexpected(plugin_error(
+          liquid::errc::invalid_argument,
+          "plugin descriptor does not implement ABI v1", "plugin"));
+    }
+    const auto taken = [this, &module](std::string_view name, auto member) {
+      const auto named = [name](const auto &operation) {
+        return operation.name == name;
+      };
+      return name.empty() || contains(name, member) ||
+             std::ranges::any_of((*module).*member, named);
+    };
+    for (const auto &query : manifest.queries) {
+      if (taken(query, &PluginModule::queries)) {
+        return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                            "plugin has an invalid query",
+                                            module->name));
+      }
+      module->queries.push_back(
+          {module->name, query, nullptr, process, protocol::Kind::query});
+    }
+    for (const auto &command : manifest.commands) {
+      if (taken(command.name, &PluginModule::commands)) {
+        return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                            "plugin has an invalid command",
+                                            module->name));
+      }
+      auto valid = validate_cbor(command.argument_schema,
+                                 liquid::errc::invalid_argument,
+                                 module->name + ":" + command.name);
+      if (!valid) {
+        return std::unexpected(valid.error());
+      }
+      module->commands.push_back(
+          {{module->name, command.name, nullptr, process, protocol::Kind::command},
+           command.default_binding,
+           command.argument_schema});
+    }
+    for (const auto &panel : manifest.panels) {
+      if (taken(panel, &PluginModule::panels)) {
+        return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                            "plugin has an invalid panel",
+                                            module->name));
+      }
+      module->panels.push_back(
+          {module->name, panel, nullptr, process, protocol::Kind::panel});
+    }
+    for (const auto &event : manifest.events) {
+      if (event != "presence" && event != "lease" && event != "attribution") {
+        return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                            "plugin has an invalid event",
+                                            module->name));
+      }
+      module->process_events.push_back(event);
+    }
+    module->process = std::move(process);
     modules.push_back(std::move(module));
     return {};
   }
@@ -864,61 +962,19 @@ auto PluginHost::operator=(PluginHost &&) noexcept -> PluginHost & = default;
 
 auto PluginHost::add(const liquify_plugin_v1 *descriptor)
     -> liquid::result<void> {
-  return impl_->add(descriptor, nullptr, false);
+  return impl_->add(descriptor);
 }
 
+// A dynamic plugin runs in its own `liquify-plugin-host` process (liquify#82): this process
+// never maps its library, and a crash or hang in it is an error of the call that met it.
 auto PluginHost::load(std::filesystem::path shared_object)
     -> liquid::result<void> {
-#if defined(_WIN32)
-  auto library = LoadLibraryW(shared_object.wstring().c_str());
-  if (!library) {
-    return std::unexpected(
-        library_error(shared_object, "could not load plugin"));
+  auto process = detail::PluginProcess::start(detail::plugin_host_executable(),
+                                              std::move(shared_object));
+  if (!process) {
+    return std::unexpected(process.error());
   }
-  auto *symbol = reinterpret_cast<liquify_plugin_entrypoint_v1>(
-      GetProcAddress(library, LIQUIFY_PLUGIN_ENTRYPOINT_V1));
-#else
-  dlerror();
-  auto *library = dlopen(shared_object.c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    return std::unexpected(
-        library_error(shared_object, "could not load plugin"));
-  }
-  auto *symbol = reinterpret_cast<liquify_plugin_entrypoint_v1>(
-      dlsym(library, LIQUIFY_PLUGIN_ENTRYPOINT_V1));
-#endif
-  if (!symbol) {
-    auto error = library_error(shared_object, "plugin entry point is missing");
-#if defined(_WIN32)
-    FreeLibrary(library);
-#else
-    dlclose(library);
-#endif
-    return std::unexpected(std::move(error));
-  }
-  const liquify_plugin_v1 *descriptor = nullptr;
-  try {
-    descriptor = symbol();
-  } catch (...) {
-#if defined(_WIN32)
-    FreeLibrary(library);
-#else
-    dlclose(library);
-#endif
-    return std::unexpected(plugin_error(liquid::errc::internal,
-                                        "plugin entry point threw an exception",
-                                        shared_object.string()));
-  }
-  auto added = impl_->add(descriptor, library, true);
-  if (!added) {
-#if defined(_WIN32)
-    FreeLibrary(library);
-#else
-    dlclose(library);
-#endif
-    return std::unexpected(added.error());
-  }
-  return {};
+  return impl_->add(std::move(*process));
 }
 
 auto PluginHost::query_names() const -> std::vector<std::string> {
@@ -951,18 +1007,48 @@ auto PluginHost::invoke_command(std::string_view name,
                                         "plugin command is not registered",
                                         std::string(name)));
   }
-  return invoke_operation(*command, module->descriptor->plugin_context,
-                          arguments_cbor);
+  return invoke_operation(*command, module->context(), arguments_cbor);
 }
 
 auto PluginHost::panels(std::span<const std::byte> context_cbor)
     -> std::vector<PluginPanelSnapshot> {
   auto output = std::vector<PluginPanelSnapshot>{};
   for (const auto &module : impl_->modules) {
+    auto panels = this->panels(module->name, context_cbor);
+    std::ranges::move(panels, std::back_inserter(output));
+  }
+  return output;
+}
+
+auto PluginHost::panel_list() const -> std::vector<PluginPanelSnapshot> {
+  auto output = std::vector<PluginPanelSnapshot>{};
+  for (const auto &module : impl_->modules) {
+    for (const auto &panel : module->panels) {
+      output.push_back({panel.plugin, panel.name, {}, {}, true});
+    }
+  }
+  return output;
+}
+
+auto PluginHost::plugin_names() const -> std::vector<std::string> {
+  auto output = std::vector<std::string>{};
+  for (const auto &module : impl_->modules) {
+    output.push_back(module->name);
+  }
+  return output;
+}
+
+auto PluginHost::panels(std::string_view plugin,
+                        std::span<const std::byte> context_cbor)
+    -> std::vector<PluginPanelSnapshot> {
+  auto output = std::vector<PluginPanelSnapshot>{};
+  for (const auto &module : impl_->modules) {
+    if (module->name != plugin) {
+      continue;
+    }
     for (const auto &panel : module->panels) {
       auto snapshot = PluginPanelSnapshot{panel.plugin, panel.name, {}, {}};
-      auto value = invoke_operation(panel, module->descriptor->plugin_context,
-                                    context_cbor);
+      auto value = invoke_operation(panel, module->context(), context_cbor);
       if (!value) {
         snapshot.error = value.error().message;
         if (!value.error().context.empty()) {
@@ -981,17 +1067,16 @@ auto PluginHost::register_queries(liquid::query_registry &registry) const
     -> liquid::result<void> {
   for (const auto &module : impl_->modules) {
     for (const auto &query : module->queries) {
-      const auto *descriptor = module->descriptor;
+      auto *context = module->context();
       auto added = registry.add(
           {.name = query.name,
            .encode_arguments =
                [](std::span<const std::byte> arguments) {
                  return canonical_plugin_cbor(arguments);
                },
-           .compute = [operation = query, descriptor](auto &, auto arguments)
+           .compute = [operation = query, context](auto &, auto arguments)
                -> liquid::runtime::task<std::vector<std::byte>> {
-             auto value = invoke_operation(
-                 operation, descriptor->plugin_context, arguments);
+             auto value = invoke_operation(operation, context, arguments);
              if (!value) {
                co_return std::unexpected(value.error());
              }
@@ -1014,55 +1099,49 @@ auto PluginHost::invoke_query(std::string_view name,
                                         "plugin query is not registered",
                                         std::string(name)));
   }
-  return invoke_operation(*query, module->descriptor->plugin_context,
-                          arguments_cbor);
+  return invoke_operation(*query, module->context(), arguments_cbor);
 }
 
-void PluginHost::publish_presence(const liquid::presence &value) {
+void PluginHost::publish_presence(const liquid::presence &value,
+                                  std::string_view plugin) {
   auto event = presence_event(value);
   if (!event) {
     return;
   }
-  const auto bytes = std::span(
-      reinterpret_cast<const std::uint8_t *>(event->data()), event->size());
-  const auto input = liquid_frontend_bytes_v1{bytes.data(), bytes.size()};
   for (const auto &module : impl_->modules) {
-    if (module->events.presence) {
-      module->events.presence(module->descriptor->plugin_context, input);
+    if (!plugin.empty() && module->name != plugin) {
+      continue;
     }
+    module->publish(module->events.presence, "presence", *event);
   }
 }
 
 void PluginHost::publish_lease(const liquid::semantic_lease &value,
-                               bool active) {
+                               bool active, std::string_view plugin) {
   auto event = lease_event(value, active);
   if (!event) {
     return;
   }
-  const auto bytes = std::span(
-      reinterpret_cast<const std::uint8_t *>(event->data()), event->size());
-  const auto input = liquid_frontend_bytes_v1{bytes.data(), bytes.size()};
   for (const auto &module : impl_->modules) {
-    if (module->events.lease) {
-      module->events.lease(module->descriptor->plugin_context, input);
+    if (!plugin.empty() && module->name != plugin) {
+      continue;
     }
+    module->publish(module->events.lease, "lease", *event);
   }
 }
 
 void PluginHost::publish_attribution(
     std::string_view path, const liquid::change_id &change,
-    std::span<const liquid::line_attribution> lines) {
+    std::span<const liquid::line_attribution> lines, std::string_view plugin) {
   auto event = attribution_event(path, change, lines);
   if (!event) {
     return;
   }
-  const auto bytes = std::span(
-      reinterpret_cast<const std::uint8_t *>(event->data()), event->size());
-  const auto input = liquid_frontend_bytes_v1{bytes.data(), bytes.size()};
   for (const auto &module : impl_->modules) {
-    if (module->events.attribution) {
-      module->events.attribution(module->descriptor->plugin_context, input);
+    if (!plugin.empty() && module->name != plugin) {
+      continue;
     }
+    module->publish(module->events.attribution, "attribution", *event);
   }
 }
 
@@ -1098,7 +1177,7 @@ auto plugin_empty_map_cbor() -> std::span<const std::byte> {
 auto load_global_plugins(
     std::optional<std::filesystem::path> global_config_path)
     -> liquid::result<ConfiguredPlugins> {
-  const auto config_path = global_config_path.value_or(global_ai_config_path());
+  const auto config_path = global_config_path.value_or(global_plugin_config_path());
   auto paths = configured_file_paths(config_path);
   if (!paths) {
     return std::unexpected(paths.error());
@@ -1119,44 +1198,326 @@ auto load_global_plugins(
   return configured;
 }
 
-auto load_configured_plugins(
-    const std::filesystem::path &repository_path,
-    std::optional<std::filesystem::path> global_config_path)
-    -> liquid::result<ConfiguredPlugins> {
-  const auto config_path = global_config_path.value_or(global_ai_config_path());
-  auto paths = configured_file_paths(config_path);
-  if (!paths) {
-    return std::unexpected(paths.error());
-  }
+namespace {
 
+auto read_file_bytes(const std::filesystem::path &path)
+    -> liquid::result<std::vector<std::byte>> {
+  auto input = std::ifstream(path, std::ios::binary);
+  if (!input) {
+    return std::unexpected(plugin_error(liquid::errc::not_found,
+                                        "could not read plugin",
+                                        path.string()));
+  }
+  const auto characters =
+      std::vector<char>(std::istreambuf_iterator<char>(input), {});
+  if (input.bad()) {
+    return std::unexpected(
+        plugin_error(liquid::errc::io, "could not read plugin", path.string()));
+  }
+  const auto view = std::as_bytes(std::span(characters));
+  return std::vector<std::byte>(view.begin(), view.end());
+}
+
+auto sha256_digest(std::span<const std::byte> value)
+    -> liquid::result<std::string> {
+  auto digest = liquid::hash(liquid::algorithm::sha256, value);
+  if (!digest) {
+    return std::unexpected(digest.error());
+  }
+  return liquid::to_string(*digest);
+}
+
+auto error_text(const liquid::error &error) -> std::string {
+  auto message = error.message;
+  if (!error.context.empty()) {
+    message += ": " + error.context;
+  }
+  return message;
+}
+
+auto repository_plugin_paths(const std::filesystem::path &repository_path)
+    -> liquid::result<std::vector<std::filesystem::path>> {
+  auto output = std::vector<std::filesystem::path>{};
   auto repository =
       liquid::runtime::block_on(liquid::repository::open(repository_path));
   if (!repository) {
     return std::unexpected(repository.error());
   }
-  auto repository_value =
-      liquid::runtime::block_on(repository->metadata(plugins_key));
-  if (!repository_value) {
-    return std::unexpected(repository_value.error());
+  auto value = liquid::runtime::block_on(repository->metadata(plugins_key));
+  if (!value) {
+    return std::unexpected(value.error());
   }
-  if (*repository_value) {
-    const auto &bytes = **repository_value;
-    const auto value = std::string_view(
-        reinterpret_cast<const char *>(bytes.data()), bytes.size());
-    append_plugin_paths(*paths, value, repository_path);
+  if (*value) {
+    const auto &bytes = **value;
+    append_plugin_paths(
+        output,
+        std::string_view(reinterpret_cast<const char *>(bytes.data()),
+                         bytes.size()),
+        repository_path);
   }
-  deduplicate_paths(*paths);
+  deduplicate_paths(output);
+  return output;
+}
+
+// Writes the bytes that were hashed to a per-user, content-addressed file and
+// returns its path. Loading that copy, never the repository's file, means the
+// repository cannot swap the library between the digest check and the load.
+auto stage_trusted_plugin(std::span<const std::byte> bytes,
+                          std::string_view digest,
+                          const std::filesystem::path &source,
+                          const std::filesystem::path &trust_store_path)
+    -> liquid::result<std::filesystem::path> {
+  const auto directory = trust_store_path.parent_path() / "plugin-cache";
+  auto code = std::error_code{};
+  std::filesystem::create_directories(directory, code);
+  if (code) {
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not create plugin cache",
+                                        directory.string()));
+  }
+#if !defined(_WIN32)
+  std::filesystem::permissions(directory, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace, code);
+#endif
+  const auto hex = digest.substr(digest.find(':') + 1);
+  const auto staged =
+      directory / (std::string(hex) + source.extension().string());
+  const auto temporary = std::filesystem::path(staged.string() + ".partial");
+  {
+    auto output =
+        std::ofstream(temporary, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char *>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+    if (!output) {
+      return std::unexpected(plugin_error(liquid::errc::io,
+                                          "could not stage trusted plugin",
+                                          temporary.string()));
+    }
+  }
+  std::filesystem::rename(temporary, staged, code);
+  if (code) {
+    std::filesystem::remove(temporary, code);
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not stage trusted plugin",
+                                        staged.string()));
+  }
+  return staged;
+}
+
+} // namespace
+
+auto global_plugin_config_path() -> std::filesystem::path {
+  const auto settings = user_settings_path();
+  return settings.empty() ? std::filesystem::path{} : settings.parent_path() / "plugins";
+}
+
+auto plugin_trust_store_path() -> std::filesystem::path {
+  return user_settings_path().parent_path() / "trusted-plugins";
+}
+
+auto plugin_digest(const std::filesystem::path &shared_object)
+    -> liquid::result<std::string> {
+  auto bytes = read_file_bytes(shared_object);
+  if (!bytes) {
+    return std::unexpected(bytes.error());
+  }
+  return sha256_digest(*bytes);
+}
+
+auto trusted_plugin_digests(const std::filesystem::path &trust_store_path)
+    -> liquid::result<std::vector<std::string>> {
+  auto output = std::vector<std::string>{};
+  if (trust_store_path.empty() || !std::filesystem::exists(trust_store_path)) {
+    return output;
+  }
+  auto input = std::ifstream(trust_store_path);
+  if (!input) {
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not open plugin trust store",
+                                        trust_store_path.string()));
+  }
+  auto line = std::string{};
+  auto line_number = std::size_t{};
+  while (std::getline(input, line)) {
+    ++line_number;
+    const auto view = trim(line);
+    if (view.empty() || view.starts_with('#')) {
+      continue;
+    }
+    const auto token = view.substr(0, view.find_first_of(" \t"));
+    auto parsed = liquid::parse_digest(token);
+    if (!token.starts_with("sha256:") || !parsed ||
+        parsed->alg != liquid::algorithm::sha256) {
+      return std::unexpected(plugin_error(
+          liquid::errc::invalid_argument, "expected a sha256 plugin digest",
+          trust_store_path.string() + ":" + std::to_string(line_number)));
+    }
+    output.push_back(liquid::to_string(*parsed));
+  }
+  return output;
+}
+
+auto trust_plugin_digest(std::string_view digest,
+                         const std::filesystem::path &origin,
+                         const std::filesystem::path &trust_store_path)
+    -> liquid::result<void> {
+  auto parsed = liquid::parse_digest(digest);
+  if (!digest.starts_with("sha256:") || !parsed ||
+      parsed->alg != liquid::algorithm::sha256) {
+    return std::unexpected(plugin_error(liquid::errc::invalid_argument,
+                                        "expected a sha256 plugin digest",
+                                        std::string(digest)));
+  }
+  auto trusted = trusted_plugin_digests(trust_store_path);
+  if (!trusted) {
+    return std::unexpected(trusted.error());
+  }
+  if (std::ranges::find(*trusted, digest) != trusted->end()) {
+    return {};
+  }
+  auto code = std::error_code{};
+  std::filesystem::create_directories(trust_store_path.parent_path(), code);
+  if (code) {
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not create trust store directory",
+                                        trust_store_path.string()));
+  }
+  auto absolute = std::filesystem::absolute(origin, code);
+  if (code) {
+    absolute = origin;
+  }
+  auto output = std::ofstream(trust_store_path, std::ios::app);
+  output << digest << '\t' << absolute.lexically_normal().generic_string()
+         << '\n';
+  if (!output) {
+    return std::unexpected(plugin_error(liquid::errc::io,
+                                        "could not write plugin trust store",
+                                        trust_store_path.string()));
+  }
+  return {};
+}
+
+auto trust_plugin(const std::filesystem::path &shared_object,
+                  const std::filesystem::path &trust_store_path)
+    -> liquid::result<std::string> {
+  auto digest = plugin_digest(shared_object);
+  if (!digest) {
+    return std::unexpected(digest.error());
+  }
+  auto recorded = trust_plugin_digest(*digest, shared_object, trust_store_path);
+  if (!recorded) {
+    return std::unexpected(recorded.error());
+  }
+  return digest;
+}
+
+auto inspect_configured_plugins(
+    const std::filesystem::path &repository_path,
+    std::optional<std::filesystem::path> global_config_path,
+    std::optional<std::filesystem::path> trust_store_path)
+    -> liquid::result<std::vector<PluginStatus>> {
+  auto global = configured_file_paths(
+      global_config_path.value_or(global_plugin_config_path()));
+  if (!global) {
+    return std::unexpected(global.error());
+  }
+  deduplicate_paths(*global);
+  auto repository = repository_plugin_paths(repository_path);
+  if (!repository) {
+    return std::unexpected(repository.error());
+  }
+  auto trusted =
+      trusted_plugin_digests(trust_store_path.value_or(plugin_trust_store_path()));
+  if (!trusted) {
+    return std::unexpected(trusted.error());
+  }
+  auto output = std::vector<PluginStatus>{};
+  for (const auto &path : *global) {
+    output.push_back({path, PluginSource::global, {}, true, {}});
+  }
+  for (const auto &path : *repository) {
+    if (std::ranges::find(*global, path) != global->end()) {
+      continue;
+    }
+    auto status = PluginStatus{path, PluginSource::repository, {}, false, {}};
+    auto digest = plugin_digest(path);
+    if (!digest) {
+      status.error = error_text(digest.error());
+    } else {
+      status.digest = std::move(*digest);
+      status.trusted =
+          std::ranges::find(*trusted, status.digest) != trusted->end();
+    }
+    output.push_back(std::move(status));
+  }
+  return output;
+}
+
+auto load_configured_plugins(
+    const std::filesystem::path &repository_path,
+    std::optional<std::filesystem::path> global_config_path,
+    std::optional<std::filesystem::path> trust_store_path)
+    -> liquid::result<ConfiguredPlugins> {
+  const auto store = trust_store_path.value_or(plugin_trust_store_path());
+  auto global = configured_file_paths(
+      global_config_path.value_or(global_plugin_config_path()));
+  if (!global) {
+    return std::unexpected(global.error());
+  }
+  deduplicate_paths(*global);
+  auto repository = repository_plugin_paths(repository_path);
+  if (!repository) {
+    return std::unexpected(repository.error());
+  }
 
   auto configured =
-      ConfiguredPlugins{std::make_shared<PluginHost>(), std::move(*paths), {}};
-  for (const auto &path : configured.paths) {
+      ConfiguredPlugins{std::make_shared<PluginHost>(), *global, {}, {}};
+  for (const auto &path : *global) {
     auto loaded = configured.host->load(path);
     if (!loaded) {
-      auto message = loaded.error().message;
-      if (!loaded.error().context.empty()) {
-        message += ": " + loaded.error().context;
+      configured.failures.push_back({path, error_text(loaded.error())});
+    }
+  }
+
+  // Repository metadata is attacker-controlled: it names a file, and the
+  // file loads only if its exact bytes were trusted by the user beforehand.
+  auto trusted = std::optional<std::vector<std::string>>{};
+  for (const auto &path : *repository) {
+    if (std::ranges::find(*global, path) != global->end()) {
+      continue;
+    }
+    configured.paths.push_back(path);
+    if (!trusted) {
+      auto digests = trusted_plugin_digests(store);
+      if (!digests) {
+        configured.failures.push_back({store, error_text(digests.error())});
+        trusted.emplace();
+      } else {
+        trusted = std::move(*digests);
       }
-      configured.failures.push_back({path, std::move(message)});
+    }
+    auto bytes = read_file_bytes(path);
+    if (!bytes) {
+      configured.failures.push_back({path, error_text(bytes.error())});
+      continue;
+    }
+    auto digest = sha256_digest(*bytes);
+    if (!digest) {
+      configured.failures.push_back({path, error_text(digest.error())});
+      continue;
+    }
+    if (std::ranges::find(*trusted, *digest) == trusted->end()) {
+      configured.untrusted.push_back({path, repository_path, *digest});
+      continue;
+    }
+    auto staged = stage_trusted_plugin(*bytes, *digest, path, store);
+    if (!staged) {
+      configured.failures.push_back({path, error_text(staged.error())});
+      continue;
+    }
+    auto loaded = configured.host->load(*staged);
+    if (!loaded) {
+      configured.failures.push_back({path, error_text(loaded.error())});
     }
   }
   return configured;

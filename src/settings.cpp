@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 #include "liquify/settings.hpp"
 
 #include <algorithm>
@@ -245,7 +247,7 @@ auto apply_keymap(const Record& group, Settings& output) -> liquid::result<void>
     return {};
 }
 
-auto apply_ai(const Record& group, Settings& output) -> liquid::result<void> {
+auto apply_ai(const Record& group, Settings& output, SettingsScope scope) -> liquid::result<void> {
     constexpr auto allowed = std::array<std::string_view, 5>{
         "enabled", "provider", "model", "context_bytes", "max_tokens"};
     if (auto checked = validate_fields(group, allowed); !checked) {
@@ -270,10 +272,11 @@ auto apply_ai(const Record& group, Settings& output) -> liquid::result<void> {
                                               describe(item->value),
                                               "anthropic is the configured provider transport"));
     }
-    if (*enabled) {
-        output.ai.enabled = **enabled;
-    }
-    if (*provider) {
+    // `enabled` is accepted, so older files still load, and never applied: AI is turned on per user
+    // and per repository, outside every settings file (liquify#75).
+    static_cast<void>(*enabled);
+    const auto repository = scope == SettingsScope::repository;
+    if (*provider && !repository) {
         output.ai.provider = **provider;
     }
     if (*model) {
@@ -284,7 +287,9 @@ auto apply_ai(const Record& group, Settings& output) -> liquid::result<void> {
                                                   "empty string",
                                                   "name the provider model"));
         }
-        output.ai.model = **model;
+        if (!repository) {
+            output.ai.model = **model;
+        }
     }
     if (*context) {
         output.ai.context_bytes = **context;
@@ -347,7 +352,8 @@ auto apply_telemetry(const Record& group, Settings& output) -> liquid::result<vo
     return {};
 }
 
-auto apply_group(const Record& group, Settings& output) -> liquid::result<void> {
+auto apply_group(const Record& group, Settings& output, SettingsScope scope)
+    -> liquid::result<void> {
     if (group.kind == "theme") {
         return apply_theme(group, output);
     }
@@ -361,9 +367,14 @@ auto apply_group(const Record& group, Settings& output) -> liquid::result<void> 
         return apply_keymap(group, output);
     }
     if (group.kind == "ai") {
-        return apply_ai(group, output);
+        return apply_ai(group, output, scope);
     }
     if (group.kind == "lake") {
+        if (scope == SettingsScope::repository) {
+            // A repository cannot define the user's Lake accounts (liquify#76): checked, not used.
+            auto ignored = Settings{};
+            return apply_lake(group, ignored);
+        }
         return apply_lake(group, output);
     }
     if (group.kind == "telemetry") {
@@ -445,21 +456,32 @@ auto theme_name(ThemePreference theme) -> std::string_view {
     return "system";
 }
 
-auto serialize_settings(const Settings& settings) -> std::string {
+auto serialize_settings(const Settings& settings, SettingsScope scope, const Settings& user)
+    -> std::string {
+    const auto repository = scope == SettingsScope::repository;
+    // At repository scope a group is written only when it overrides the user's value (liquify#76).
+    const auto write = [repository](bool differs) { return !repository || differs; };
     auto output = std::ostringstream{};
     output << "liquify settings {\n";
-    output << "  theme { mode: " << theme_name(settings.theme) << " }\n";
+    if (write(settings.theme != user.theme)) {
+        output << "  theme { mode: " << theme_name(settings.theme) << " }\n";
+    }
+    if (write(settings.fonts != user.fonts)) {
     output << "  fonts {\n";
     output << "    ui_family: \"" << escape(settings.fonts.ui_family) << "\"\n";
     output << "    editor_family: \"" << escape(settings.fonts.editor_family) << "\"\n";
     output << "    ui_size: " << settings.fonts.ui_size << "\n";
     output << "    editor_size: " << settings.fonts.editor_size << "\n";
     output << "  }\n";
+    }
+    if (write(settings.editor != user.editor)) {
     output << "  editor {\n";
     output << "    wrap: " << (settings.editor.wrap ? "true" : "false") << "\n";
     output << "    whitespace: " << (settings.editor.whitespace ? "true" : "false") << "\n";
     output << "    format_on_save: " << (settings.editor.format_on_save ? "true" : "false") << "\n";
     output << "  }\n";
+    }
+    if (write(settings.keymap != user.keymap)) {
     output << "  keymap { bindings: {";
     auto first = true;
     for (const auto& [command, binding] : settings.keymap) {
@@ -468,20 +490,32 @@ auto serialize_settings(const Settings& settings) -> std::string {
         first = false;
     }
     output << (settings.keymap.empty() ? "}" : "\n    }") << " }\n";
-    output << "  ai {\n";
-    output << "    enabled: " << (settings.ai.enabled ? "true" : "false") << "\n";
-    output << "    provider: " << settings.ai.provider << "\n";
-    output << "    model: \"" << escape(settings.ai.model) << "\"\n";
-    output << "    context_bytes: " << settings.ai.context_bytes << "\n";
-    output << "    max_tokens: " << settings.ai.max_tokens << "\n";
-    output << "  }\n";
-    output << "  lake {\n";
-    for (const auto& account : settings.lake_accounts) {
-        output << "    account \"" << escape(account.name) << "\" { url: \"" << escape(account.url)
-               << "\" }\n";
     }
-    output << "  }\n";
-    output << "  telemetry { enabled: " << (settings.telemetry ? "true" : "false") << " }\n";
+    // `ai.enabled` is never written: it lives outside settings files (liquify#75). A repository
+    // writes neither the provider nor the model, nor any Lake account (liquify#76).
+    if (!repository) {
+        output << "  ai {\n";
+        output << "    provider: " << settings.ai.provider << "\n";
+        output << "    model: \"" << escape(settings.ai.model) << "\"\n";
+        output << "    context_bytes: " << settings.ai.context_bytes << "\n";
+        output << "    max_tokens: " << settings.ai.max_tokens << "\n";
+        output << "  }\n";
+        output << "  lake {\n";
+        for (const auto& account : settings.lake_accounts) {
+            output << "    account \"" << escape(account.name) << "\" { url: \""
+                   << escape(account.url) << "\" }\n";
+        }
+        output << "  }\n";
+    } else if (settings.ai.context_bytes != user.ai.context_bytes ||
+               settings.ai.max_tokens != user.ai.max_tokens) {
+        output << "  ai {\n";
+        output << "    context_bytes: " << settings.ai.context_bytes << "\n";
+        output << "    max_tokens: " << settings.ai.max_tokens << "\n";
+        output << "  }\n";
+    }
+    if (write(settings.telemetry != user.telemetry)) {
+        output << "  telemetry { enabled: " << (settings.telemetry ? "true" : "false") << " }\n";
+    }
     output << "}\n";
     return output.str();
 }
@@ -521,13 +555,20 @@ auto repository_settings_path(const std::filesystem::path& repository) -> std::f
     return repository / ".liquid" / "settings.liquid";
 }
 
-auto parse_settings(std::string_view text, const std::filesystem::path& path, Settings base)
-    -> liquid::result<Settings> {
+auto parse_settings(std::string_view text,
+                    const std::filesystem::path& path,
+                    Settings base,
+                    SettingsScope scope) -> liquid::result<Settings> {
     auto parsed = liquid::parse_configuration(text, path);
     if (!parsed) {
         return std::unexpected(parsed.error());
     }
     for (const auto& record : parsed->records) {
+        // Top-level `keymap { bind ... }` records share the file and belong to the command
+        // registry's keymap parser (command.hpp, liquify#34).
+        if (record.kind == "keymap") {
+            continue;
+        }
         if (record.kind != "liquify" || record.name != "settings") {
             return std::unexpected(settings_error(record.location,
                                                   "liquify settings record",
@@ -541,7 +582,7 @@ auto parse_settings(std::string_view text, const std::filesystem::path& path, Se
                                                   "place values inside a named settings group"));
         }
         for (const auto& group : record.records) {
-            auto applied = apply_group(group, base);
+            auto applied = apply_group(group, base, scope);
             if (!applied) {
                 return std::unexpected(applied.error());
             }
@@ -553,7 +594,7 @@ auto parse_settings(std::string_view text, const std::filesystem::path& path, Se
 auto load_settings(const std::optional<std::filesystem::path>& repository,
                    std::optional<std::filesystem::path> user_path) -> SettingsLoad {
     auto output = SettingsLoad{};
-    const auto apply_file = [&output](const std::filesystem::path& path) {
+    const auto apply_file = [&output](const std::filesystem::path& path, SettingsScope scope) {
         if (path.empty() || !std::filesystem::exists(path)) {
             return;
         }
@@ -562,24 +603,81 @@ auto load_settings(const std::optional<std::filesystem::path>& repository,
             output.diagnostics.push_back(diagnostic(path, text.error()));
             return;
         }
-        auto parsed = parse_settings(*text, path, output.settings);
+        auto parsed = parse_settings(*text, path, output.settings, scope);
         if (!parsed) {
             output.diagnostics.push_back(diagnostic(path, parsed.error()));
             return;
         }
         output.settings = std::move(*parsed);
     };
-    apply_file(user_path.value_or(user_settings_path()));
+    apply_file(user_path.value_or(user_settings_path()), SettingsScope::user);
+    output.user = output.settings;
     if (repository) {
-        apply_file(repository_settings_path(*repository));
+        apply_file(repository_settings_path(*repository), SettingsScope::repository);
     }
     return output;
 }
 
-auto save_settings(const std::filesystem::path& path, const Settings& settings)
-    -> liquid::result<void> {
-    const auto serialized = serialize_settings(settings);
-    auto validated = parse_settings(serialized, path);
+// The file's top-level `keymap { bind ... }` records, as written, so that saving the settings
+// surface's groups never drops the command keymap that shares the file (liquify#34).
+static auto keymap_records_text(const std::filesystem::path& path) -> std::string {
+    if (!std::filesystem::exists(path)) {
+        return {};
+    }
+    auto text = read_file(path);
+    if (!text) {
+        return {};
+    }
+    auto parsed = liquid::parse_configuration(*text, path);
+    if (!parsed) {
+        return {};
+    }
+    auto output = std::string{};
+    for (const auto& record : parsed->records) {
+        if (record.kind != "keymap") {
+            continue;
+        }
+        auto offset = std::size_t{};
+        for (auto line = std::uint64_t{1}; line < record.location.line && offset < text->size();
+             ++line) {
+            offset = text->find('\n', offset);
+            offset = offset == std::string::npos ? text->size() : offset + 1;
+        }
+        offset = std::min<std::size_t>(offset + record.location.column - 1, text->size());
+        auto depth = 0;
+        auto quoted = false;
+        auto end = offset;
+        for (; end < text->size(); ++end) {
+            const auto character = (*text)[end];
+            if (quoted) {
+                if (character == '\\') {
+                    ++end;
+                } else if (character == '"') {
+                    quoted = false;
+                }
+            } else if (character == '"') {
+                quoted = true;
+            } else if (character == '#') {
+                end = std::min(text->find('\n', end), text->size()) - 1;
+            } else if (character == '{') {
+                ++depth;
+            } else if (character == '}' && --depth == 0) {
+                ++end;
+                break;
+            }
+        }
+        output += "\n" + text->substr(offset, end - offset) + "\n";
+    }
+    return output;
+}
+
+auto save_settings(const std::filesystem::path& path,
+                   const Settings& settings,
+                   SettingsScope scope,
+                   const Settings& user) -> liquid::result<void> {
+    const auto serialized =
+        serialize_settings(settings, scope, user) + keymap_records_text(path);
+    auto validated = parse_settings(serialized, path, user, scope);
     if (!validated) {
         return std::unexpected(validated.error());
     }

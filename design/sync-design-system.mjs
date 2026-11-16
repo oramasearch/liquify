@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: MIT
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -17,7 +18,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_VENDOR = join(ROOT, "vendor", "orama-design");
 const DEFAULT_FONTS = join(ROOT, "fonts");
-const UPSTREAM_REPOSITORY = "https://github.com/oramasearch/orama-design";
+// The design system is OramaSearch, Inc.'s own; the vendored copy is MIT (see COPYRIGHT).
+const UPSTREAM_REPOSITORY = "OramaSearch, Inc. design system (this copy is MIT, see COPYRIGHT)";
 const TOKEN_SOURCE = join("packages", "design-system", "tokens", "dtcg");
 
 function fail(message) {
