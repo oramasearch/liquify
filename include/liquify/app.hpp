@@ -97,6 +97,9 @@ private:
   void draw_line_attribution(std::size_t line);
   void draw_status_bar();
   void draw_welcome();
+  void type_title(std::string_view text, std::string_view id = {});
+  void type_heading(std::string_view text, std::string_view id = {});
+  [[nodiscard]] auto begin_dialog(const char *title, int flags) -> bool;
   struct StatusFailure {
     std::string summary;
     PanelId panel;
@@ -379,6 +382,8 @@ private:
   int ui_font_index_ = -1;
   int editor_font_index_ = -1;
   int heading_font_index_ = -1;
+  int title_font_index_ = -1;
+  int section_font_index_ = -1;
   bool applied_dark_theme_{};
   bool applied_high_contrast_{};
   bool reduced_motion_{};

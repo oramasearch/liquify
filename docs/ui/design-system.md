@@ -61,3 +61,26 @@ and the `layer` role. ImGui's default header, a near-black bar with dark labels,
 light and dark, takes each header row's most common colour as its background and the pixel that
 differs most as its ink, and fails below 4.5:1. The native scenario `table-headers` captures both
 tables in the real window.
+
+## Type scale
+
+liquify sets text in four roles from the design tokens lake uses (`text24`, `text16`, the UI size,
+`text12`; IBM Plex Sans Regular and SemiBold):
+
+| Role | Face | Where |
+|---|---|---|
+| Title | Plex Sans SemiBold 24 (`App::type_title`) | The front door's "Welcome to liquify", the empty editor's "liquify" |
+| Heading | Plex Sans SemiBold 16 (`App::type_heading`, `App::begin_dialog`) | Every dialog title, every panel header, the front door's "Recent Repositories" |
+| Body | Plex Sans Regular at the UI size | Everything else; supporting copy under a title uses the secondary ink |
+| Caption | Regular, disabled ink | Hints under fields and secondary facts |
+
+Titles and headings are Title Case and buttons and labels sentence case, following lake's
+*Capitalization* table: Quick Open, Command Palette, Symbol Search, Open Recent, New File, Move or
+Rename Path, Review Comment, Rename Symbol, Extract Function, What Will Be Sent, Clone from Lake,
+New Repository, Set Lake, Set Up Build, Cut Change, Request Review. The empty editor centres its
+title, supporting copy and next step as one block.
+
+`Screenshot.TypeScaleSeparatesTitlesHeadingsAndBody` measures rendered rows: the front door's
+title is at least 1.5 times its copy, its section heading taller than the copy, and a panel header
+taller than body text, in both themes. The native scenario `look` captures the empty editor, the
+palette, Settings, the editor and the front door in the real window.

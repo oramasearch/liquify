@@ -39,7 +39,9 @@ SDL composition handles CJK input methods and dead keys without editing until co
 plain clipboard forms, file drops through libliquid, complete keyboard traversal with visible
 focus, macOS accessibility labels, high contrast, and the OS reduced-motion preference are
 recorded in [`../ui/accessibility.md`](../ui/accessibility.md).
-The stamped Orama token and IBM Plex snapshot under `design/` generate committed native constants;
+The stamped Orama token and IBM Plex snapshot (Sans Regular and SemiBold, Mono) under `design/`
+generate committed native constants, and a title / heading / body / caption type scale is applied
+to the front door, dialogs, panel headers and the empty editor;
 its gate verifies source hashes and rejects stale generated output. Those roles drive the system,
 light and dark shell with its activity bar, contextual sidebar, tabbed and split editor, bottom
 panel, floating panels and status bar. One frame-level drawable scale applies to shell and

@@ -34,7 +34,7 @@ through its persisted demand-driven query graph,
 text-anchor mapping, syntax modules, attribution, presence, operation history, and coroutine-native
 forge review client.
 The stamped Orama DTCG snapshot under `design/` generates native light and dark roles plus
-embedded IBM Plex Sans and Mono assets; its gate rejects changed source and output bytes. The
+embedded IBM Plex Sans (Regular, SemiBold) and Mono assets and a title/heading/body/caption type scale; its gate rejects changed source and output bytes. The
 light/dark shell arranges the activity bar, contextual sidebar, split editor, bottom panel,
 floating panels and status bar from those roles. Shell and retained editor share logical
 coordinates with one frame-level drawable scale; native GPU window and workflow acceptance tests
