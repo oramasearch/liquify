@@ -37,6 +37,11 @@ The shell loads Sans at the design-system type sizes and Mono for editor text. P
 sizes follow SDL's per-window display scale so the logical type scale remains constant on
 high-pixel-density displays.
 
+The font atlas is built for Basic Latin, Latin-1 and General Punctuation (U+2010 to U+205E), so
+the em dash, the ellipsis, curly quotes and the bullet in liquify's own text draw from IBM Plex
+instead of "?" (liquify#129). Characters outside those ranges, such as CJK composition, come from
+the input method's own preview.
+
 ## Gate
 
 The gate verifies every stamped token and font digest, compares the committed header with a fresh
